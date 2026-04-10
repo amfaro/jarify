@@ -5,13 +5,17 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from jarify.rules.base import FormatterRule
+from jarify.rules.consistent_empty_array import ConsistentEmptyArrayRule
 from jarify.rules.cte_naming import CteNamingRule
 from jarify.rules.duckdb_prefer_qualify import DuckdbPreferQualifyRule
 from jarify.rules.duckdb_type_style import DuckdbTypeStyleRule
 from jarify.rules.keyword_case import KeywordCaseRule
 from jarify.rules.no_implicit_cross_join import NoImplicitCrossJoinRule
 from jarify.rules.no_select_star import NoSelectStarRule
+from jarify.rules.no_select_star_in_cte import NoSelectStarInCteRule
 from jarify.rules.no_unused_cte import NoUnusedCteRule
+from jarify.rules.prefer_group_by_all import PreferGroupByAllRule
+from jarify.rules.prefer_using_over_on import PreferUsingOverOnRule
 from jarify.rules.trailing_commas import TrailingCommasRule
 
 if TYPE_CHECKING:
@@ -46,5 +50,13 @@ def get_default_rules(config: JarifyConfig) -> list[FormatterRule]:
         rules.append(DuckdbPreferQualifyRule(severity=config.duckdb_prefer_qualify))
     if config.cte_naming != "off":
         rules.append(CteNamingRule(severity=config.cte_naming))
+    if config.prefer_group_by_all != "off":
+        rules.append(PreferGroupByAllRule(severity=config.prefer_group_by_all))
+    if config.prefer_using_over_on != "off":
+        rules.append(PreferUsingOverOnRule(severity=config.prefer_using_over_on))
+    if config.consistent_empty_array != "off":
+        rules.append(ConsistentEmptyArrayRule(severity=config.consistent_empty_array))
+    if config.no_select_star_in_cte != "off":
+        rules.append(NoSelectStarInCteRule(severity=config.no_select_star_in_cte))
 
     return rules

@@ -138,6 +138,42 @@ WHERE
 
 ---
 
+### `GROUP BY` — one expression per line
+
+Every `GROUP BY` expression is on its own line using the same leading-comma style as `SELECT`. `GROUP BY ALL` is exempt and stays on one line.
+
+**Bad**
+```sql
+SELECT a, b, count(*) FROM t GROUP BY a, b
+```
+
+**Good**
+```sql
+SELECT
+   a
+  ,b
+  ,count(*)
+FROM t
+GROUP BY
+   a
+  ,b
+;
+```
+
+`GROUP BY ALL` (DuckDB shorthand) stays inline:
+
+```sql
+SELECT
+   a
+  ,b
+  ,count(*)
+FROM t
+GROUP BY ALL
+;
+```
+
+---
+
 ### CTE layout
 
 The opening parenthesis goes on its own line. Each subsequent CTE is prefixed with a comma (no space between comma and name).
@@ -250,6 +286,27 @@ SELECT
    a
 FROM foo
 INNER JOIN bar
+  ON foo.id = bar.id
+;
+```
+
+---
+
+### `LEFT OUTER JOIN` → `LEFT JOIN`
+
+The redundant `OUTER` keyword is dropped from `LEFT` and `RIGHT` joins. `FULL OUTER JOIN` is preserved.
+
+**Bad**
+```sql
+SELECT a FROM foo LEFT OUTER JOIN bar ON foo.id = bar.id
+```
+
+**Good**
+```sql
+SELECT
+   a
+FROM foo
+LEFT JOIN bar
   ON foo.id = bar.id
 ;
 ```
@@ -487,5 +544,94 @@ SELECT
 FROM t
 QUALIFY
   rn = 1
+;
+```
+
+---
+
+### `prefer-group-by-all`
+
+Flag explicit `GROUP BY col1, col2, ...` when all non-aggregated `SELECT` columns are listed. Use `GROUP BY ALL` instead.
+
+**Bad**
+```sql
+SELECT a, b, count(*) AS n FROM t GROUP BY a, b
+```
+
+**Good**
+```sql
+SELECT
+   a
+  ,b
+  ,count(*) AS n
+FROM t
+GROUP BY ALL
+;
+```
+
+---
+
+### `prefer-using-over-on`
+
+Flag `ON a.col = b.col` equi-joins where both sides reference the same column name. Use `USING (col)` instead.
+
+**Bad**
+```sql
+SELECT a.x FROM a INNER JOIN b ON a.id = b.id
+```
+
+**Good**
+```sql
+SELECT
+   a.x
+FROM a
+INNER JOIN b
+  USING (id)
+;
+```
+
+---
+
+### `consistent-empty-array`
+
+Flag `'[]'::type[]` (string-cast empty arrays) in favour of the native DuckDB `[]` empty array literal.
+
+**Bad**
+```sql
+SELECT COALESCE(tags, '[]')::text[] AS tags FROM t
+```
+
+**Good**
+```sql
+SELECT
+   COALESCE(tags, [])::TEXT[] AS tags
+FROM t
+;
+```
+
+---
+
+### `no-select-star-in-cte`
+
+Flag `SELECT *` inside CTE body definitions. Stricter variant of `no-select-star` that applies only within CTE bodies.
+
+**Bad**
+```sql
+WITH _base AS (SELECT * FROM source_table)
+SELECT id FROM _base
+```
+
+**Good**
+```sql
+WITH _base AS
+(
+  SELECT
+     id
+    ,name
+  FROM source_table
+)
+SELECT
+   id
+FROM _base
 ;
 ```

@@ -80,7 +80,7 @@ LEFT JOIN _enrollments AS e
   ON e.participant_key = all_e.participant_key
   AND e.program_supplier_key = rs.program_supplier_key
   AND e.enabled = TRUE
-LEFT OUTER JOIN _prices AS p
+LEFT JOIN _prices AS p
   ON sc.version = p.version
   AND sc.sku_key = p.sku_key
   AND p.end_date IS NULL
