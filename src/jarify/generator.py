@@ -15,7 +15,7 @@ Subclasses sqlglot's DuckDBGenerator to enforce jarify's opinionated rules:
 from __future__ import annotations
 
 import typing as t
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 import sqlglot.expressions as exp
 from sqlglot.dialects.duckdb import DuckDB
@@ -26,6 +26,11 @@ if TYPE_CHECKING:
 
 class JarifyGenerator(DuckDB.Generator):
     """Opinionated DuckDB SQL generator for jarify."""
+
+    # DuckDB's TRANSFORMS maps exp.Pivot to a preprocess([unqualify_columns]) transform,
+    # which strips all table qualifiers from columns inside PIVOT subqueries.
+    # We remove it so the dispatch falls through to pivot_sql directly, preserving qualifiers.
+    TRANSFORMS: ClassVar[dict] = {k: v for k, v in DuckDB.Generator.TRANSFORMS.items() if k is not exp.Pivot}
 
     def __init__(self, config: JarifyConfig) -> None:
         super().__init__(

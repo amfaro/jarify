@@ -88,13 +88,22 @@ def _try_pivot_order_by_workaround(sql: str, config: JarifyConfig) -> str | None
     except ParseError:
         return None  # not the PIVOT+ORDER BY pattern we know how to handle
 
+    trees = [t for t in trees if t is not None]
+    if not trees:
+        return None
+
     rules = get_default_rules(config)
     generator = JarifyGenerator(config)
 
-    formatted_pivot = generator.generate(_apply_rules(trees[0], rules))
+    # Format every statement; ORDER BY attaches only to the last one (the PIVOT)
+    formatted_parts = [generator.generate(_apply_rules(t, rules)) for t in trees]
     formatted_order_by = _format_order_by_clause(order_by_text, config, generator)
 
-    return f"{formatted_pivot.rstrip()}\n{formatted_order_by.lstrip()}\n;\n"
+    *preceding, last_pivot = formatted_parts
+    pivot_with_order = f"{last_pivot.rstrip()}\n{formatted_order_by.lstrip()}"
+
+    all_parts = [*preceding, pivot_with_order]
+    return "\n;\n\n".join(all_parts) + "\n;\n"
 
 
 def _split_trailing_order_by(sql: str) -> tuple[str, str] | None:
