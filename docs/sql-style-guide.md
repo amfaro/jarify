@@ -173,6 +173,30 @@ FROM enriched
 
 ---
 
+### CTE names — underscore prefix
+
+CTE names must start with an underscore.
+
+**Bad**
+```sql
+WITH latest_version AS ( ... )
+SELECT * FROM latest_version
+```
+
+**Good**
+```sql
+WITH _latest_version AS
+(
+  ...
+)
+SELECT
+   *
+FROM _latest_version
+;
+```
+
+---
+
 ### Table aliases — `AS` always required
 
 The `AS` keyword is never omitted from table or column aliases.
@@ -272,21 +296,21 @@ ORDER BY
 
 ---
 
-### Type casts — `::` operator normalised to `CAST`
+### Type casts — prefer `::` over `CAST()`
 
-The `::` shorthand cast syntax is rewritten to the standard `CAST(expr AS type)` form. Type names are also normalised to canonical DuckDB names (`INT`, `TEXT`, `BOOLEAN`).
+Use the concise DuckDB `::` cast syntax instead of the verbose `CAST()` form.
 
 **Bad**
 ```sql
-SELECT a::INTEGER, b::VARCHAR, c::BOOLEAN FROM t
+SELECT CAST(a AS INT), CAST(b AS TEXT), CAST(c AS BOOLEAN) FROM t
 ```
 
 **Good**
 ```sql
 SELECT
-   CAST(a AS INT)
-  ,CAST(b AS TEXT)
-  ,CAST(c AS BOOLEAN)
+   a::INT
+  ,b::TEXT
+  ,c::BOOLEAN
 FROM t
 ;
 ```
