@@ -63,3 +63,18 @@ def test_parse_failure_returns_original_with_warning():
     assert result == bad_sql
     assert len(warnings) == 1
     assert "could not parse" in str(warnings[0])
+
+
+def test_pivot_order_by_formats_without_warning():
+    """PIVOT ... USING ... ORDER BY is formatted cleanly without any warning."""
+    sql = (
+        "WITH _d AS (SELECT a, grp, val FROM t) "
+        "PIVOT (SELECT a, grp, val FROM _d) ON grp USING first(val) ORDER BY a, grp"
+    )
+    result, warnings = format_sql(sql)
+    assert not warnings, f"Expected no warnings, got: {warnings}"
+    assert "ORDER BY" in result
+    assert "PIVOT" in result
+    # Idempotent
+    result2, _ = format_sql(result)
+    assert result == result2
