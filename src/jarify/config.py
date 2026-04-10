@@ -41,6 +41,10 @@ class JarifyConfig:
     duckdb_type_style: str = "warn"  # prefer canonical DuckDB type names
     duckdb_prefer_qualify: str = "warn"  # prefer QUALIFY over subquery window filter
     cte_naming: str = "warn"  # CTE names must start with an underscore
+    prefer_group_by_all: str = "warn"  # suggest GROUP BY ALL when listing all non-agg cols
+    prefer_using_over_on: str = "warn"  # suggest USING (col) over ON a.col = b.col
+    consistent_empty_array: str = "warn"  # prefer [] over '[]'::type[] empty array
+    no_select_star_in_cte: str = "warn"  # flag SELECT * inside CTE bodies
 
     # --- per-rule overrides (populated from [rules.*] in toml) ---
     rules: dict[str, Any] = field(default_factory=dict)

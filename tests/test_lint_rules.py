@@ -116,3 +116,93 @@ class TestCteNaming:
         assert "WITH _base" in out
         assert "FROM _base" in out
 
+
+class TestPreferGroupByAll:
+    def test_warns_when_all_non_agg_cols_listed(self):
+        sql = "SELECT a, b, count(*) AS n FROM t GROUP BY a, b"
+        rules = _lint(sql)
+        assert "prefer-group-by-all" in rules
+
+    def test_no_warn_for_group_by_all(self):
+        sql = "SELECT a, b, count(*) AS n FROM t GROUP BY ALL"
+        rules = _lint(sql)
+        assert "prefer-group-by-all" not in rules
+
+    def test_no_warn_when_group_by_is_subset(self):
+        # Only grouping by one of two non-agg columns — not equivalent to GROUP BY ALL
+        sql = "SELECT a, b, count(*) AS n FROM t GROUP BY a"
+        rules = _lint(sql)
+        assert "prefer-group-by-all" not in rules
+
+    def test_off_disables_rule(self):
+        sql = "SELECT a, b, count(*) AS n FROM t GROUP BY a, b"
+        rules = _lint(sql, prefer_group_by_all="off")
+        assert "prefer-group-by-all" not in rules
+
+
+class TestPreferUsingOverOn:
+    def test_warns_on_same_column_name_equijoin(self):
+        sql = "SELECT a.x FROM a INNER JOIN b ON a.id = b.id"
+        rules = _lint(sql)
+        assert "prefer-using-over-on" in rules
+
+    def test_no_warn_when_using_already_used(self):
+        sql = "SELECT a.x FROM a INNER JOIN b USING (id)"
+        rules = _lint(sql)
+        assert "prefer-using-over-on" not in rules
+
+    def test_no_warn_when_columns_differ(self):
+        sql = "SELECT a.x FROM a INNER JOIN b ON a.foo = b.bar"
+        rules = _lint(sql)
+        assert "prefer-using-over-on" not in rules
+
+    def test_off_disables_rule(self):
+        sql = "SELECT a.x FROM a INNER JOIN b ON a.id = b.id"
+        rules = _lint(sql, prefer_using_over_on="off")
+        assert "prefer-using-over-on" not in rules
+
+
+class TestConsistentEmptyArray:
+    def test_warns_on_string_cast_empty_array(self):
+        sql = "SELECT COALESCE(tags, '[]')::text[] AS tags FROM t"
+        rules = _lint(sql)
+        assert "consistent-empty-array" in rules
+
+    def test_no_warn_on_native_empty_array(self):
+        sql = "SELECT COALESCE(tags, []) AS tags FROM t"
+        rules = _lint(sql)
+        assert "consistent-empty-array" not in rules
+
+    def test_off_disables_rule(self):
+        sql = "SELECT COALESCE(tags, '[]')::text[] AS tags FROM t"
+        rules = _lint(sql, consistent_empty_array="off")
+        assert "consistent-empty-array" not in rules
+
+
+class TestNoSelectStarInCte:
+    def test_warns_on_select_star_in_cte(self):
+        sql = "WITH _base AS (SELECT * FROM t) SELECT a FROM _base"
+        rules = _lint(sql)
+        assert "no-select-star-in-cte" in rules
+
+    def test_no_warn_when_cte_lists_columns(self):
+        sql = "WITH _base AS (SELECT a, b FROM t) SELECT a FROM _base"
+        rules = _lint(sql)
+        assert "no-select-star-in-cte" not in rules
+
+    def test_no_warn_on_star_outside_cte(self):
+        # SELECT * in the outer query is caught by no-select-star, not this rule
+        sql = "WITH _base AS (SELECT a FROM t) SELECT * FROM _base"
+        rules = _lint(sql, no_select_star="off")
+        assert "no-select-star-in-cte" not in rules
+
+    def test_off_disables_rule(self):
+        sql = "WITH _base AS (SELECT * FROM t) SELECT a FROM _base"
+        rules = _lint(sql, no_select_star_in_cte="off")
+        assert "no-select-star-in-cte" not in rules
+
+    def test_no_warn_count_star_in_cte(self):
+        sql = "WITH _base AS (SELECT COUNT(*) AS n FROM t) SELECT n FROM _base"
+        rules = _lint(sql)
+        assert "no-select-star-in-cte" not in rules
+

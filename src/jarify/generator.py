@@ -168,7 +168,7 @@ class JarifyGenerator(DuckDB.Generator):
         return "\n".join(parts)
 
     # ------------------------------------------------------------------
-    # JOIN normalization: bare JOIN → INNER JOIN
+    # JOIN normalization: bare JOIN → INNER JOIN; LEFT/RIGHT OUTER → LEFT/RIGHT
     # ------------------------------------------------------------------
 
     def join_sql(self, expression: exp.Join) -> str:
@@ -176,6 +176,10 @@ class JarifyGenerator(DuckDB.Generator):
             # Bare JOIN with no qualifier — normalize to INNER JOIN
             expression = expression.copy()
             expression.set("kind", "INNER")
+        elif expression.side in ("LEFT", "RIGHT") and expression.kind == "OUTER":
+            # DROP redundant OUTER: LEFT OUTER JOIN → LEFT JOIN
+            expression = expression.copy()
+            expression.set("kind", None)
         return super().join_sql(expression)
 
     # ------------------------------------------------------------------
@@ -255,6 +259,21 @@ class JarifyGenerator(DuckDB.Generator):
             # Uses multiline ^ so indented "  SELECT" inside CTEs is never matched.
             return re.sub(r"(?m)^SELECT\n", "", sql)
         return super().select_sql(expression)
+
+    # ------------------------------------------------------------------
+    # GROUP BY: one expression per line in pretty mode
+    # ------------------------------------------------------------------
+
+    def group_sql(self, expression: exp.Group) -> str:
+        group_by_all = expression.args.get("all")
+        if group_by_all is True:
+            return self.seg("GROUP BY ALL")
+        if self.pretty and expression.expressions:
+            # Force multi-line: mirror op_expressions but always flat=False
+            modifier = " DISTINCT" if group_by_all is False else ""
+            expressions_sql = self.expressions(expression, flat=False)
+            return f"{self.seg(f'GROUP BY{modifier}')}{self.sep() if expressions_sql else ''}{expressions_sql}"
+        return super().group_sql(expression)
 
     # ------------------------------------------------------------------
     # Cast: prefer :: shorthand over CAST()

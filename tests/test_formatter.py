@@ -113,3 +113,44 @@ class TestFromFirst:
         from jarify.formatter import format_sql
         out, _ = format_sql("SELECT * FROM people", JarifyConfig(prefer_from_first=False))
         assert "SELECT" in out
+
+
+class TestLeftOuterJoinNormalization:
+    def test_left_outer_join_normalized(self):
+        out, _ = format_sql("SELECT a FROM foo LEFT OUTER JOIN bar ON foo.id = bar.id")
+        assert "LEFT JOIN" in out
+        assert "LEFT OUTER JOIN" not in out
+
+    def test_right_outer_join_normalized(self):
+        out, _ = format_sql("SELECT a FROM foo RIGHT OUTER JOIN bar ON foo.id = bar.id")
+        assert "RIGHT JOIN" in out
+        assert "RIGHT OUTER JOIN" not in out
+
+    def test_left_join_unchanged(self):
+        out, _ = format_sql("SELECT a FROM foo LEFT JOIN bar ON foo.id = bar.id")
+        assert "LEFT JOIN" in out
+
+    def test_full_outer_join_preserved(self):
+        out, _ = format_sql("SELECT a FROM foo FULL OUTER JOIN bar ON foo.id = bar.id")
+        assert "FULL" in out
+
+
+class TestGroupByPerLine:
+    def test_group_by_multi_column_one_per_line(self):
+        out, _ = format_sql("SELECT a, b, count(*) FROM t GROUP BY a, b")
+        lines = out.splitlines()
+        group_by_idx = next(i for i, line in enumerate(lines) if "GROUP BY" in line)
+        # The line with GROUP BY should not contain column names on the same line
+        group_by_line = lines[group_by_idx]
+        assert group_by_line.strip() == "GROUP BY", (
+            f"Expected 'GROUP BY' on its own line, got: {group_by_line!r}"
+        )
+
+    def test_group_by_all_stays_inline(self):
+        out, _ = format_sql("SELECT a, b, count(*) FROM t GROUP BY ALL")
+        assert "GROUP BY ALL" in out
+
+    def test_group_by_single_column(self):
+        out, _ = format_sql("SELECT a, count(*) FROM t GROUP BY a")
+        assert "GROUP BY" in out
+        assert "a" in out
