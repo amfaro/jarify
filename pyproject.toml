@@ -10,6 +10,11 @@ dependencies = [
     "sqlglot>=30.4.2",
 ]
 
+[project.urls]
+Homepage = "https://github.com/amfaro/jarify"
+Repository = "https://github.com/amfaro/jarify"
+Issues = "https://github.com/amfaro/jarify/issues"
+
 [project.scripts]
 jarify = "jarify.cli:main"
 
