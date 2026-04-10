@@ -189,8 +189,6 @@ WITH _latest_version AS
 (
   ...
 )
-SELECT
-   *
 FROM _latest_version
 ;
 ```
@@ -312,6 +310,37 @@ SELECT
   ,b::TEXT
   ,c::BOOLEAN
 FROM t
+;
+```
+
+---
+
+### `SELECT *` — rewritten as FROM-first
+
+`SELECT *` is rewritten to DuckDB's FROM-first syntax, omitting the `SELECT` clause entirely. Applies only when there are no JOINs.
+
+**Bad**
+```sql
+SELECT
+   *
+FROM people
+;
+```
+
+**Good**
+```sql
+FROM people
+;
+```
+
+Also applies with `WHERE`, `ORDER BY`, `LIMIT`, etc.:
+
+```sql
+FROM orders
+WHERE
+  status = 'active'
+ORDER BY
+   created_at
 ;
 ```
 

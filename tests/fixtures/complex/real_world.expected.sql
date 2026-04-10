@@ -15,8 +15,6 @@ WITH _latest_version AS
 )
 ,_relevant_skus AS
 (
-  SELECT
-     *
   FROM read_parquet(
      's3://' || getvariable('tigris_bucket') || '/dataops/*/*/relevant_skus.parquet'
     ,hive_partitioning = TRUE
@@ -27,8 +25,6 @@ WITH _latest_version AS
 )
 ,_enrollments AS
 (
-  SELECT
-     *
   FROM read_parquet(
      's3://' || getvariable('tigris_bucket') || '/dataops/*/*/enrollments.parquet'
     ,hive_partitioning = TRUE

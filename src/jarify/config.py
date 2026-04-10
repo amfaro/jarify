@@ -30,6 +30,7 @@ class JarifyConfig:
     normalize_join: bool = True  # bare JOIN → INNER JOIN
     require_alias_as: bool = True  # always require AS keyword for aliases
     one_column_per_line: bool = True  # each SELECT column on its own line
+    prefer_from_first: bool = True  # SELECT * FROM t → FROM t (DuckDB FROM-first syntax)
 
     # --- general lint rules (severity: "off" | "warn" | "error") ---
     no_select_star: str = "warn"

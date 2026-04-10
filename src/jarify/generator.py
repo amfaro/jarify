@@ -9,11 +9,12 @@ Subclasses sqlglot's DuckDBGenerator to enforce jarify's opinionated rules:
 - Consistent keyword casing; DuckDB functions in lowercase
 - IS NOT NULL preserved (not rewritten to NOT x IS NULL)
 - NULLS LAST/FIRST suppressed when it matches DuckDB's default
-- Column aliases aligned on AS when 2+ aliases exist in a SELECT
+- SELECT * FROM t → FROM t (DuckDB FROM-first syntax)
 """
 
 from __future__ import annotations
 
+import re
 import typing as t
 from typing import TYPE_CHECKING, ClassVar
 
@@ -233,6 +234,27 @@ class JarifyGenerator(DuckDB.Generator):
     # ------------------------------------------------------------------
     # format_args: apply leading-comma style when function args wrap
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # FROM-first: SELECT * FROM t → FROM t
+    # ------------------------------------------------------------------
+
+    def select_sql(self, expression: exp.Select) -> str:
+        exprs = expression.expressions
+        if (
+            self._config.prefer_from_first
+            and len(exprs) == 1
+            and isinstance(exprs[0], exp.Star)
+            and not expression.args.get("distinct")
+            and not expression.args.get("joins")
+        ):
+            expr_copy = expression.copy()
+            expr_copy.set("expressions", [])
+            sql = super().select_sql(expr_copy)
+            # Strip the bare "SELECT" line (no columns → "SELECT\nFROM ...")
+            # Uses multiline ^ so indented "  SELECT" inside CTEs is never matched.
+            return re.sub(r"(?m)^SELECT\n", "", sql)
+        return super().select_sql(expression)
 
     # ------------------------------------------------------------------
     # Cast: prefer :: shorthand over CAST()
