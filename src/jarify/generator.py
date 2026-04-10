@@ -234,6 +234,16 @@ class JarifyGenerator(DuckDB.Generator):
     # format_args: apply leading-comma style when function args wrap
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Cast: prefer :: shorthand over CAST()
+    # ------------------------------------------------------------------
+
+    def cast_sql(self, expression: exp.Cast, safe_prefix: str | None = None) -> str:
+        if safe_prefix:
+            # TRY_CAST — keep verbose form
+            return super().cast_sql(expression, safe_prefix=safe_prefix)
+        return f"{self.sql(expression, 'this')}::{self.sql(expression, 'to')}"
+
     def format_args(self, *args: t.Any, sep: str = ", ") -> str:
         arg_sqls = tuple(self.sql(arg) for arg in args if arg is not None and not isinstance(arg, bool))
         if self.pretty and self.too_wide(arg_sqls):

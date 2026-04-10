@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from jarify.rules.base import FormatterRule
+from jarify.rules.cte_naming import CteNamingRule
 from jarify.rules.duckdb_prefer_qualify import DuckdbPreferQualifyRule
 from jarify.rules.duckdb_type_style import DuckdbTypeStyleRule
 from jarify.rules.keyword_case import KeywordCaseRule
@@ -43,5 +44,7 @@ def get_default_rules(config: JarifyConfig) -> list[FormatterRule]:
         rules.append(DuckdbTypeStyleRule(severity=config.duckdb_type_style))
     if config.duckdb_prefer_qualify != "off":
         rules.append(DuckdbPreferQualifyRule(severity=config.duckdb_prefer_qualify))
+    if config.cte_naming != "off":
+        rules.append(CteNamingRule(severity=config.cte_naming))
 
     return rules

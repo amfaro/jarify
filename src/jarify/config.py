@@ -39,6 +39,7 @@ class JarifyConfig:
     # --- DuckDB-specific lint rules ---
     duckdb_type_style: str = "warn"  # prefer canonical DuckDB type names
     duckdb_prefer_qualify: str = "warn"  # prefer QUALIFY over subquery window filter
+    cte_naming: str = "warn"  # CTE names must start with an underscore
 
     # --- per-rule overrides (populated from [rules.*] in toml) ---
     rules: dict[str, Any] = field(default_factory=dict)

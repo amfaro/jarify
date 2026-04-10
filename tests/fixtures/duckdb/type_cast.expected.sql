@@ -1,6 +1,6 @@
 SELECT
-   CAST(a AS INT)
-  ,CAST(b AS TEXT)
-  ,CAST(c AS BOOLEAN)
+   a::INT
+  ,b::TEXT
+  ,c::BOOLEAN
 FROM t
 ;
