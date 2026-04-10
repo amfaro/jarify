@@ -6,28 +6,34 @@ Existing SQL formatters can't be configured to enforce a specific team style, an
 
 ## Quick start
 
-No installation required. Run directly with [`uvx`](https://docs.astral.sh/uv/guides/tools/):
+No installation required. Run directly with [`uvx`](https://docs.astral.sh/uv/guides/tools/).
+
+### From a GitHub Release (recommended)
+
+Releases publish a pre-built wheel to the [Releases page](https://github.com/amfaro/jarify/releases). Pinning to a wheel is the fastest option because uv skips the build step:
+
+```bash
+uvx --from "https://github.com/amfaro/jarify/releases/download/v0.0.1/jarify-0.0.1-py3-none-any.whl" jarify fmt path/to/query.sql
+```
+
+### From git
+
+Always runs the latest commit on `main` — useful during development:
 
 ```bash
 uvx --from git+https://github.com/amfaro/jarify.git jarify fmt path/to/query.sql
 ```
 
-Pin to a specific release:
+Pin to a specific release tag:
 
 ```bash
-uvx --from "git+https://github.com/amfaro/jarify.git@v0.1.0" jarify fmt path/to/query.sql
-```
-
-Or install from a release wheel for faster repeat invocations:
-
-```bash
-uvx --from "https://github.com/amfaro/jarify/releases/download/v0.1.0/jarify-0.1.0-py3-none-any.whl" jarify fmt path/to/query.sql
+uvx --from "git+https://github.com/amfaro/jarify.git@v0.0.1" jarify fmt path/to/query.sql
 ```
 
 ### Persistent install
 
 ```bash
-uv tool install "git+https://github.com/amfaro/jarify.git"
+uv tool install "https://github.com/amfaro/jarify/releases/download/v0.0.1/jarify-0.0.1-py3-none-any.whl"
 jarify fmt path/to/query.sql
 ```
 
@@ -185,9 +191,9 @@ mise run check   # lint + test
 
 ### Releases
 
-Push a `v*` tag to trigger the publish workflow. GitHub Actions builds the wheel and sdist and attaches them to a GitHub Release.
+Push a `v*` tag to trigger the publish workflow. GitHub Actions builds the wheel and sdist, attaches them to a GitHub Release, and generates release notes automatically.
 
 ```bash
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.0.1
+git push origin v0.0.1
 ```
