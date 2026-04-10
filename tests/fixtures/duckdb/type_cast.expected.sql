@@ -1,0 +1,5 @@
+SELECT
+  CAST(a AS INT),
+  CAST(b AS TEXT),
+  CAST(c AS BOOLEAN)
+FROM t;

@@ -1,0 +1,38 @@
+[project]
+name = "jarify"
+version = "0.1.0"
+description = "Bespoke SQL linter and formatter for DuckDB, powered by sqlglot"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "click>=8.3.2",
+    "rich>=14.3.3",
+    "sqlglot>=30.4.2",
+]
+
+[project.scripts]
+jarify = "jarify.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-snapshot>=0.9.0",
+    "ruff>=0.15.10",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/jarify"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

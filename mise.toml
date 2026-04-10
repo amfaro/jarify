@@ -1,0 +1,24 @@
+[tools]
+uv = "latest"
+
+[env]
+UV_LINK_MODE = "copy"
+
+[task_config]
+includes = [".mise/tasks"]
+
+[tasks.lint]
+description = "Run ruff linter"
+run = "uv run ruff check src/ tests/"
+
+[tasks.fmt]
+description = "Run ruff formatter"
+run = "uv run ruff format src/ tests/"
+
+[tasks.test]
+description = "Run test suite"
+run = "uv run pytest"
+
+[tasks.check]
+description = "Run all checks (lint + test)"
+depends = ["lint", "test"]
