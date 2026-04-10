@@ -51,8 +51,8 @@ def test_semicolon_own_line_multi_statement():
 def test_as_alignment():
     sql = "SELECT first_name AS first, last_name AS last, email AS email_address FROM t"
     result, _ = format_sql(sql)
-    lines = [l for l in result.splitlines() if " AS " in l]
-    as_positions = [l.index(" AS ") for l in lines]
+    lines = [line for line in result.splitlines() if " AS " in line]
+    as_positions = [line.index(" AS ") for line in lines]
     assert len(set(as_positions)) == 1, f"AS keywords not aligned: {as_positions}"
 
 
