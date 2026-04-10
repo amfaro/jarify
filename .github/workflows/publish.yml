@@ -14,12 +14,19 @@ jobs:
     runs-on: blacksmith-2vcpu-ubuntu-2404
 
     steps:
+      - name: Fetch secrets from Doppler
+        uses: dopplerhq/secrets-fetch-action@v1
+        id: doppler
+        with:
+          doppler-token: ${{ secrets.DOPPLER_TOKEN }}
+          inject-env-vars: false
+
       - name: Generate token
         id: app-token
         uses: actions/create-github-app-token@v2
         with:
-          app-id: ${{ secrets.WORKFLOW_CLIENT_ID }}
-          private-key: ${{ secrets.WORKFLOW_CLIENT_PRIVATE_KEY }}
+          app-id: ${{ steps.doppler.outputs.WORKFLOW_CLIENT_ID }}
+          private-key: ${{ steps.doppler.outputs.WORKFLOW_CLIENT_PRIVATE_KEY }}
 
       - uses: actions/checkout@v4
         with:
