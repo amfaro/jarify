@@ -76,10 +76,14 @@ def fmt(
 
     for label, original, target_path in inputs:
         try:
-            formatted = format_sql(original, config)
+            formatted, warnings = format_sql(original, config)
         except Exception as exc:
             console.print(f"[red]ERROR[/] {label}: {exc}")
             sys.exit(2)
+
+        for w in warnings:
+            console.print(f"[yellow]WARN[/] {label}: {w}")
+            any_changed = any_changed  # parse warnings → don't count as reformatted
 
         if original == formatted:
             if not diff:

@@ -1,6 +1,8 @@
-SET VARIABLE tigris_bucket = getenv('TIGRIS_BUCKET');
+SET VARIABLE tigris_bucket = getenv('TIGRIS_BUCKET')
+;
 
-SET VARIABLE time_frame = getenv('TIME_FRAME');
+SET VARIABLE time_frame = getenv('TIME_FRAME')
+;
 
 WITH _latest_version AS
 (
@@ -88,4 +90,5 @@ LEFT OUTER JOIN _prices AS p
   AND p.end_date IS NULL
 ORDER BY
    manufacturer_label
-  ,sku_key;
+  ,sku_key
+;

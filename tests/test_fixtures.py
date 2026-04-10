@@ -43,12 +43,11 @@ def test_format_fixture(
     """Format input SQL and compare to the expected snapshot."""
     config = JarifyConfig()
     sql = input_path.read_text()
-    result = format_sql(sql, config)
+    result, _ = format_sql(sql, config)
 
     if update_snapshots:
         expected_path.write_text(result)
         pytest.skip(f"Snapshot updated: {expected_path.name}")
-        return
 
     if not expected_path.exists():
         pytest.fail(
@@ -68,7 +67,7 @@ def test_format_idempotent(request: pytest.FixtureRequest) -> None:
         if not expected_path.exists():
             continue
         already_formatted = expected_path.read_text().rstrip("\n") + "\n"
-        result = format_sql(already_formatted, config)
+        result, _ = format_sql(already_formatted, config)
         assert result == already_formatted, (
             f"Idempotency failure for {expected_path.name}:\n"
             f"--- first pass output ---\n{already_formatted}"
