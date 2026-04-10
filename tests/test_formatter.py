@@ -78,3 +78,38 @@ def test_pivot_order_by_formats_without_warning():
     # Idempotent
     result2, _ = format_sql(result)
     assert result == result2
+
+
+class TestFromFirst:
+    def test_select_star_becomes_from_first(self):
+        from jarify.formatter import format_sql
+        out, _ = format_sql("SELECT * FROM people")
+        assert out.startswith("FROM people")
+        assert "SELECT" not in out
+
+    def test_select_star_with_where(self):
+        from jarify.formatter import format_sql
+        out, _ = format_sql("SELECT * FROM people WHERE age > 18")
+        assert "FROM people" in out
+        assert "SELECT" not in out
+
+    def test_select_star_with_join_keeps_select(self):
+        from jarify.formatter import format_sql
+        out, _ = format_sql("SELECT * FROM people LEFT JOIN orders ON people.id = orders.person_id")
+        assert "SELECT" in out
+
+    def test_select_distinct_star_keeps_select(self):
+        from jarify.formatter import format_sql
+        out, _ = format_sql("SELECT DISTINCT * FROM people")
+        assert "SELECT DISTINCT" in out
+
+    def test_explicit_columns_unaffected(self):
+        from jarify.formatter import format_sql
+        out, _ = format_sql("SELECT id, name FROM people")
+        assert "SELECT" in out
+
+    def test_prefer_from_first_false_keeps_select(self):
+        from jarify.config import JarifyConfig
+        from jarify.formatter import format_sql
+        out, _ = format_sql("SELECT * FROM people", JarifyConfig(prefer_from_first=False))
+        assert "SELECT" in out
