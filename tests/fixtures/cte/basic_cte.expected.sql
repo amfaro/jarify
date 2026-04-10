@@ -19,4 +19,5 @@ SELECT
   ,enriched.c
 FROM enriched
 WHERE
-  enriched.a > 1;
+  enriched.a > 1
+;

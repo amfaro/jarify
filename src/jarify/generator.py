@@ -9,6 +9,7 @@ Subclasses sqlglot's DuckDBGenerator to enforce jarify's opinionated rules:
 - Consistent keyword casing; DuckDB functions in lowercase
 - IS NOT NULL preserved (not rewritten to NOT x IS NULL)
 - NULLS LAST/FIRST suppressed when it matches DuckDB's default
+- Column aliases aligned on AS when 2+ aliases exist in a SELECT
 """
 
 from __future__ import annotations
@@ -38,6 +39,7 @@ class JarifyGenerator(DuckDB.Generator):
             dialect="duckdb",  # tells generator to skip default NULLS ordering
         )
         self._config = config
+        self._as_align_width: int | None = None  # set during SELECT expression rendering
 
     # ------------------------------------------------------------------
     # Leading-comma style: ,col  (comma at pad, content at pad+1)
@@ -80,18 +82,62 @@ class JarifyGenerator(DuckDB.Generator):
         if flat:
             return sep.join(sql for sql in (self.sql(e) for e in expressions_list) if sql)
 
-        result_sqls = []
-        for i, e in enumerate(expressions_list):
-            sql = self.sql(e, comment=False)
-            if not sql:
-                continue
-            comments = self.maybe_comment("", e) if isinstance(e, exp.Expr) else ""
-            # First item gets one extra leading space (aligns content with ,item lines)
-            leader = " " if i == 0 else ","
-            result_sqls.append(f"{leader}{prefix}{sql}{comments}")
+        # Compute AS alignment for direct SELECT expression lists
+        is_select = isinstance(expression, exp.Select) and key is None
+        saved_align = self._as_align_width
+        if is_select:
+            self._as_align_width = self._compute_as_align_width(list(expressions_list))
+
+        try:
+            result_sqls = []
+            for i, e in enumerate(expressions_list):
+                sql = self.sql(e, comment=False)
+                if not sql:
+                    continue
+                comments = self.maybe_comment("", e) if isinstance(e, exp.Expr) else ""
+                # First item gets one extra leading space (aligns content with ,item lines)
+                leader = " " if i == 0 else ","
+                result_sqls.append(f"{leader}{prefix}{sql}{comments}")
+        finally:
+            self._as_align_width = saved_align
 
         result_sql = "\n".join(s.rstrip() for s in result_sqls)
         return self.indent(result_sql, skip_first=skip_first, skip_last=skip_last) if indent else result_sql
+
+    def _compute_as_align_width(self, expressions_list: list) -> int | None:
+        """Compute the column width for AS alignment in a SELECT expression list.
+
+        Returns None if alignment should not be applied (< 2 aliases, or any
+        aliased column expression spans multiple lines).
+        """
+        aliased = [e for e in expressions_list if isinstance(e, exp.Alias)]
+        if len(aliased) < 2:
+            return None
+
+        col_widths: list[int] = []
+        for a in aliased:
+            col_sql = self.sql(a.this)
+            if "\n" in col_sql:
+                # Multi-line expression — skip alignment for the whole SELECT
+                return None
+            col_widths.append(len(col_sql))
+
+        return max(col_widths)
+
+    # ------------------------------------------------------------------
+    # Alias: align AS keyword when _as_align_width is set
+    # ------------------------------------------------------------------
+
+    def alias_sql(self, expression: exp.Alias) -> str:
+        this_sql = self.sql(expression, "this")
+        alias_name = self.sql(expression, "alias")
+        if not alias_name:
+            return this_sql
+        align_width = self._as_align_width
+        if align_width is not None and isinstance(expression.parent, exp.Select):
+            padding = " " * max(0, align_width - len(this_sql))
+            return f"{this_sql}{padding} AS {alias_name}"
+        return f"{this_sql} AS {alias_name}"
 
     # ------------------------------------------------------------------
     # CTE formatting: paren on its own line, comma-prefix separator

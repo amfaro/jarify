@@ -2,4 +2,5 @@ SELECT
    *
 FROM read_parquet('data.parquet')
 WHERE
-  year = 2024;
+  year = 2024
+;

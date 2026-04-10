@@ -3,4 +3,5 @@ SELECT
   ,row_number() OVER (PARTITION BY b ORDER BY c) AS rn
 FROM t
 QUALIFY
-  rn = 1;
+  rn = 1
+;
