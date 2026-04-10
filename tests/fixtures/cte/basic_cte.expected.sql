@@ -1,19 +1,22 @@
-WITH base AS (
+WITH base AS
+(
   SELECT
-    a,
-    b
+     a
+    ,b
   FROM foo
-), enriched AS (
+)
+,enriched AS
+(
   SELECT
-    base.a,
-    bar.c
+     base.a
+    ,bar.c
   FROM base
   INNER JOIN bar
     ON base.id = bar.id
 )
 SELECT
-  enriched.a,
-  enriched.c
+   enriched.a
+  ,enriched.c
 FROM enriched
 WHERE
   enriched.a > 1;

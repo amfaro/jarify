@@ -7,7 +7,8 @@ def test_default_config():
     config = JarifyConfig()
     assert config.dialect == "duckdb"
     assert config.uppercase_keywords is True
-    assert config.trailing_commas is True
+    assert config.leading_commas is True
+    assert config.trailing_commas is False
     assert config.indent == 2
 
 

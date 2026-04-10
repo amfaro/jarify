@@ -141,8 +141,7 @@ def lint(
         total_violations += len(violations)
 
     if total_violations:
-        console.print(f"\n[bold]{'red' if has_errors else 'yellow'}]"
-                      f"{total_violations} violation(s) found[/]")
+        console.print(f"\n[bold]{'red' if has_errors else 'yellow'}]{total_violations} violation(s) found[/]")
         sys.exit(1)
     else:
         console.print("[bold green]All clean![/]")
@@ -173,7 +172,7 @@ def show_config(config_path: Path | None) -> None:
         if isinstance(val, bool):
             lines.append(f"{f.name:<22} = {'true' if val else 'false'}")
         elif isinstance(val, str):
-            lines.append(f"{f.name:<22} = \"{val}\"")
+            lines.append(f'{f.name:<22} = "{val}"')
         else:
             lines.append(f"{f.name:<22} = {val}")
     toml_text = "\n".join(lines) + "\n"
@@ -183,6 +182,7 @@ def show_config(config_path: Path | None) -> None:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _resolve_inputs(
     paths: tuple[Path, ...],
@@ -231,4 +231,3 @@ def _print_diff(label: str, original: str, formatted: str) -> None:
     if diff_lines:
         diff_text = "".join(diff_lines)
         console.print(Syntax(diff_text, "diff", theme="monokai"))
-

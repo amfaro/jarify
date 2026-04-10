@@ -23,13 +23,13 @@ class JarifyConfig:
     uppercase_keywords: bool = True
 
     # --- comma style ---
-    trailing_commas: bool = True
-    leading_commas: bool = False  # set True for leading-comma style
+    trailing_commas: bool = False
+    leading_commas: bool = True  # team style: leading commas
 
     # --- formatting rules ---
-    normalize_join: bool = True         # bare JOIN → INNER JOIN
-    require_alias_as: bool = True       # always require AS keyword for aliases
-    one_column_per_line: bool = True    # each SELECT column on its own line
+    normalize_join: bool = True  # bare JOIN → INNER JOIN
+    require_alias_as: bool = True  # always require AS keyword for aliases
+    one_column_per_line: bool = True  # each SELECT column on its own line
 
     # --- general lint rules (severity: "off" | "warn" | "error") ---
     no_select_star: str = "warn"
@@ -37,7 +37,7 @@ class JarifyConfig:
     no_unused_cte: str = "warn"
 
     # --- DuckDB-specific lint rules ---
-    duckdb_type_style: str = "warn"      # prefer canonical DuckDB type names
+    duckdb_type_style: str = "warn"  # prefer canonical DuckDB type names
     duckdb_prefer_qualify: str = "warn"  # prefer QUALIFY over subquery window filter
 
     # --- per-rule overrides (populated from [rules.*] in toml) ---

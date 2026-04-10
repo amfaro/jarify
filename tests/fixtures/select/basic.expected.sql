@@ -1,7 +1,7 @@
 SELECT
-  a,
-  b,
-  c
+   a
+  ,b
+  ,c
 FROM my_table
 WHERE
   x > 1

@@ -2,14 +2,18 @@
 
 Subclasses sqlglot's DuckDBGenerator to enforce jarify's opinionated rules:
 - Configurable indentation width
-- Configurable comma placement (trailing vs leading)
+- Leading-comma style: ,col aligned with content at pad+1
 - Bare JOIN → INNER JOIN normalization
 - AND/OR conditions always on separate lines in pretty mode
-- Consistent keyword casing
+- CTE: opening paren on its own line, comma-prefix separator
+- Consistent keyword casing; DuckDB functions in lowercase
+- IS NOT NULL preserved (not rewritten to NOT x IS NULL)
+- NULLS LAST/FIRST suppressed when it matches DuckDB's default
 """
 
 from __future__ import annotations
 
+import typing as t
 from typing import TYPE_CHECKING
 
 import sqlglot.expressions as exp
@@ -28,10 +32,88 @@ class JarifyGenerator(DuckDB.Generator):
             indent=config.indent,
             leading_comma=config.leading_commas,
             normalize=False,  # we manage casing ourselves
+            normalize_functions="lower",  # DuckDB functions stay lowercase
             max_text_width=config.max_line_length,
             comments=True,
+            dialect="duckdb",  # tells generator to skip default NULLS ordering
         )
         self._config = config
+
+    # ------------------------------------------------------------------
+    # Leading-comma style: ,col  (comma at pad, content at pad+1)
+    # ------------------------------------------------------------------
+
+    def expressions(
+        self,
+        expression: exp.Expr | None = None,
+        key: str | None = None,
+        sqls: t.Collection[str | exp.Expr] | None = None,
+        flat: bool = False,
+        indent: bool = True,
+        skip_first: bool = False,
+        skip_last: bool = False,
+        sep: str = ", ",
+        prefix: str = "",
+        dynamic: bool = False,
+        new_line: bool = False,
+    ) -> str:
+        if not (self.pretty and self.leading_comma):
+            return super().expressions(
+                expression=expression,
+                key=key,
+                sqls=sqls,
+                flat=flat,
+                indent=indent,
+                skip_first=skip_first,
+                skip_last=skip_last,
+                sep=sep,
+                prefix=prefix,
+                dynamic=dynamic,
+                new_line=new_line,
+            )
+
+        expressions_list = expression.args.get(key or "expressions") if expression else sqls
+
+        if not expressions_list:
+            return ""
+
+        if flat:
+            return sep.join(sql for sql in (self.sql(e) for e in expressions_list) if sql)
+
+        result_sqls = []
+        for i, e in enumerate(expressions_list):
+            sql = self.sql(e, comment=False)
+            if not sql:
+                continue
+            comments = self.maybe_comment("", e) if isinstance(e, exp.Expr) else ""
+            # First item gets one extra leading space (aligns content with ,item lines)
+            leader = " " if i == 0 else ","
+            result_sqls.append(f"{leader}{prefix}{sql}{comments}")
+
+        result_sql = "\n".join(s.rstrip() for s in result_sqls)
+        return self.indent(result_sql, skip_first=skip_first, skip_last=skip_last) if indent else result_sql
+
+    # ------------------------------------------------------------------
+    # CTE formatting: paren on its own line, comma-prefix separator
+    # ------------------------------------------------------------------
+
+    def cte_sql(self, expression: exp.CTE) -> str:
+        alias = expression.args.get("alias")
+        if alias:
+            alias.add_comments(expression.pop_comments())
+        alias_sql = self.sql(expression, "alias")
+        # Put the opening paren on its own line: alias AS\n(...)
+        return f"{alias_sql} AS\n{self.wrap(expression)}"
+
+    def with_sql(self, expression: exp.With) -> str:
+        ctes = expression.expressions
+        if not ctes:
+            return ""
+        recursive = "RECURSIVE " if self.CTE_RECURSIVE_KEYWORD_REQUIRED and expression.args.get("recursive") else ""
+        parts = [f"WITH {recursive}{self.cte_sql(ctes[0])}"]
+        for cte in ctes[1:]:
+            parts.append(f",{self.cte_sql(cte)}")
+        return "\n".join(parts)
 
     # ------------------------------------------------------------------
     # JOIN normalization: bare JOIN → INNER JOIN
@@ -57,7 +139,6 @@ class JarifyGenerator(DuckDB.Generator):
         if stack is not None:
             return super().connector_sql(expression, op, stack)
 
-        # Collect all terms from the connector chain
         terms: list[str] = []
         ops: list[str] = []
         self._flatten_connector(expression, terms, ops)
@@ -66,7 +147,6 @@ class JarifyGenerator(DuckDB.Generator):
             return super().connector_sql(expression, op)
 
         if self.pretty:
-            # Always put each condition on its own line
             lines = [terms[0]]
             for connector_op, term in zip(ops, terms[1:], strict=False):
                 lines.append(f"{connector_op} {term}")
@@ -88,3 +168,27 @@ class JarifyGenerator(DuckDB.Generator):
             self._flatten_connector(node.right, terms, ops)
         else:
             terms.append(self.sql(node))
+
+    # ------------------------------------------------------------------
+    # IS NOT NULL: preserve original form instead of NOT x IS NULL
+    # ------------------------------------------------------------------
+
+    def not_sql(self, expression: exp.Not) -> str:
+        inner = expression.this
+        if isinstance(inner, exp.Is) and isinstance(inner.expression, exp.Null):
+            return f"{self.sql(inner.this)} IS NOT NULL"
+        return f"NOT {self.sql(expression, 'this')}"
+
+    # ------------------------------------------------------------------
+    # format_args: apply leading-comma style when function args wrap
+    # ------------------------------------------------------------------
+
+    def format_args(self, *args: t.Any, sep: str = ", ") -> str:
+        arg_sqls = tuple(self.sql(arg) for arg in args if arg is not None and not isinstance(arg, bool))
+        if self.pretty and self.too_wide(arg_sqls):
+            if self.leading_comma:
+                parts = [f" {arg_sqls[0]}"]
+                parts.extend(f",{sql}" for sql in arg_sqls[1:])
+                return self.indent("\n" + "\n".join(parts) + "\n", skip_first=True, skip_last=True)
+            return self.indent("\n" + f"{sep.strip()}\n".join(arg_sqls) + "\n", skip_first=True, skip_last=True)
+        return sep.join(arg_sqls)

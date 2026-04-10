@@ -38,9 +38,7 @@ class NoImplicitCrossJoinRule(FormatterRule):
                     LintViolation(
                         rule=self.name,
                         severity=self.severity,
-                        message=(
-                            "Implicit CROSS JOIN detected; use explicit CROSS JOIN or add an ON/USING clause"
-                        ),
+                        message=("Implicit CROSS JOIN detected; use explicit CROSS JOIN or add an ON/USING clause"),
                     )
                 )
         return violations

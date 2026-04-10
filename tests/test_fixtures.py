@@ -32,10 +32,7 @@ def _collect_fixture_pairs() -> list[tuple[str, Path, Path]]:
 
 @pytest.mark.parametrize(
     "test_id,input_path,expected_path",
-    [
-        pytest.param(tid, inp, exp, id=tid)
-        for tid, inp, exp in _collect_fixture_pairs()
-    ],
+    [pytest.param(tid, inp, exp, id=tid) for tid, inp, exp in _collect_fixture_pairs()],
 )
 def test_format_fixture(
     test_id: str,
@@ -61,10 +58,7 @@ def test_format_fixture(
         )
 
     expected = expected_path.read_text()
-    assert result == expected, (
-        f"\n--- expected ({expected_path.name}) ---\n{expected}"
-        f"\n--- actual ---\n{result}"
-    )
+    assert result == expected, f"\n--- expected ({expected_path.name}) ---\n{expected}\n--- actual ---\n{result}"
 
 
 def test_format_idempotent(request: pytest.FixtureRequest) -> None:

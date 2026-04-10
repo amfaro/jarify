@@ -1,6 +1,6 @@
 SELECT
-  a,
-  ROW_NUMBER() OVER (PARTITION BY b ORDER BY c NULLS LAST) AS rn
+   a
+  ,row_number() OVER (PARTITION BY b ORDER BY c) AS rn
 FROM t
 QUALIFY
   rn = 1;

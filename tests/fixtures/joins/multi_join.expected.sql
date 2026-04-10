@@ -1,5 +1,5 @@
 SELECT
-  a
+   a
 FROM foo
 LEFT JOIN bar
   ON foo.id = bar.id

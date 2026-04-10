@@ -54,9 +54,7 @@ class DuckdbPreferQualifyRule(FormatterRule):
                     LintViolation(
                         rule=self.name,
                         severity=self.severity,
-                        message=(
-                            "Consider using QUALIFY instead of a subquery to filter window function results"
-                        ),
+                        message=("Consider using QUALIFY instead of a subquery to filter window function results"),
                     )
                 )
         return violations
