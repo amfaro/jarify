@@ -97,7 +97,22 @@ class TestCteNaming:
         violations = lint_sql(sql)
         names = [v.rule for v in violations]
         assert "cte-naming" in names
-        # Ensure the message names the offender
         cte_msgs = [v.message for v in violations if v.rule == "cte-naming"]
         assert any("bad" in m for m in cte_msgs)
+
+    def test_autofix_prefixes_cte_name(self):
+        from jarify.formatter import format_sql
+
+        sql = "WITH people AS (SELECT 1 AS id) SELECT id FROM people"
+        out, _ = format_sql(sql)
+        assert "_people" in out
+        assert "WITH people" not in out
+
+    def test_autofix_renames_all_references(self):
+        from jarify.formatter import format_sql
+
+        sql = "WITH base AS (SELECT 1 AS x) SELECT x FROM base"
+        out, _ = format_sql(sql)
+        assert "WITH _base" in out
+        assert "FROM _base" in out
 

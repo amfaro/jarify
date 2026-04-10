@@ -19,6 +19,32 @@ class CteNamingRule(FormatterRule):
         return "cte-naming"
 
     def apply(self, tree: exp.Expression) -> exp.Expression:
+        with_clause = tree.args.get("with_")
+        if not with_clause:
+            return tree
+
+        renames: dict[str, str] = {}
+        for cte in with_clause.expressions:
+            if cte.alias and not cte.alias.startswith("_"):
+                renames[cte.alias] = f"_{cte.alias}"
+
+        if not renames:
+            return tree
+
+        # Rename CTE definitions
+        for cte in with_clause.expressions:
+            if cte.alias in renames:
+                cte.args["alias"].args["this"].args["this"] = renames[cte.alias]
+
+        # Rename every table reference and column table qualifier that matches a renamed CTE
+        for table in tree.find_all(exp.Table):
+            if table.name in renames:
+                table.args["this"].args["this"] = renames[table.name]
+
+        for column in tree.find_all(exp.Column):
+            if column.table in renames:
+                column.args["table"].args["this"] = renames[column.table]
+
         return tree
 
     def check(self, tree: exp.Expression) -> list[LintViolation]:
