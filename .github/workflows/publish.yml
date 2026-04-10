@@ -19,6 +19,8 @@ jobs:
         id: doppler
         with:
           doppler-token: ${{ secrets.DOPPLER_TOKEN }}
+          doppler-project: shared
+          doppler-config: prod
           inject-env-vars: false
 
       - name: Generate token
