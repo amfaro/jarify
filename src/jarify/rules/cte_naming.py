@@ -1,0 +1,66 @@
+"""Rule: CTE names must start with an underscore."""
+
+from __future__ import annotations
+
+import sqlglot.expressions as exp
+
+from jarify.rules.base import FormatterRule
+from jarify.types import LintViolation
+
+
+class CteNamingRule(FormatterRule):
+    """Lint: CTE names must begin with an underscore (e.g. _people)."""
+
+    def __init__(self, severity: str = "warn") -> None:
+        self.severity = severity
+
+    @property
+    def name(self) -> str:
+        return "cte-naming"
+
+    def apply(self, tree: exp.Expression) -> exp.Expression:
+        with_clause = tree.args.get("with_")
+        if not with_clause:
+            return tree
+
+        renames: dict[str, str] = {}
+        for cte in with_clause.expressions:
+            if cte.alias and not cte.alias.startswith("_"):
+                renames[cte.alias] = f"_{cte.alias}"
+
+        if not renames:
+            return tree
+
+        # Rename CTE definitions
+        for cte in with_clause.expressions:
+            if cte.alias in renames:
+                cte.args["alias"].args["this"].args["this"] = renames[cte.alias]
+
+        # Rename every table reference and column table qualifier that matches a renamed CTE
+        for table in tree.find_all(exp.Table):
+            if table.name in renames:
+                table.args["this"].args["this"] = renames[table.name]
+
+        for column in tree.find_all(exp.Column):
+            if column.table in renames:
+                column.args["table"].args["this"] = renames[column.table]
+
+        return tree
+
+    def check(self, tree: exp.Expression) -> list[LintViolation]:
+        if self.severity == "off":
+            return []
+        violations: list[LintViolation] = []
+        with_clause = tree.args.get("with_")
+        if not with_clause:
+            return []
+        for cte in with_clause.expressions:
+            if cte.alias and not cte.alias.startswith("_"):
+                violations.append(
+                    LintViolation(
+                        rule=self.name,
+                        severity=self.severity,
+                        message=f"CTE '{cte.alias}' should start with an underscore (e.g. '_{cte.alias}')",
+                    )
+                )
+        return violations

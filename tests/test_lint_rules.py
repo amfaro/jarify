@@ -71,3 +71,48 @@ class TestLintSeverity:
         star_violations = [v for v in violations if v.rule == "no-select-star"]
         assert star_violations
         assert "WARN" in str(star_violations[0])
+
+
+class TestCteNaming:
+    def test_warns_on_cte_without_underscore(self):
+        sql = "WITH people AS (SELECT 1 AS id) SELECT id FROM people"
+        rules = _lint(sql)
+        assert "cte-naming" in rules
+
+    def test_no_warn_when_cte_starts_with_underscore(self):
+        sql = "WITH _people AS (SELECT 1 AS id) SELECT id FROM _people"
+        rules = _lint(sql)
+        assert "cte-naming" not in rules
+
+    def test_off_disables_rule(self):
+        sql = "WITH people AS (SELECT 1) SELECT 1 FROM people"
+        rules = _lint(sql, cte_naming="off")
+        assert "cte-naming" not in rules
+
+    def test_multiple_ctes_flags_only_bad_ones(self):
+        sql = """
+        WITH _good AS (SELECT 1 AS x), bad AS (SELECT 2 AS y)
+        SELECT x, y FROM _good, bad
+        """
+        violations = lint_sql(sql)
+        names = [v.rule for v in violations]
+        assert "cte-naming" in names
+        cte_msgs = [v.message for v in violations if v.rule == "cte-naming"]
+        assert any("bad" in m for m in cte_msgs)
+
+    def test_autofix_prefixes_cte_name(self):
+        from jarify.formatter import format_sql
+
+        sql = "WITH people AS (SELECT 1 AS id) SELECT id FROM people"
+        out, _ = format_sql(sql)
+        assert "_people" in out
+        assert "WITH people" not in out
+
+    def test_autofix_renames_all_references(self):
+        from jarify.formatter import format_sql
+
+        sql = "WITH base AS (SELECT 1 AS x) SELECT x FROM base"
+        out, _ = format_sql(sql)
+        assert "WITH _base" in out
+        assert "FROM _base" in out
+
