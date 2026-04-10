@@ -31,10 +31,14 @@ class JarifyConfig:
     require_alias_as: bool = True       # always require AS keyword for aliases
     one_column_per_line: bool = True    # each SELECT column on its own line
 
-    # --- lint rules (severity: "off" | "warn" | "error") ---
+    # --- general lint rules (severity: "off" | "warn" | "error") ---
     no_select_star: str = "warn"
     no_implicit_cross_join: str = "warn"
     no_unused_cte: str = "warn"
+
+    # --- DuckDB-specific lint rules ---
+    duckdb_type_style: str = "warn"      # prefer canonical DuckDB type names
+    duckdb_prefer_qualify: str = "warn"  # prefer QUALIFY over subquery window filter
 
     # --- per-rule overrides (populated from [rules.*] in toml) ---
     rules: dict[str, Any] = field(default_factory=dict)
