@@ -10,6 +10,8 @@ Subclasses sqlglot's DuckDBGenerator to enforce jarify's opinionated rules:
 - IS NOT NULL preserved (not rewritten to NOT x IS NULL)
 - NULLS LAST/FIRST suppressed when it matches DuckDB's default
 - SELECT * FROM t → FROM t (DuckDB FROM-first syntax)
+- Struct tuple casts (val, ...)::type use leading-comma style when multi-line
+- DISTINCT inside aggregates appears on its own line when the call wraps
 """
 
 from __future__ import annotations
@@ -283,7 +285,32 @@ class JarifyGenerator(DuckDB.Generator):
         if safe_prefix:
             # TRY_CAST — keep verbose form
             return super().cast_sql(expression, safe_prefix=safe_prefix)
-        return f"{self.sql(expression, 'this')}::{self.sql(expression, 'to')}"
+        type_sql = self.sql(expression, "to")
+        # Struct literal (val1, val2, ...)::type — apply leading-comma style when the
+        # tuple wraps across lines (our expressions() always wraps 2+ items).
+        if self.pretty and self.leading_comma and isinstance(expression.this, exp.Tuple):
+            exprs_sql = self.expressions(expression.this, flat=False)
+            return f"(\n{exprs_sql}\n)::{type_sql}"
+        return f"{self.sql(expression, 'this')}::{type_sql}"
+
+    # ------------------------------------------------------------------
+    # ArrayAgg with DISTINCT: put DISTINCT on its own line when wrapping
+    # ------------------------------------------------------------------
+
+    def arrayagg_sql(self, expression: exp.ArrayAgg) -> str:
+        if not (self.pretty and isinstance(expression.this, exp.Distinct)):
+            return super().arrayagg_sql(expression)
+        distinct = expression.this
+        exprs_sqls = [self.sql(e) for e in distinct.expressions]
+        # Wrap when any expression is already multi-line, or when the flat inline is too wide
+        any_multiline = any("\n" in s for s in exprs_sqls)
+        flat_inline = f"array_agg(DISTINCT {', '.join(exprs_sqls)})"
+        if not any_multiline and not self.too_wide([flat_inline]):
+            return super().arrayagg_sql(expression)
+        exprs_str = "\n".join(exprs_sqls)
+        inner = self.indent(f"\nDISTINCT {exprs_str}\n", skip_first=True, skip_last=True)
+        array_agg_sql = f"array_agg({inner})"
+        return self._add_arrayagg_null_filter(array_agg_sql, expression, expression.this)
 
     def format_args(self, *args: t.Any, sep: str = ", ") -> str:
         arg_sqls = tuple(self.sql(arg) for arg in args if arg is not None and not isinstance(arg, bool))
