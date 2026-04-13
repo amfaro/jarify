@@ -215,12 +215,19 @@ class JarifyGenerator(DuckDB.Generator):
         return f"{alias} {columns_sql}" if alias and columns_sql else f"{alias}{columns_sql}"
 
     def cte_sql(self, expression: exp.CTE) -> str:
-        alias = expression.args.get("alias")
-        if alias:
-            alias.add_comments(expression.pop_comments())
+        # Pop comments from the CTE node to prevent double-rendering when sql()
+        # calls maybe_comment on the result.  Render them after AS on the same
+        # line: use -- for single-line comments, /* */ for multi-line.
+        comments = expression.pop_comments() or []
         alias_sql = self.sql(expression, "alias")
-        # Put the opening paren on its own line: alias AS\n(...)
-        return f"{alias_sql} AS\n{self.wrap(expression)}"
+        comment_parts: list[str] = []
+        for c in comments:
+            text = c.strip()
+            if not text:
+                continue
+            comment_parts.append(f"/*{c}*/" if "\n" in c else f"-- {text}")
+        comment_suffix = (" " + " ".join(comment_parts)) if comment_parts else ""
+        return f"{alias_sql} AS{comment_suffix}\n{self.wrap(expression)}"
 
     def with_sql(self, expression: exp.With) -> str:
         ctes = expression.expressions
