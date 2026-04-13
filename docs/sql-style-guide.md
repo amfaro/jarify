@@ -570,6 +570,31 @@ CREATE OR REPLACE TABLE examples
 
 ---
 
+### `CREATE MACRO` layout
+
+The opening parenthesis of the parameter list goes on its own line. Parameters use the standard leading-comma style: the first parameter is indented three spaces, subsequent parameters use two spaces plus a leading comma.
+
+**Bad**
+```sql
+CREATE OR REPLACE MACRO get_programs_json(_participant_key, _time_frame, _program_supplier_key) AS (SELECT 1)
+```
+
+**Good**
+```sql
+CREATE OR REPLACE MACRO get_programs_json
+(
+   _participant_key
+  ,_time_frame
+  ,_program_supplier_key
+) AS
+(
+  SELECT 1
+)
+;
+```
+
+---
+
 ## Lint Rules
 
 Lint rules report violations but do not modify the SQL. All rules default to `warn`. Severity can be set to `off`, `warn`, or `error` in `jarify.toml`.

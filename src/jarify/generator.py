@@ -561,6 +561,24 @@ class JarifyGenerator(DuckDB.Generator):
         return super().datatype_sql(expression).lower()
 
     # ------------------------------------------------------------------
+    # CREATE MACRO: opening paren on its own line, leading-comma params
+    # ------------------------------------------------------------------
+
+    def userdefinedfunction_sql(self, expression: exp.UserDefinedFunction) -> str:
+        this = self.sql(expression, "this")
+        if not expression.args.get("wrapped") or not self.pretty:
+            return super().userdefinedfunction_sql(expression)
+
+        # Pretty + wrapped: build param list without indentation to avoid the
+        # double-indent that occurs when self.wrap() re-indents an already-indented
+        # string produced by self.expressions().  Apply a single indent pass here.
+        params = self.no_identify(self.expressions, expression, indent=False)
+        if not params.strip():
+            return this
+        indented = self.indent(params)
+        return f"{this}\n(\n{indented}\n)"
+
+    # ------------------------------------------------------------------
     # CREATE TABLE: opening paren on its own line, column alignment,
     # blank line before table-level constraints
     # ------------------------------------------------------------------
