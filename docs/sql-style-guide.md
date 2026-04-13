@@ -372,6 +372,55 @@ FROM t
 
 ---
 
+### Struct literal — leading-comma style when multi-line
+
+When a positional struct literal `(val1, val2, ...)::my_struct` wraps across lines, the opening `(` appears on its own line and the fields use the same leading-comma style as `SELECT` lists.
+
+**Bad**
+```sql
+SELECT (active_ingredient_key, quantity, active_ingredient_uom_key)::active_ingredient_struct FROM sku_composition
+```
+
+**Good**
+```sql
+SELECT
+   (
+     active_ingredient_key
+    ,quantity
+    ,active_ingredient_uom_key
+  )::active_ingredient_struct
+FROM sku_composition
+;
+```
+
+---
+
+### `DISTINCT` inside aggregates — own line when wrapping
+
+When `array_agg(DISTINCT expr ...)` wraps across lines, `DISTINCT` appears on its own line.
+
+**Bad**
+```sql
+SELECT array_agg(DISTINCT (active_ingredient_key, quantity, uom_key)::active_ingredient_struct) FROM t
+```
+
+**Good**
+```sql
+SELECT
+   array_agg(
+    DISTINCT
+    (
+       active_ingredient_key
+      ,quantity
+      ,uom_key
+    )::active_ingredient_struct
+  )
+FROM t
+;
+```
+
+---
+
 ### `SELECT *` — rewritten as FROM-first
 
 `SELECT *` is rewritten to DuckDB's FROM-first syntax, omitting the `SELECT` clause entirely. Applies only when there are no JOINs.
