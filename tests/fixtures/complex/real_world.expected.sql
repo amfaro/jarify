@@ -20,8 +20,7 @@ WITH _latest_version AS
     ,hive_partitioning = TRUE
     ,hive_types = {'program_supplier_key': text, 'time_frame': int}
   )
-  WHERE
-    time_frame = getvariable('time_frame')
+  WHERE time_frame = getvariable('time_frame')
 )
 ,_enrollments AS
 (
@@ -30,8 +29,7 @@ WITH _latest_version AS
     ,hive_partitioning = TRUE
     ,hive_types = {'program_supplier_key': text, 'time_frame': int}
   )
-  WHERE
-    time_frame = getvariable('time_frame')
+  WHERE time_frame = getvariable('time_frame')
 )
 ,_sku_catalog AS
 (

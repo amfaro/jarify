@@ -2,8 +2,7 @@ FROM people
 ;
 
 FROM orders
-WHERE
-  status = 'active'
+WHERE status = 'active'
 ;
 
 FROM products

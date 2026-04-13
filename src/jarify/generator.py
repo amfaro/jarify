@@ -5,6 +5,8 @@ Subclasses sqlglot's DuckDBGenerator to enforce jarify's opinionated rules:
 - Leading-comma style: ,col aligned with content at pad+1
 - Bare JOIN → INNER JOIN normalization
 - AND/OR conditions always on separate lines in pretty mode
+- WHERE/HAVING/ON: first condition inline with keyword, AND/OR right-justified
+  so all condition content aligns at the same column
 - CTE: opening paren on its own line, comma-prefix separator
 - Consistent keyword casing; DuckDB functions in lowercase
 - IS NOT NULL preserved (not rewritten to NOT x IS NULL)
@@ -230,6 +232,55 @@ class JarifyGenerator(DuckDB.Generator):
             self._flatten_connector(node.right, terms, ops)
         else:
             terms.append(self.sql(node))
+
+    # ------------------------------------------------------------------
+    # WHERE / HAVING: first condition inline, AND/OR right-justified
+    # ------------------------------------------------------------------
+
+    def where_sql(self, expression: exp.Where) -> str:
+        return self._inline_clause_sql("WHERE", expression)
+
+    def having_sql(self, expression: exp.Having) -> str:
+        return self._inline_clause_sql("HAVING", expression)
+
+    def _inline_clause_sql(self, keyword: str, expression: exp.Expression) -> str:
+        """Format a clause (WHERE/HAVING) with the first condition inline.
+
+        Places the first condition on the same line as the keyword, then
+        right-justifies AND/OR so all condition content aligns at column
+        len(keyword) + 1 (e.g. column 6 for WHERE, column 7 for HAVING).
+
+        Lines inside parentheses are indented by self.pad relative to their
+        position in the original connector output, preserving the standard
+        paren indentation that the rest of the generator uses.
+        """
+        if not self.pretty:
+            this = self.sql(expression, "this")
+            return f"{self.seg(keyword)} {this}"
+
+        condition_sql = self.sql(expression, "this")
+        lines = condition_sql.split("\n")
+
+        keyword_width = len(keyword) + 1  # e.g. 6 for "WHERE "
+        result: list[str] = []
+        depth = 0
+
+        for i, line in enumerate(lines):
+            if i == 0:
+                result.append(f"{keyword} {line}")
+            elif depth == 0 and line.startswith("AND "):
+                prefix = " " * max(0, keyword_width - len("AND "))
+                result.append(f"{prefix}{line}")
+            elif depth == 0 and line.startswith("OR "):
+                prefix = " " * max(0, keyword_width - len("OR "))
+                result.append(f"{prefix}{line}")
+            else:
+                # Continuation lines inside parens: add one pad level so they
+                # stay more indented than the AND/OR line that opened them.
+                result.append(f"{' ' * self.pad}{line}")
+            depth += line.count("(") - line.count(")")
+
+        return self.seg("\n".join(result))
 
     # ------------------------------------------------------------------
     # IS NOT NULL: preserve original form instead of NOT x IS NULL

@@ -21,8 +21,7 @@ SELECT
    a
   ,b
 FROM my_table
-WHERE
-  x > 1
+WHERE x > 1
 ;
 ```
 
@@ -139,13 +138,13 @@ FROM read_parquet(
 
 ---
 
-### AND / OR conditions — one per line
+### WHERE / HAVING — first condition inline, AND/OR aligned
 
-Every condition in a `WHERE`, `ON`, or `HAVING` clause is on its own line.
+The first condition goes on the same line as the keyword. Each subsequent `AND`/`OR` connector is right-justified so all condition content starts at the same column (`WHERE ` = 6 chars, `HAVING ` = 7 chars).
 
 **Bad**
 ```sql
-SELECT a FROM t WHERE x > 1 AND y < 2 AND z = 'foo'
+SELECT a FROM t WHERE x > 1 AND y < 2 OR z = 'foo'
 ```
 
 **Good**
@@ -153,10 +152,31 @@ SELECT a FROM t WHERE x > 1 AND y < 2 AND z = 'foo'
 SELECT
    a
 FROM t
-WHERE
-  x > 1
+WHERE x > 1
   AND y < 2
-  AND z = 'foo'
+   OR z = 'foo'
+;
+```
+
+Single-condition `WHERE` is also inline:
+
+```sql
+FROM orders
+WHERE status = 'active'
+;
+```
+
+The same inline rule applies to `HAVING`:
+
+```sql
+SELECT
+   a
+  ,count(*) AS n
+FROM t
+GROUP BY
+   a
+HAVING count(*) > 1
+   AND a IS NOT NULL
 ;
 ```
 
@@ -348,8 +368,7 @@ WHERE NOT end_date IS NULL
 
 **Good**
 ```sql
-WHERE
-  end_date IS NOT NULL
+WHERE end_date IS NOT NULL
 ```
 
 ---
@@ -466,8 +485,7 @@ Also applies with `WHERE`, `ORDER BY`, `LIMIT`, etc.:
 
 ```sql
 FROM orders
-WHERE
-  status = 'active'
+WHERE status = 'active'
 ORDER BY
    created_at
 ;
