@@ -135,6 +135,67 @@ class TestLeftOuterJoinNormalization:
         assert "FULL" in out
 
 
+class TestJoinFormatting:
+    def test_on_condition_inline(self):
+        out, _ = format_sql("SELECT a FROM foo LEFT JOIN bar ON foo.id = bar.id")
+        # ON must be on the same line as the JOIN, not on a new indented line
+        assert "LEFT JOIN bar ON foo.id = bar.id" in out
+
+    def test_on_multi_condition_inline(self):
+        out, _ = format_sql(
+            "SELECT a FROM foo JOIN bar ON foo.id = bar.id AND foo.x = bar.x"
+        )
+        assert "INNER JOIN bar ON foo.id = bar.id AND foo.x = bar.x" in out
+
+    def test_as_omitted_from_join_table_alias(self):
+        out, _ = format_sql("SELECT a FROM foo AS f LEFT JOIN bar AS b ON f.id = b.fid")
+        assert " AS f" not in out
+        assert " AS b" not in out
+        lines = out.splitlines()
+        from_line = next(ln for ln in lines if ln.startswith("FROM"))
+        join_line = next(ln for ln in lines if "JOIN" in ln)
+        assert from_line.startswith("FROM foo") and " f" in from_line
+        assert "bar" in join_line and (" b " in join_line or join_line.endswith(" b"))
+
+    def test_alias_alignment_applied(self):
+        out, _ = format_sql(
+            "SELECT a FROM orders AS o LEFT JOIN users AS u ON u.id = o.user_id"
+            " LEFT JOIN addresses AS addr ON addr.id = o.aid"
+        )
+        lines = out.splitlines()
+        from_line = next(ln for ln in lines if ln.startswith("FROM"))
+        join_lines = [ln for ln in lines if "JOIN" in ln]
+
+        def alias_col(line: str, alias: str) -> int:
+            cutoff = line.index(" ON ") if " ON " in line else len(line)
+            idx = line[:cutoff].rindex(f" {alias}")
+            return idx + 1  # 0-based column of alias first char
+
+        o_col = alias_col(from_line, "o")
+        u_col = alias_col(join_lines[0], "u")
+        addr_col = alias_col(join_lines[1], "addr")
+        # Right-alignment: the END of each alias lands at the same column
+        o_end = o_col + len("o")
+        u_end = u_col + len("u")
+        addr_end = addr_col + len("addr")
+        assert o_end == u_end == addr_end, (
+            f"Alias end columns differ: o={o_end}, u={u_end}, addr={addr_end}"
+        )
+
+    def test_no_alignment_with_subquery_join(self):
+        out, _ = format_sql(
+            "SELECT a FROM t CROSS JOIN (SELECT b FROM s) AS sub LEFT JOIN u AS x ON x.id = t.id"
+        )
+        # Subquery in block disables alignment but AS stays on subquery
+        assert "CROSS JOIN" in out
+        # Simple table alias still drops AS even without alignment
+        assert "LEFT JOIN u x" in out
+
+    def test_using_inline(self):
+        out, _ = format_sql("SELECT a FROM foo JOIN bar USING (id)")
+        assert "INNER JOIN bar USING (id)" in out
+
+
 class TestGroupByPerLine:
     def test_group_by_multi_column_one_per_line(self):
         out, _ = format_sql("SELECT a, b, count(*) FROM t GROUP BY a, b")

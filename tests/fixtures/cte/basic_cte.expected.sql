@@ -11,8 +11,7 @@ WITH _base AS
      _base.a
     ,bar.c
   FROM _base
-  INNER JOIN bar
-    ON _base.id = bar.id
+  INNER JOIN bar ON _base.id = bar.id
 )
 SELECT
    _enriched.a

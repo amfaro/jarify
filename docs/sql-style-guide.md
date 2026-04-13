@@ -246,8 +246,7 @@ WITH base AS
      base.a
     ,bar.c
   FROM base
-  INNER JOIN bar
-    ON base.id = bar.id
+  INNER JOIN bar ON base.id = bar.id
 )
 SELECT
    enriched.a
@@ -279,9 +278,9 @@ FROM _latest_version
 
 ---
 
-### Table aliases — `AS` always required
+### Table aliases — `AS` omitted in `FROM`/`JOIN`, required in `SELECT`
 
-The `AS` keyword is never omitted from table or column aliases.
+The `AS` keyword is kept for column aliases in `SELECT` lists but **omitted** between a table reference and its alias in `FROM` and `JOIN` lines.
 
 **Bad**
 ```sql
@@ -293,7 +292,7 @@ SELECT a foo, b bar FROM my_table t
 SELECT
    a AS foo
   ,b AS bar
-FROM my_table AS t
+FROM my_table t
 ;
 ```
 
@@ -319,6 +318,29 @@ FROM t
 
 ---
 
+### `JOIN` formatting — inline `ON`, aligned aliases
+
+When a `FROM`/`JOIN` block contains only simple table references, aliases are right-aligned — the **end** of every alias lands at the same column (determined by the widest `keyword + table_name + alias` in the block).
+
+**Bad**
+```sql
+SELECT a FROM orders AS o LEFT JOIN users AS u ON u.id = o.user_id LEFT JOIN addresses AS addr ON addr.id = o.aid
+```
+
+**Good**
+```sql
+SELECT
+   a
+FROM orders            o
+LEFT JOIN users        u ON u.id = o.user_id
+LEFT JOIN addresses addr ON addr.id = o.aid
+;
+```
+
+If any entry in the block is a subquery (multi-line), alignment is skipped for the entire block, but `ON` is still kept inline.
+
+---
+
 ### Bare `JOIN` → `INNER JOIN`
 
 A `JOIN` with no explicit qualifier is normalized to `INNER JOIN`.
@@ -333,8 +355,7 @@ SELECT a FROM foo JOIN bar ON foo.id = bar.id
 SELECT
    a
 FROM foo
-INNER JOIN bar
-  ON foo.id = bar.id
+INNER JOIN bar ON foo.id = bar.id
 ;
 ```
 
@@ -354,8 +375,7 @@ SELECT a FROM foo LEFT OUTER JOIN bar ON foo.id = bar.id
 SELECT
    a
 FROM foo
-LEFT JOIN bar
-  ON foo.id = bar.id
+LEFT JOIN bar ON foo.id = bar.id
 ;
 ```
 
@@ -592,8 +612,7 @@ SELECT
    a.x
   ,b.y
 FROM a
-INNER JOIN b
-  ON a.id = b.id
+INNER JOIN b ON a.id = b.id
 ;
 ```
 
@@ -708,8 +727,7 @@ SELECT a.x FROM a INNER JOIN b ON a.id = b.id
 SELECT
    a.x
 FROM a
-INNER JOIN b
-  USING (id)
+INNER JOIN b USING (id)
 ;
 ```
 

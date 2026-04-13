@@ -18,6 +18,8 @@ Subclasses sqlglot's DuckDBGenerator to enforce jarify's opinionated rules:
   blank line before table-level constraints
 - Aggregate and window functions (COUNT, SUM, ROW_NUMBER, RANK, …) are uppercase;
   all other DuckDB built-in functions remain lowercase
+- FROM/JOIN block: AS omitted from table aliases; ON/USING inline; aliases
+  column-aligned when the block contains only simple (single-line) table refs
 """
 
 from __future__ import annotations
@@ -85,6 +87,7 @@ class JarifyGenerator(DuckDB.Generator):
         self._as_align_width: int | None = None  # set during SELECT expression rendering
         self._col_name_align: int | None = None  # set during CREATE TABLE column rendering
         self._col_type_align: int | None = None  # set during CREATE TABLE column rendering
+        self._join_alias_col: int | None = None   # set during FROM/JOIN block rendering
 
     # ------------------------------------------------------------------
     # Function name casing: aggregates/window functions → UPPER, rest → lower
@@ -226,7 +229,134 @@ class JarifyGenerator(DuckDB.Generator):
             # DROP redundant OUTER: LEFT OUTER JOIN → LEFT JOIN
             expression = expression.copy()
             expression.set("kind", None)
-        return super().join_sql(expression)
+
+        if not self.pretty:
+            return super().join_sql(expression)
+
+        op_sql = self._join_keyword(expression)
+        this = expression.this
+        on_sql = self._inline_on_sql(expression)
+
+        if self._join_alias_col is not None and isinstance(this, exp.Table):
+            table_ref = self.table_parts(this)
+            alias_str = self._table_alias_str(this)
+            if alias_str:
+                pad = " " * max(1, self._join_alias_col - len(op_sql) - 1 - len(table_ref) - len(alias_str))
+                return self.seg(f"{op_sql} {table_ref}{pad}{alias_str}{on_sql}")
+            return self.seg(f"{op_sql} {table_ref}{on_sql}")
+
+        # No alignment path: render table ref, drop AS for simple tables
+        if isinstance(this, exp.Table):
+            table_ref = self.table_parts(this)
+            alias_str = self._table_alias_str(this)
+            this_sql = f"{table_ref} {alias_str}" if alias_str else table_ref
+        else:
+            this_sql = self.sql(this)
+
+        exprs = self.expressions(expression)
+        if exprs:
+            this_sql = f"{this_sql},{self.seg(exprs)}"
+
+        return self.seg(f"{op_sql} {this_sql}{on_sql}")
+
+    def from_sql(self, expression: exp.From) -> str:
+        table = expression.this
+        if not self.pretty or not isinstance(table, exp.Table):
+            return super().from_sql(expression)
+
+        alias_str = self._table_alias_str(table)
+        if not alias_str:
+            return super().from_sql(expression)
+
+        table_ref = self.table_parts(table)
+        if self._join_alias_col is not None:
+            pad = " " * max(1, self._join_alias_col - len("FROM") - 1 - len(table_ref) - len(alias_str))
+            return self.seg(f"FROM {table_ref}{pad}{alias_str}")
+        return self.seg(f"FROM {table_ref} {alias_str}")
+
+    # ------------------------------------------------------------------
+    # FROM/JOIN alignment helpers
+    # ------------------------------------------------------------------
+
+    def _join_keyword(self, expression: exp.Join) -> str:
+        """Return the join keyword string, e.g. 'LEFT JOIN', 'INNER JOIN'."""
+        side = expression.side
+        kind = expression.kind
+        method = expression.method
+        if not self.SEMI_ANTI_JOIN_WITH_SIDE and kind in ("SEMI", "ANTI"):
+            side = None
+        op = " ".join(part for part in (method, side, kind) if part)
+        return f"{op} JOIN" if op else "JOIN"
+
+    def _table_alias_str(self, table: exp.Table) -> str:
+        """Return the alias string for a table node, or empty string if none."""
+        alias_node = table.args.get("alias")
+        return self.sql(alias_node) if alias_node else ""
+
+    def _inline_on_sql(self, expression: exp.Join) -> str:
+        """Render the ON or USING clause as a single inline string."""
+        on_expr = expression.args.get("on")
+        using = expression.args.get("using")
+        if on_expr:
+            saved = self.pretty
+            self.pretty = False
+            try:
+                on_rendered = self.sql(on_expr)
+            finally:
+                self.pretty = saved
+            return f" ON {on_rendered}"
+        if using:
+            cols = ", ".join(self.sql(col) for col in using)
+            return f" USING ({cols})"
+        return ""
+
+    def _table_ref_only_sql(self, table_expr: exp.Expression) -> str | None:
+        """Return the table reference string (no alias) for simple tables, else None."""
+        if isinstance(table_expr, exp.Table):
+            ref = self.table_parts(table_expr)
+            return None if "\n" in ref else ref
+        return None
+
+    def _compute_join_align_width(self, expression: exp.Select) -> int | None:
+        """Compute the right-alignment column for the FROM/JOIN block.
+
+        Returns `max(kw_len + 1 + table_len + alias_len) + 1` across all aliased
+        entries, so that the END of every alias lands at the same column (one space
+        before the ON/USING keyword or end of line).  Returns None when alignment
+        should be skipped (any entry uses a subquery, or no entries have aliases).
+        """
+        from_expr = expression.args.get("from_")
+        joins = expression.args.get("joins") or []
+        if not from_expr:
+            return None
+
+        entries: list[tuple[int, str, exp.Expression]] = []
+
+        from_ref = self._table_ref_only_sql(from_expr.this)
+        if from_ref is None:
+            return None
+        entries.append((len("FROM"), from_ref, from_expr.this))
+
+        for join in joins:
+            kw = self._join_keyword(join)
+            ref = self._table_ref_only_sql(join.this)
+            if ref is None:
+                return None
+            entries.append((len(kw), ref, join.this))
+
+        max_total = 0
+        has_alias = False
+        for kw_len, ref, table_expr in entries:
+            if isinstance(table_expr, exp.Table):
+                alias = self._table_alias_str(table_expr)
+                if alias:
+                    has_alias = True
+                    max_total = max(max_total, kw_len + 1 + len(ref) + len(alias))
+
+        if not has_alias:
+            return None
+
+        return max_total + 1  # +1 for minimum one space before ON/EOL
 
     # ------------------------------------------------------------------
     # Connector: always break AND/OR onto separate lines in pretty mode
@@ -339,21 +469,28 @@ class JarifyGenerator(DuckDB.Generator):
     # ------------------------------------------------------------------
 
     def select_sql(self, expression: exp.Select) -> str:
-        exprs = expression.expressions
-        if (
-            self._config.prefer_from_first
-            and len(exprs) == 1
-            and isinstance(exprs[0], exp.Star)
-            and not expression.args.get("distinct")
-            and not expression.args.get("joins")
-        ):
-            expr_copy = expression.copy()
-            expr_copy.set("expressions", [])
-            sql = super().select_sql(expr_copy)
-            # Strip the bare "SELECT" line (no columns → "SELECT\nFROM ...")
-            # Uses multiline ^ so indented "  SELECT" inside CTEs is never matched.
-            return re.sub(r"(?m)^SELECT\n", "", sql)
-        return super().select_sql(expression)
+        # Compute and store join alias alignment width for this SELECT's FROM/JOIN block
+        saved_align = self._join_alias_col
+        if self.pretty:
+            self._join_alias_col = self._compute_join_align_width(expression)
+        try:
+            exprs = expression.expressions
+            if (
+                self._config.prefer_from_first
+                and len(exprs) == 1
+                and isinstance(exprs[0], exp.Star)
+                and not expression.args.get("distinct")
+                and not expression.args.get("joins")
+            ):
+                expr_copy = expression.copy()
+                expr_copy.set("expressions", [])
+                sql = super().select_sql(expr_copy)
+                # Strip the bare "SELECT" line (no columns → "SELECT\nFROM ...")
+                # Uses multiline ^ so indented "  SELECT" inside CTEs is never matched.
+                return re.sub(r"(?m)^SELECT\n", "", sql)
+            return super().select_sql(expression)
+        finally:
+            self._join_alias_col = saved_align
 
     # ------------------------------------------------------------------
     # GROUP BY: one expression per line in pretty mode

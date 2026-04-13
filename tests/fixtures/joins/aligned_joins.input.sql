@@ -1,0 +1,1 @@
+SELECT o.id, u.name, a.city FROM orders AS o LEFT JOIN users AS u ON u.id = o.user_id LEFT JOIN addresses AS a ON a.id = o.shipping_address_id LEFT JOIN line_items AS li ON li.order_id = o.id LEFT JOIN products AS p ON p.id = li.product_id

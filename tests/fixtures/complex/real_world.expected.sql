@@ -40,8 +40,7 @@ WITH _latest_version AS
     ,hive_partitioning = TRUE
     ,hive_types = {'version': text}
   )
-  SEMI JOIN _latest_version
-    USING (version)
+  SEMI JOIN _latest_version USING (version)
 )
 ,_prices AS
 (
@@ -52,8 +51,7 @@ WITH _latest_version AS
     ,hive_partitioning = TRUE
     ,hive_types = {'version': text}
   )
-  SEMI JOIN _latest_version
-    USING (version)
+  SEMI JOIN _latest_version USING (version)
 )
 SELECT
    sc.manufacturer_label
@@ -65,23 +63,15 @@ SELECT
   ,all_e.participant_key
   ,CASE WHEN e.participant_key IS NOT NULL THEN 'Y' ELSE 'N' END AS enrolled
   ,sc.version
-FROM _relevant_skus AS rs
-INNER JOIN _sku_catalog AS sc
-  ON sc.sku_key = rs.sku_key
-  AND sc.manufacturer_key = rs.program_supplier_key
+FROM _relevant_skus rs
+INNER JOIN _sku_catalog sc ON sc.sku_key = rs.sku_key AND sc.manufacturer_key = rs.program_supplier_key
 CROSS JOIN (
   SELECT DISTINCT
      participant_key
   FROM _enrollments
 ) AS all_e
-LEFT JOIN _enrollments AS e
-  ON e.participant_key = all_e.participant_key
-  AND e.program_supplier_key = rs.program_supplier_key
-  AND e.enabled = TRUE
-LEFT JOIN _prices AS p
-  ON sc.version = p.version
-  AND sc.sku_key = p.sku_key
-  AND p.end_date IS NULL
+LEFT JOIN _enrollments e ON e.participant_key = all_e.participant_key AND e.program_supplier_key = rs.program_supplier_key AND e.enabled = TRUE
+LEFT JOIN _prices p ON sc.version = p.version AND sc.sku_key = p.sku_key AND p.end_date IS NULL
 ORDER BY
    manufacturer_label
   ,sku_key
