@@ -408,8 +408,7 @@ SELECT array_agg(DISTINCT (active_ingredient_key, quantity, uom_key)::active_ing
 ```sql
 SELECT
    array_agg(
-    DISTINCT
-    (
+    DISTINCT (
        active_ingredient_key
       ,quantity
       ,uom_key

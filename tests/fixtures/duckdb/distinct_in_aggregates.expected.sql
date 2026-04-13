@@ -1,7 +1,6 @@
 SELECT
    array_agg(
-    DISTINCT
-    (
+    DISTINCT (
        active_ingredient_key
       ,quantity
       ,active_ingredient_uom_key

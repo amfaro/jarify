@@ -308,7 +308,7 @@ class JarifyGenerator(DuckDB.Generator):
         if not any_multiline and not self.too_wide([flat_inline]):
             return super().arrayagg_sql(expression)
         exprs_str = "\n".join(exprs_sqls)
-        inner = self.indent(f"\nDISTINCT\n{exprs_str}\n", skip_first=True, skip_last=True)
+        inner = self.indent(f"\nDISTINCT {exprs_str}\n", skip_first=True, skip_last=True)
         array_agg_sql = f"array_agg({inner})"
         return self._add_arrayagg_null_filter(array_agg_sql, expression, expression.this)
 
