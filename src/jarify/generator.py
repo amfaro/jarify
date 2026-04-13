@@ -241,7 +241,7 @@ class JarifyGenerator(DuckDB.Generator):
             table_ref = self.table_parts(this)
             alias_str = self._table_alias_str(this)
             if alias_str:
-                pad = " " * max(1, self._join_alias_col - len(op_sql) - 1 - len(table_ref))
+                pad = " " * max(1, self._join_alias_col - len(op_sql) - 1 - len(table_ref) - len(alias_str))
                 return self.seg(f"{op_sql} {table_ref}{pad}{alias_str}{on_sql}")
             return self.seg(f"{op_sql} {table_ref}{on_sql}")
 
@@ -270,7 +270,7 @@ class JarifyGenerator(DuckDB.Generator):
 
         table_ref = self.table_parts(table)
         if self._join_alias_col is not None:
-            pad = " " * max(1, self._join_alias_col - len("FROM") - 1 - len(table_ref))
+            pad = " " * max(1, self._join_alias_col - len("FROM") - 1 - len(table_ref) - len(alias_str))
             return self.seg(f"FROM {table_ref}{pad}{alias_str}")
         return self.seg(f"FROM {table_ref} {alias_str}")
 
@@ -318,40 +318,45 @@ class JarifyGenerator(DuckDB.Generator):
         return None
 
     def _compute_join_align_width(self, expression: exp.Select) -> int | None:
-        """Compute the alias start column for the FROM/JOIN block.
+        """Compute the right-alignment column for the FROM/JOIN block.
 
-        Returns the column index (0-based) such that all aliases align, or None
-        when alignment should be skipped (any entry is a subquery, no aliases
-        present, or fewer than two rows in the block).
+        Returns `max(kw_len + 1 + table_len + alias_len) + 1` across all aliased
+        entries, so that the END of every alias lands at the same column (one space
+        before the ON/USING keyword or end of line).  Returns None when alignment
+        should be skipped (any entry uses a subquery, or no entries have aliases).
         """
         from_expr = expression.args.get("from_")
         joins = expression.args.get("joins") or []
         if not from_expr:
             return None
 
-        entries: list[tuple[int, str]] = []
+        entries: list[tuple[int, str, exp.Expression]] = []
 
         from_ref = self._table_ref_only_sql(from_expr.this)
         if from_ref is None:
             return None
-        entries.append((len("FROM"), from_ref))
+        entries.append((len("FROM"), from_ref, from_expr.this))
 
         for join in joins:
             kw = self._join_keyword(join)
             ref = self._table_ref_only_sql(join.this)
             if ref is None:
                 return None
-            entries.append((len(kw), ref))
+            entries.append((len(kw), ref, join.this))
 
-        all_tables = ([from_expr.this] if from_expr else []) + [j.this for j in joins]
-        has_alias = any(
-            isinstance(t, exp.Table) and bool(self._table_alias_str(t))
-            for t in all_tables
-        )
+        max_total = 0
+        has_alias = False
+        for kw_len, ref, table_expr in entries:
+            if isinstance(table_expr, exp.Table):
+                alias = self._table_alias_str(table_expr)
+                if alias:
+                    has_alias = True
+                    max_total = max(max_total, kw_len + 1 + len(ref) + len(alias))
+
         if not has_alias:
             return None
 
-        return max(kw_len + 1 + len(ref) for kw_len, ref in entries) + 1
+        return max_total + 1  # +1 for minimum one space before ON/EOL
 
     # ------------------------------------------------------------------
     # Connector: always break AND/OR onto separate lines in pretty mode

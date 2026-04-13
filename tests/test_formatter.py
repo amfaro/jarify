@@ -174,8 +174,12 @@ class TestJoinFormatting:
         o_col = alias_col(from_line, "o")
         u_col = alias_col(join_lines[0], "u")
         addr_col = alias_col(join_lines[1], "addr")
-        assert o_col == u_col == addr_col, (
-            f"Alias columns differ: o={o_col}, u={u_col}, addr={addr_col}"
+        # Right-alignment: the END of each alias lands at the same column
+        o_end = o_col + len("o")
+        u_end = u_col + len("u")
+        addr_end = addr_col + len("addr")
+        assert o_end == u_end == addr_end, (
+            f"Alias end columns differ: o={o_end}, u={u_end}, addr={addr_end}"
         )
 
     def test_no_alignment_with_subquery_join(self):
