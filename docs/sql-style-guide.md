@@ -278,6 +278,28 @@ FROM _latest_version
 
 ---
 
+### CTE inline comments — after `AS`
+
+Inline comments on a CTE definition are placed after `AS` on the same line, using `--` style. The opening `(` still goes on its own line below.
+
+**Bad**
+```sql
+WITH _programs /* this is where we filter */ AS
+(
+  SELECT ...
+)
+```
+
+**Good**
+```sql
+WITH _programs AS -- this is where we filter by parameters
+(
+  SELECT ...
+)
+```
+
+---
+
 ### Table aliases — `AS` omitted in `FROM`/`JOIN`, required in `SELECT`
 
 The `AS` keyword is kept for column aliases in `SELECT` lists but **omitted** between a table reference and its alias in `FROM` and `JOIN` lines.
