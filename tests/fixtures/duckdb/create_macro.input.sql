@@ -1,0 +1,1 @@
+CREATE OR REPLACE MACRO get_programs_json(_participant_key, _time_frame, _program_supplier_key) AS (SELECT json_object('programs', json_group_array(json_object('name', program_name, 'supplier', supplier_name))) FROM programs WHERE participant_key = _participant_key AND time_frame = _time_frame AND supplier_key = _program_supplier_key);
