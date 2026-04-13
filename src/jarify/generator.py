@@ -6,7 +6,8 @@ Subclasses sqlglot's DuckDBGenerator to enforce jarify's opinionated rules:
 - Bare JOIN → INNER JOIN normalization
 - AND/OR conditions always on separate lines in pretty mode
 - WHERE/HAVING/ON: first condition inline with keyword, AND/OR right-justified
-  so all condition content aligns at the same column
+  so all condition content aligns at the same column; = operators in WHERE
+  top-level AND conditions are column-aligned (padded to max LHS width + 2)
 - CTE: opening paren on its own line, comma-prefix separator
 - Consistent keyword casing; DuckDB functions in lowercase
 - IS NOT NULL preserved (not rewritten to NOT x IS NULL)
@@ -429,7 +430,65 @@ class JarifyGenerator(DuckDB.Generator):
     # ------------------------------------------------------------------
 
     def where_sql(self, expression: exp.Where) -> str:
-        return self._inline_clause_sql("WHERE", expression)
+        """Format WHERE with leading-AND style and = operator column-alignment.
+
+        When the top-level condition is a pure AND chain the = signs in simple
+        equality conditions are padded so they all align at the same column.
+        The target column is max(LHS width across all EQ in WHERE) + 2.
+
+        Parenthesised conditions that are direct AND operands (e.g. compound OR
+        filters) are rendered on a single line rather than expanded.
+
+        Falls back to _inline_clause_sql when the top-level is not AND (e.g.
+        a bare OR at the top level).
+        """
+        if not self.pretty or not isinstance(expression.this, exp.And):
+            return self._inline_clause_sql("WHERE", expression)
+
+        conditions = self._flatten_and(expression.this)
+
+        # Max EQ LHS width across entire WHERE tree (including nested EQs)
+        eq_lhs_widths = [len(self.sql(eq.this)) for eq in expression.find_all(exp.EQ)]
+        # Only align when there are at least 2 EQ comparisons total
+        target = (max(eq_lhs_widths) + 2) if len(eq_lhs_widths) >= 2 else 0
+
+        result: list[str] = []
+        for i, cond in enumerate(conditions):
+            if target > 0 and isinstance(cond, exp.EQ):
+                lhs = self.sql(cond.this)
+                rhs = self.sql(cond.expression)
+                cond_str = (
+                    f"{lhs.ljust(target)}= {rhs}" if "\n" not in lhs else self.sql(cond)
+                )
+            elif isinstance(cond, exp.Paren):
+                cond_str = self._compact_sql(cond)
+            else:
+                cond_str = self.sql(cond)
+
+            if i == 0:
+                result.append(f"WHERE {cond_str}")
+            else:
+                result.append(f"  AND {cond_str}")
+
+        return self.seg("\n".join(result))
+
+    def _flatten_and(self, condition: exp.Expression) -> list[exp.Expression]:
+        """Return the flat list of operands from a nested AND chain."""
+        if isinstance(condition, exp.And):
+            return self._flatten_and(condition.this) + self._flatten_and(
+                condition.expression
+            )
+        return [condition]
+
+    def _compact_sql(self, expression: exp.Expression) -> str:
+        """Render expression compactly without line breaks."""
+        saved = self.pretty
+        self.pretty = False
+        try:
+            result = self.sql(expression)
+        finally:
+            self.pretty = saved
+        return result
 
     def having_sql(self, expression: exp.Having) -> str:
         return self._inline_clause_sql("HAVING", expression)
