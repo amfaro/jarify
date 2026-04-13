@@ -213,6 +213,31 @@ WHERE p.time_frame            = _time_frame
 
 ---
 
+### WHERE — `IN (subquery)` layout
+
+An `IN` condition whose right-hand side is a subquery follows the same opening-paren style as CTEs: the `(` goes on its own line, the inner query is indented by one level, and `)` closes at the same column as `IN`.
+
+**Bad**
+```sql
+WHERE program_key IN (
+    SELECT
+       program_key
+    FROM _programs
+  )
+```
+
+**Good**
+```sql
+WHERE program_key IN
+(
+  SELECT
+     program_key
+  FROM _programs
+)
+```
+
+---
+
 ### `GROUP BY` — one expression per line
 
 Every `GROUP BY` expression is on its own line using the same leading-comma style as `SELECT`. `GROUP BY ALL` is exempt and stays on one line.
