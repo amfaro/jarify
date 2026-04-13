@@ -6,9 +6,9 @@ Jarify enforces a single, non-configurable SQL style. This document describes ev
 
 ## Formatting Rules
 
-### Keywords — uppercase
+### Keywords — uppercase; data types — lowercase
 
-SQL keywords are always uppercase.
+SQL keywords (`SELECT`, `FROM`, `WHERE`, `JOIN`, `NOT NULL`, etc.) are always uppercase. Data type names (`text`, `int`, `timestamp`, `decimal`, etc.) are always lowercase.
 
 **Bad**
 ```sql
@@ -23,6 +23,30 @@ SELECT
 FROM my_table
 WHERE
   x > 1
+;
+```
+
+Type names are lowercased even in casts and `CREATE TABLE`:
+
+**Bad**
+```sql
+SELECT a::TEXT, b::INTEGER FROM t
+CREATE TABLE t (id INTEGER NOT NULL, name TEXT)
+```
+
+**Good**
+```sql
+SELECT
+   a::text
+  ,b::int
+FROM t
+;
+
+CREATE TABLE t
+(
+   id   int  NOT NULL
+  ,name text
+)
 ;
 ```
 
@@ -475,6 +499,35 @@ FROM u
 
 ---
 
+### `CREATE TABLE` layout
+
+The opening parenthesis goes on its own line. Column names are padded to align all type tokens, and types are padded to align all constraint tokens when any column carries constraints. A blank line separates column definitions from table-level constraints (`PRIMARY KEY`, `UNIQUE`, `CHECK`, etc.).
+
+**Bad**
+```sql
+CREATE OR REPLACE TABLE examples (
+   transaction_id TEXT NOT NULL,
+   program_supplier_key TEXT NOT NULL,
+   seller_key TEXT,
+   PRIMARY KEY (program_supplier_key, transaction_id)
+)
+```
+
+**Good**
+```sql
+CREATE OR REPLACE TABLE examples
+(
+   transaction_id       TEXT NOT NULL
+  ,program_supplier_key TEXT NOT NULL
+  ,seller_key           TEXT
+
+  ,PRIMARY KEY (program_supplier_key, transaction_id)
+)
+;
+```
+
+---
+
 ## Lint Rules
 
 Lint rules report violations but do not modify the SQL. All rules default to `warn`. Severity can be set to `off`, `warn`, or `error` in `jarify.toml`.
@@ -555,8 +608,8 @@ Flag non-canonical DuckDB type names. Use the canonical form instead.
 
 | Non-canonical | Canonical |
 |---------------|-----------|
-| `FLOAT`, `FLOAT4` | `REAL` |
-| `NVARCHAR` | `TEXT` |
+| `float`, `float4` | `real` |
+| `nvarchar` | `text` |
 
 **Bad**
 ```sql
@@ -565,7 +618,7 @@ CREATE TABLE t (score FLOAT, label NVARCHAR)
 
 **Good**
 ```sql
-CREATE TABLE t (score REAL, label TEXT)
+CREATE TABLE t (score real, label text)
 ```
 
 ---
