@@ -246,8 +246,7 @@ WITH base AS
      base.a
     ,bar.c
   FROM base
-  INNER JOIN bar
-    ON base.id = bar.id
+  INNER JOIN bar ON base.id = bar.id
 )
 SELECT
    enriched.a
@@ -321,7 +320,7 @@ FROM t
 
 ### `JOIN` formatting — inline `ON`, aligned aliases
 
-Every join is emitted on a single line. The `ON` (or `USING`) condition appears inline immediately after the alias with no wrapping. When a `FROM`/`JOIN` block contains only simple table references, all aliases are padded to start at the same column (determined by the widest `keyword + table_name` in the block).
+When a `FROM`/`JOIN` block contains only simple table references, aliases are right-aligned — the **end** of every alias lands at the same column (determined by the widest `keyword + table_name + alias` in the block).
 
 **Bad**
 ```sql
@@ -332,8 +331,8 @@ SELECT a FROM orders AS o LEFT JOIN users AS u ON u.id = o.user_id LEFT JOIN add
 ```sql
 SELECT
    a
-FROM orders      o
-LEFT JOIN users  u   ON u.id = o.user_id
+FROM orders            o
+LEFT JOIN users        u ON u.id = o.user_id
 LEFT JOIN addresses addr ON addr.id = o.aid
 ;
 ```
@@ -613,8 +612,7 @@ SELECT
    a.x
   ,b.y
 FROM a
-INNER JOIN b
-  ON a.id = b.id
+INNER JOIN b ON a.id = b.id
 ;
 ```
 
@@ -729,8 +727,7 @@ SELECT a.x FROM a INNER JOIN b ON a.id = b.id
 SELECT
    a.x
 FROM a
-INNER JOIN b
-  USING (id)
+INNER JOIN b USING (id)
 ;
 ```
 
