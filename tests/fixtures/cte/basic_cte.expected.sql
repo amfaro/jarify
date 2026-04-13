@@ -18,6 +18,5 @@ SELECT
    _enriched.a
   ,_enriched.c
 FROM _enriched
-WHERE
-  _enriched.a > 1
+WHERE _enriched.a > 1
 ;
