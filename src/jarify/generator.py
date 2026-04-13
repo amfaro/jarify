@@ -195,8 +195,24 @@ class JarifyGenerator(DuckDB.Generator):
         return f"{this_sql} AS {alias_name}"
 
     # ------------------------------------------------------------------
-    # CTE formatting: paren on its own line, comma-prefix separator
+    # CTE formatting: paren on its own line, comma-prefix separator;
+    # table alias with columns gets a space before the column list
     # ------------------------------------------------------------------
+
+    def tablealias_sql(self, expression: exp.TableAlias) -> str:
+        alias = self.sql(expression, "this")
+        columns = self.expressions(expression, key="columns", flat=True)
+        columns_sql = f"({columns})" if columns else ""
+
+        if columns_sql and not self.SUPPORTS_TABLE_ALIAS_COLUMNS:
+            columns_sql = ""
+            self.unsupported("Named columns are not supported in table alias.")
+
+        if not alias and not self.dialect.UNNEST_COLUMN_ONLY:
+            alias = self._next_name()
+
+        # Add a space between name and column list: "t (a, b)" not "t(a, b)"
+        return f"{alias} {columns_sql}" if alias and columns_sql else f"{alias}{columns_sql}"
 
     def cte_sql(self, expression: exp.CTE) -> str:
         alias = expression.args.get("alias")
@@ -475,6 +491,23 @@ class JarifyGenerator(DuckDB.Generator):
             self._join_alias_col = self._compute_join_align_width(expression)
         try:
             exprs = expression.expressions
+            from_ = expression.args.get("from_")
+
+            # Detect VALUES-only CTE body: SELECT * FROM (VALUES ...) AS _values
+            # sqlglot parses `WITH t(a,b) AS (VALUES ...)` into this shape; render
+            # it back to a plain VALUES block instead of FROM (VALUES ...) AS _values.
+            if (
+                self.pretty
+                and self._config.prefer_from_first
+                and len(exprs) == 1
+                and isinstance(exprs[0], exp.Star)
+                and not expression.args.get("distinct")
+                and not expression.args.get("joins")
+                and isinstance(from_, exp.From)
+                and isinstance(from_.this, exp.Values)
+            ):
+                return self._cte_values_sql(from_.this)
+
             if (
                 self._config.prefer_from_first
                 and len(exprs) == 1
@@ -491,6 +524,53 @@ class JarifyGenerator(DuckDB.Generator):
             return super().select_sql(expression)
         finally:
             self._join_alias_col = saved_align
+
+    def _cte_values_sql(self, expression: exp.Values) -> str:
+        """Render a VALUES block for a CTE body.
+
+        Produces leading-comma row list with column alignment: the first
+        column in each row is padded so that the second (and subsequent)
+        column values align across all rows.
+        """
+        rows = expression.expressions  # list of Tuple nodes
+        if not rows:
+            return "VALUES"
+
+        rendered: list[list[str]] = [
+            [self.sql(cell) for cell in tup.expressions]
+            for tup in rows
+        ]
+
+        num_cols = max(len(r) for r in rendered) if rendered else 0
+        if num_cols == 0:
+            return "VALUES"
+
+        # Max rendered width per non-last column for padding alignment
+        col_widths: list[int] = [
+            max((len(r[col_idx]) for r in rendered if col_idx < len(r)), default=0)
+            for col_idx in range(num_cols - 1)
+        ]
+
+        # Build each row: (val0,<pad>val1,<pad>val2,...,last_val)
+        # The comma follows immediately after each non-last value; trailing
+        # spaces pad up to max_width+1 so the next value aligns.
+        row_sqls: list[str] = []
+        for cells in rendered:
+            parts: list[str] = []
+            for i, cell in enumerate(cells):
+                if i < len(col_widths):
+                    pad = " " * (col_widths[i] - len(cell) + 1)
+                    parts.append(f"{cell},{pad}")
+                else:
+                    parts.append(cell)
+            row_sqls.append(f"({''.join(parts)})")
+
+        # Leading-comma style: first row gets a leading space, rest get comma
+        lines = [f" {row_sqls[0]}"]
+        lines.extend(f",{row}" for row in row_sqls[1:])
+
+        body = self.indent("\n".join(lines))
+        return f"VALUES\n{body}"
 
     # ------------------------------------------------------------------
     # GROUP BY: one expression per line in pretty mode
