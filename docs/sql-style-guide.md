@@ -595,6 +595,33 @@ CREATE OR REPLACE MACRO get_programs_json
 
 ---
 
+### `VALUES` CTE layout
+
+A `WITH` clause CTE whose body is a plain `VALUES` list is rendered as `VALUES` (not `FROM (VALUES ...) AS ...`). Rows use leading-comma style. Each non-last column is right-padded with spaces after its comma so that the next column aligns across all rows. CTE names that declare column aliases include a space before the column list.
+
+**Bad**
+```sql
+WITH _lookup (code, label) AS (VALUES ('a', 'active'), ('i', 'inactive'))
+SELECT code, label FROM _lookup
+```
+
+**Good**
+```sql
+WITH _lookup (code, label) AS
+(
+  VALUES
+     ('a', 'active'  )
+    ,('i', 'inactive')
+)
+SELECT
+   code
+  ,label
+FROM _lookup
+;
+```
+
+---
+
 ## Lint Rules
 
 Lint rules report violations but do not modify the SQL. All rules default to `warn`. Severity can be set to `off`, `warn`, or `error` in `jarify.toml`.
