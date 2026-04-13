@@ -23,8 +23,10 @@ def parse_sql_lenient(sql: str, dialect: str = DUCKDB_DIALECT) -> tuple[list[Exp
     try:
         trees = sqlglot.parse(sql, read=dialect, error_level=sqlglot.ErrorLevel.RAISE)
     except ParseError:
-        # Fall back to lenient parsing so we still get partial trees
-        trees = sqlglot.parse(sql, read=dialect, error_level=sqlglot.ErrorLevel.WARN)
+        # Fall back to lenient parsing so we still get partial trees.
+        # Use IGNORE (not WARN) to suppress sqlglot's side-effect stderr prints;
+        # errors are re-captured via the RAISE pass below.
+        trees = sqlglot.parse(sql, read=dialect, error_level=sqlglot.ErrorLevel.IGNORE)
         # Re-parse to capture the actual errors
         try:
             sqlglot.parse(sql, read=dialect, error_level=sqlglot.ErrorLevel.RAISE)

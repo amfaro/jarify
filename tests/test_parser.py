@@ -1,5 +1,8 @@
 """Tests for the SQL parser module."""
 
+import io
+import sys
+
 from jarify.parser import parse_sql, parse_sql_lenient
 
 
@@ -23,3 +26,15 @@ def test_parse_lenient_collects_errors():
     _, errors = parse_sql_lenient("SELECT FROM WHERE")
     # Should parse leniently without raising
     assert isinstance(errors, list)
+
+
+def test_parse_lenient_emits_nothing_to_stderr():
+    """ErrorLevel.WARN side-effect must not bleed through to the caller's stderr."""
+    captured = io.StringIO()
+    old_stderr = sys.stderr
+    sys.stderr = captured
+    try:
+        parse_sql_lenient("THIS IS NOT VALID SQL @@@!!!")
+    finally:
+        sys.stderr = old_stderr
+    assert captured.getvalue() == "", f"Unexpected stderr output: {captured.getvalue()!r}"
