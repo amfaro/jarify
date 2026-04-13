@@ -16,6 +16,8 @@ Subclasses sqlglot's DuckDBGenerator to enforce jarify's opinionated rules:
 - DISTINCT inside aggregates appears on its own line when the call wraps
 - CREATE TABLE: opening paren on its own line, column name/type alignment,
   blank line before table-level constraints
+- Aggregate and window functions (COUNT, SUM, ROW_NUMBER, RANK, …) are uppercase;
+  all other DuckDB built-in functions remain lowercase
 """
 
 from __future__ import annotations
@@ -39,6 +41,35 @@ class JarifyGenerator(DuckDB.Generator):
     # We remove it so the dispatch falls through to pivot_sql directly, preserving qualifiers.
     TRANSFORMS: ClassVar[dict] = {k: v for k, v in DuckDB.Generator.TRANSFORMS.items() if k is not exp.Pivot}
 
+    # Aggregate and window function names that should be uppercased in output.
+    # Derived from sqlglot's AggFunc hierarchy + RowNumber (window-only) + the
+    # DuckDB-dialect names for functions that get renamed by the dialect layer
+    # (e.g. VariancePop → "var_pop", PercentileCont → "quantile_cont").
+    _UPPERCASE_FUNCS: ClassVar[frozenset[str]] = (
+        frozenset(
+            cls.sql_name().lower()
+            for _, cls in vars(exp).items()
+            if isinstance(cls, type) and issubclass(cls, exp.AggFunc) and cls is not exp.AggFunc
+        )
+        | frozenset(["row_number"])
+        | frozenset(
+            [
+                # DuckDB renames these aggregate expressions; add the dialect output
+                # names so normalize_func can uppercase them too.
+                "approx_count_distinct",  # ApproxDistinct
+                "bool_and",               # LogicalAnd
+                "bool_or",                # LogicalOr
+                "boolxor",                # BoolxorAgg
+                "json_arrayagg",          # JSONArrayAgg
+                "json_group_object",      # JSONObjectAgg / JSONBObjectAgg
+                "listagg",                # GroupConcat
+                "quantile_cont",          # PercentileCont
+                "quantile_disc",          # PercentileDisc
+                "var_pop",                # VariancePop
+            ]
+        )
+    )
+
     def __init__(self, config: JarifyConfig) -> None:
         super().__init__(
             pretty=True,
@@ -54,6 +85,13 @@ class JarifyGenerator(DuckDB.Generator):
         self._as_align_width: int | None = None  # set during SELECT expression rendering
         self._col_name_align: int | None = None  # set during CREATE TABLE column rendering
         self._col_type_align: int | None = None  # set during CREATE TABLE column rendering
+
+    # ------------------------------------------------------------------
+    # Function name casing: aggregates/window functions → UPPER, rest → lower
+    # ------------------------------------------------------------------
+
+    def normalize_func(self, name: str) -> str:
+        return name.upper() if name.lower() in self._UPPERCASE_FUNCS else name.lower()
 
     # ------------------------------------------------------------------
     # Leading-comma style: ,col  (comma at pad, content at pad+1)
@@ -357,14 +395,15 @@ class JarifyGenerator(DuckDB.Generator):
             return super().arrayagg_sql(expression)
         distinct = expression.this
         exprs_sqls = [self.sql(e) for e in distinct.expressions]
+        func_name = self.normalize_func("ARRAY_AGG")
         # Wrap when any expression is already multi-line, or when the flat inline is too wide
         any_multiline = any("\n" in s for s in exprs_sqls)
-        flat_inline = f"array_agg(DISTINCT {', '.join(exprs_sqls)})"
+        flat_inline = f"{func_name}(DISTINCT {', '.join(exprs_sqls)})"
         if not any_multiline and not self.too_wide([flat_inline]):
             return super().arrayagg_sql(expression)
         exprs_str = "\n".join(exprs_sqls)
         inner = self.indent(f"\nDISTINCT {exprs_str}\n", skip_first=True, skip_last=True)
-        array_agg_sql = f"array_agg({inner})"
+        array_agg_sql = f"{func_name}({inner})"
         return self._add_arrayagg_null_filter(array_agg_sql, expression, expression.this)
 
     def format_args(self, *args: t.Any, sep: str = ", ") -> str:

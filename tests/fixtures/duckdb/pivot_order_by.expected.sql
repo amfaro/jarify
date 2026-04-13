@@ -14,7 +14,7 @@ PIVOT (
   FROM _data
 )
 ON participant_key
-USING first(enrolled)
+USING FIRST(enrolled)
 ORDER BY
    program_key
   ,participant_key

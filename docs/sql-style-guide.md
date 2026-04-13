@@ -51,20 +51,24 @@ CREATE TABLE t
 
 ---
 
-### Functions — lowercase
+### Functions — aggregate and window uppercase, scalar lowercase
 
-DuckDB built-in functions are always lowercase.
+Aggregate and window functions (`COUNT`, `SUM`, `AVG`, `ROW_NUMBER`, `RANK`, `LEAD`, etc.) are always uppercase. All other DuckDB built-in functions (`regexp_extract`, `strftime`, `date_trunc`, etc.) remain lowercase.
 
 **Bad**
 ```sql
-SELECT REGEXP_EXTRACT(file, 'version=(.{21})', 1) AS version FROM GLOB('s3://bucket/*/*')
+SELECT COUNT(*), SUM(amount), row_number() OVER (ORDER BY ts), REGEXP_EXTRACT(x, '[0-9]+'), STRFTIME(ts, '%Y') FROM t
 ```
 
 **Good**
 ```sql
 SELECT
-   regexp_extract(file, 'version=(.{21})', 1) AS version
-FROM glob('s3://bucket/*/*')
+   COUNT(*)
+  ,SUM(amount)
+  ,ROW_NUMBER() OVER (ORDER BY ts)
+  ,regexp_extract(x, '[0-9]+')
+  ,strftime(ts, '%Y')
+FROM t
 ;
 ```
 
@@ -171,11 +175,11 @@ The same inline rule applies to `HAVING`:
 ```sql
 SELECT
    a
-  ,count(*) AS n
+  ,COUNT(*) AS n
 FROM t
 GROUP BY
    a
-HAVING count(*) > 1
+HAVING COUNT(*) > 1
    AND a IS NOT NULL
 ;
 ```
@@ -188,7 +192,7 @@ Every `GROUP BY` expression is on its own line using the same leading-comma styl
 
 **Bad**
 ```sql
-SELECT a, b, count(*) FROM t GROUP BY a, b
+SELECT a, b, COUNT(*) FROM t GROUP BY a, b
 ```
 
 **Good**
@@ -196,7 +200,7 @@ SELECT a, b, count(*) FROM t GROUP BY a, b
 SELECT
    a
   ,b
-  ,count(*)
+  ,COUNT(*)
 FROM t
 GROUP BY
    a
@@ -210,7 +214,7 @@ GROUP BY
 SELECT
    a
   ,b
-  ,count(*)
+  ,COUNT(*)
 FROM t
 GROUP BY ALL
 ;
@@ -440,17 +444,17 @@ FROM sku_composition
 
 ### `DISTINCT` inside aggregates — own line when wrapping
 
-When `array_agg(DISTINCT expr ...)` wraps across lines, `DISTINCT` appears on its own line.
+When `ARRAY_AGG(DISTINCT expr ...)` wraps across lines, `DISTINCT` appears on its own line.
 
 **Bad**
 ```sql
-SELECT array_agg(DISTINCT (active_ingredient_key, quantity, uom_key)::active_ingredient_struct) FROM t
+SELECT ARRAY_AGG(DISTINCT (active_ingredient_key, quantity, uom_key)::active_ingredient_struct) FROM t
 ```
 
 **Good**
 ```sql
 SELECT
-   array_agg(
+   ARRAY_AGG(
     DISTINCT (
        active_ingredient_key
       ,quantity
@@ -659,7 +663,7 @@ WHERE rn = 1
 ```sql
 SELECT
    a
-  ,row_number() OVER (PARTITION BY b ORDER BY c) AS rn
+  ,ROW_NUMBER() OVER (PARTITION BY b ORDER BY c) AS rn
 FROM t
 QUALIFY
   rn = 1
@@ -674,7 +678,7 @@ Flag explicit `GROUP BY col1, col2, ...` when all non-aggregated `SELECT` column
 
 **Bad**
 ```sql
-SELECT a, b, count(*) AS n FROM t GROUP BY a, b
+SELECT a, b, COUNT(*) AS n FROM t GROUP BY a, b
 ```
 
 **Good**
@@ -682,7 +686,7 @@ SELECT a, b, count(*) AS n FROM t GROUP BY a, b
 SELECT
    a
   ,b
-  ,count(*) AS n
+  ,COUNT(*) AS n
 FROM t
 GROUP BY ALL
 ;
