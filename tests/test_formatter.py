@@ -65,6 +65,15 @@ def test_parse_failure_returns_original_with_warning():
     assert "could not parse" in str(warnings[0])
 
 
+def test_parse_failure_warning_includes_actual_error_not_pivot_message():
+    """Warning for non-PIVOT parse failures must not mention PIVOT or issues/2."""
+    bad_sql = "THIS IS NOT VALID SQL @@@!!!"
+    _, warnings = format_sql(bad_sql)
+    msg = str(warnings[0])
+    assert "PIVOT" not in msg
+    assert "issues/2" not in msg
+
+
 def test_pivot_order_by_formats_without_warning():
     """PIVOT ... USING ... ORDER BY is formatted cleanly without any warning."""
     sql = (

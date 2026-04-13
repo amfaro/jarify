@@ -39,16 +39,12 @@ def format_sql(
 
     try:
         trees = parse_sql(sql, dialect=config.dialect)
-    except ParseError:
+    except ParseError as exc:
         result = _try_pivot_order_by_workaround(sql, config)
         if result is not None:
             return result, warnings
         warnings.append(
-            FormatWarning(
-                "could not parse SQL (formatting skipped): "
-                "unsupported syntax — PIVOT with ORDER BY is a known limitation "
-                "tracked in https://github.com/amfaro/jarify/issues/2"
-            )
+            FormatWarning(f"could not parse SQL (formatting skipped): {exc}")
         )
         return sql, warnings
 
