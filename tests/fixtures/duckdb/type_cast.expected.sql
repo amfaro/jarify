@@ -1,6 +1,6 @@
 SELECT
-   a::INT
-  ,b::TEXT
-  ,c::BOOLEAN
+   a::int
+  ,b::text
+  ,c::boolean
 FROM t
 ;

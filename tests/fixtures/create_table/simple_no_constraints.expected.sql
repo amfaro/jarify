@@ -1,7 +1,7 @@
 CREATE TABLE person
 (
-   id   INT  NOT NULL
-  ,name TEXT
-  ,age  INT
+   id   int  NOT NULL
+  ,name text
+  ,age  int
 )
 ;

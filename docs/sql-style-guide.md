@@ -6,9 +6,9 @@ Jarify enforces a single, non-configurable SQL style. This document describes ev
 
 ## Formatting Rules
 
-### Keywords — uppercase
+### Keywords — uppercase; data types — lowercase
 
-SQL keywords are always uppercase.
+SQL keywords (`SELECT`, `FROM`, `WHERE`, `JOIN`, `NOT NULL`, etc.) are always uppercase. Data type names (`text`, `int`, `timestamp`, `decimal`, etc.) are always lowercase.
 
 **Bad**
 ```sql
@@ -23,6 +23,30 @@ SELECT
 FROM my_table
 WHERE
   x > 1
+;
+```
+
+Type names are lowercased even in casts and `CREATE TABLE`:
+
+**Bad**
+```sql
+SELECT a::TEXT, b::INTEGER FROM t
+CREATE TABLE t (id INTEGER NOT NULL, name TEXT)
+```
+
+**Good**
+```sql
+SELECT
+   a::text
+  ,b::int
+FROM t
+;
+
+CREATE TABLE t
+(
+   id   int  NOT NULL
+  ,name text
+)
 ;
 ```
 
@@ -584,8 +608,8 @@ Flag non-canonical DuckDB type names. Use the canonical form instead.
 
 | Non-canonical | Canonical |
 |---------------|-----------|
-| `FLOAT`, `FLOAT4` | `REAL` |
-| `NVARCHAR` | `TEXT` |
+| `float`, `float4` | `real` |
+| `nvarchar` | `text` |
 
 **Bad**
 ```sql
@@ -594,7 +618,7 @@ CREATE TABLE t (score FLOAT, label NVARCHAR)
 
 **Good**
 ```sql
-CREATE TABLE t (score REAL, label TEXT)
+CREATE TABLE t (score real, label text)
 ```
 
 ---

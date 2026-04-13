@@ -1,7 +1,7 @@
 CREATE TABLE orders
 (
-   order_id INT            NOT NULL PRIMARY KEY
-  ,customer TEXT           NOT NULL
-  ,total    DECIMAL(18, 3)
+   order_id int            NOT NULL PRIMARY KEY
+  ,customer text           NOT NULL
+  ,total    decimal(18, 3)
 )
 ;

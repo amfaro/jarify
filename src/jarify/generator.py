@@ -327,6 +327,13 @@ class JarifyGenerator(DuckDB.Generator):
         return sep.join(arg_sqls)
 
     # ------------------------------------------------------------------
+    # Data types — always lowercase (text, int, timestamp, …)
+    # ------------------------------------------------------------------
+
+    def datatype_sql(self, expression: exp.DataType) -> str:
+        return super().datatype_sql(expression).lower()
+
+    # ------------------------------------------------------------------
     # CREATE TABLE: opening paren on its own line, column alignment,
     # blank line before table-level constraints
     # ------------------------------------------------------------------
