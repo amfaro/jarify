@@ -145,7 +145,8 @@ def lint(
         total_violations += len(violations)
 
     if total_violations:
-        console.print(f"\n[bold]{'red' if has_errors else 'yellow'}]{total_violations} violation(s) found[/]")
+        color = "red" if has_errors else "yellow"
+        console.print(f"\n[bold {color}]{total_violations} violation(s) found[/]")
         sys.exit(1)
     else:
         console.print("[bold green]All clean![/]")
