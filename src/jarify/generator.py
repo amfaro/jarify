@@ -12,6 +12,8 @@ Subclasses sqlglot's DuckDBGenerator to enforce jarify's opinionated rules:
 - SELECT * FROM t → FROM t (DuckDB FROM-first syntax)
 - Struct tuple casts (val, ...)::type use leading-comma style when multi-line
 - DISTINCT inside aggregates appears on its own line when the call wraps
+- CREATE TABLE: opening paren on its own line, column name/type alignment,
+  blank line before table-level constraints
 """
 
 from __future__ import annotations
@@ -48,6 +50,8 @@ class JarifyGenerator(DuckDB.Generator):
         )
         self._config = config
         self._as_align_width: int | None = None  # set during SELECT expression rendering
+        self._col_name_align: int | None = None  # set during CREATE TABLE column rendering
+        self._col_type_align: int | None = None  # set during CREATE TABLE column rendering
 
     # ------------------------------------------------------------------
     # Leading-comma style: ,col  (comma at pad, content at pad+1)
@@ -321,3 +325,81 @@ class JarifyGenerator(DuckDB.Generator):
                 return self.indent("\n" + "\n".join(parts) + "\n", skip_first=True, skip_last=True)
             return self.indent("\n" + f"{sep.strip()}\n".join(arg_sqls) + "\n", skip_first=True, skip_last=True)
         return sep.join(arg_sqls)
+
+    # ------------------------------------------------------------------
+    # CREATE TABLE: opening paren on its own line, column alignment,
+    # blank line before table-level constraints
+    # ------------------------------------------------------------------
+
+    def schema_sql(self, expression: exp.Schema) -> str:
+        this = self.sql(expression, "this")
+        sql = self.schema_columns_sql(expression)
+        if this and sql and self.pretty:
+            return f"{this}\n{sql}"
+        return f"{this} {sql}" if this and sql else this or sql
+
+    def schema_columns_sql(self, expression: exp.Expr) -> str:  # type: ignore[override]
+        if not expression.expressions:
+            return ""
+        if not self.pretty:
+            return super().schema_columns_sql(expression)
+
+        col_defs = [e for e in expression.expressions if isinstance(e, exp.ColumnDef)]
+        table_constraints = [e for e in expression.expressions if not isinstance(e, exp.ColumnDef)]
+
+        # Compute alignment widths across all column definitions
+        col_name_width = max((len(self.sql(c, "this")) for c in col_defs), default=0)
+        type_width = max(
+            (len(self.sql(c, "kind")) for c in col_defs if self.sql(c, "kind")),
+            default=0,
+        )
+
+        saved_name = self._col_name_align
+        saved_type = self._col_type_align
+        self._col_name_align = col_name_width
+        self._col_type_align = type_width
+        try:
+            col_sqls = [self.columndef_sql(c) for c in col_defs]
+            constraint_sqls = [self.sql(c) for c in table_constraints]
+        finally:
+            self._col_name_align = saved_name
+            self._col_type_align = saved_type
+
+        # Build body with leading-comma style
+        lines: list[str] = []
+        for i, sql in enumerate(col_sqls):
+            leader = " " if i == 0 else ","
+            lines.append(f"{leader}{sql}")
+
+        if constraint_sqls:
+            lines.append("")  # blank line separating columns from table constraints
+            for sql in constraint_sqls:
+                lines.append(f",{sql}")
+
+        # Indent each non-blank line by pad spaces; keep blank lines clean
+        indented = [(" " * self.pad + line) if line else "" for line in lines]
+        body = "\n".join(indented)
+        return f"(\n{body}\n)"
+
+    def columndef_sql(self, expression: exp.ColumnDef, sep: str = " ") -> str:
+        column = self.sql(expression, "this")
+        kind = self.sql(expression, "kind")
+        constraints_sql = self.expressions(expression, key="constraints", sep=" ", flat=True)
+        exists = "IF NOT EXISTS " if expression.args.get("exists") else ""
+        position = self.sql(expression, "position")
+
+        if expression.find(exp.ComputedColumnConstraint) and not self.COMPUTED_COLUMN_WITH_TYPE:
+            kind = ""
+
+        # Apply column name padding when inside a CREATE TABLE schema body
+        col_part = column.ljust(self._col_name_align) if self._col_name_align else column
+
+        # Pad type to align constraints column, but only when this column has constraints
+        if self._col_type_align and kind and constraints_sql:
+            kind_part = f"{sep}{kind.ljust(self._col_type_align)}"
+        else:
+            kind_part = f"{sep}{kind}" if kind else ""
+
+        constraints_part = f" {constraints_sql}" if constraints_sql else ""
+        position_part = f" {position}" if position else ""
+        return f"{exists}{col_part}{kind_part}{constraints_part}{position_part}"

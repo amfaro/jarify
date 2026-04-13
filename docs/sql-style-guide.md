@@ -475,6 +475,35 @@ FROM u
 
 ---
 
+### `CREATE TABLE` layout
+
+The opening parenthesis goes on its own line. Column names are padded to align all type tokens, and types are padded to align all constraint tokens when any column carries constraints. A blank line separates column definitions from table-level constraints (`PRIMARY KEY`, `UNIQUE`, `CHECK`, etc.).
+
+**Bad**
+```sql
+CREATE OR REPLACE TABLE examples (
+   transaction_id TEXT NOT NULL,
+   program_supplier_key TEXT NOT NULL,
+   seller_key TEXT,
+   PRIMARY KEY (program_supplier_key, transaction_id)
+)
+```
+
+**Good**
+```sql
+CREATE OR REPLACE TABLE examples
+(
+   transaction_id       TEXT NOT NULL
+  ,program_supplier_key TEXT NOT NULL
+  ,seller_key           TEXT
+
+  ,PRIMARY KEY (program_supplier_key, transaction_id)
+)
+;
+```
+
+---
+
 ## Lint Rules
 
 Lint rules report violations but do not modify the SQL. All rules default to `warn`. Severity can be set to `off`, `warn`, or `error` in `jarify.toml`.
