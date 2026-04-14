@@ -525,12 +525,37 @@ class JarifyGenerator(DuckDB.Generator):
                 prefix = " " * max(0, keyword_width - len("OR "))
                 result.append(f"{prefix}{line}")
             else:
-                # Continuation lines inside parens: add one pad level so they
-                # stay more indented than the AND/OR line that opened them.
-                result.append(f"{' ' * self.pad}{line}")
+                # Pass continuation lines through as-is; child methods (e.g.
+                # in_sql) are responsible for their own relative indentation.
+                result.append(line)
             depth += line.count("(") - line.count(")")
 
         return self.seg("\n".join(result))
+
+    # ------------------------------------------------------------------
+    # IS NOT NULL: preserve original form instead of NOT x IS NULL
+    # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # IN (subquery): opening paren on its own line
+    # ------------------------------------------------------------------
+
+    def in_sql(self, expression: exp.In) -> str:
+        """Render IN with a subquery as col IN\\n(\\n  SELECT ...\\n).
+
+        The opening paren is placed on its own line at the same indentation
+        level as the enclosing keyword (WHERE/HAVING), so the subquery block
+        mirrors the CTE body style used elsewhere.
+
+        Falls back to the base generator for IN with a value list.
+        """
+        query = expression.args.get("query")
+        if self.pretty and query is not None:
+            this = self.sql(expression, "this")
+            select_sql = self.sql(query.this)
+            indented = self.indent(select_sql)
+            return f"{this} IN\n(\n{indented}\n)"
+        return super().in_sql(expression)
 
     # ------------------------------------------------------------------
     # IS NOT NULL: preserve original form instead of NOT x IS NULL
