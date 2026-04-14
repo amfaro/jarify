@@ -98,76 +98,9 @@ jarify show-config
 
 Prints the effective configuration (syntax-highlighted TOML).
 
-## Formatting style
+## Style and lint rules
 
-Jarify enforces a single, opinionated style. There are no knobs to turn.
-
-### Leading commas
-
-```sql
-SELECT
-   manufacturer_label
-  ,brand_prefix_label
-  ,pack_size_label
-FROM products
-ORDER BY
-   manufacturer_label
-  ,sku_key;
-```
-
-The first column gets one extra leading space so content aligns with the `,col` lines. The same pattern applies to function arguments when they wrap.
-
-### CTE layout
-
-Opening paren on its own line, subsequent CTEs prefixed with a comma:
-
-```sql
-WITH _latest_version AS
-(
-  SELECT
-     regexp_extract(file, 'version=(.{21})', 1) AS version
-  FROM glob('s3://bucket/catalog/*/*')
-  ORDER BY
-     file DESC
-  LIMIT 1
-)
-,_relevant_skus AS
-(
-  SELECT
-     *
-  FROM read_parquet(
-     's3://bucket/dataops/*/*/relevant_skus.parquet'
-    ,hive_partitioning = TRUE
-    ,hive_types = {'program_supplier_key': text, 'time_frame': int}
-  )
-  WHERE
-    time_frame = getvariable('time_frame')
-)
-SELECT ...
-```
-
-### Other rules
-
-| Rule | Behaviour |
-|------|-----------|
-| **Keywords** | Uppercase (`SELECT`, `FROM`, `WHERE`, …) |
-| **Functions** | Lowercase (`read_parquet`, `glob`, `getvariable`, …) |
-| **Bare `JOIN`** | Normalized to `INNER JOIN` |
-| **AND / OR chains** | Each condition on its own line |
-| **`IS NOT NULL`** | Preserved as-is (not rewritten to `NOT x IS NULL`) |
-| **`NULLS LAST`** | Suppressed when it matches DuckDB's default ordering |
-| **`NULLS FIRST`** | Preserved when it differs from DuckDB's default |
-| **Table aliases** | `AS` keyword always added (`FROM t AS t1`) |
-
-## Lint rules
-
-| Rule | Default | Description |
-|------|---------|-------------|
-| `no_select_star` | `warn` | Flag `SELECT *` (except `COUNT(*)`) |
-| `no_implicit_cross_join` | `warn` | Require explicit `CROSS JOIN` keyword |
-| `no_unused_cte` | `warn` | Flag CTEs that are never referenced |
-| `duckdb_type_style` | `warn` | Flag non-canonical DuckDB type names |
-| `duckdb_prefer_qualify` | `warn` | Prefer `QUALIFY` over subquery window filter |
+Jarify enforces a single, opinionated style. There are no knobs to turn. See the **[SQL Style Guide](docs/sql-style-guide.md)** for the complete rule reference with bad/good examples for every formatting and lint rule.
 
 ## Development
 
