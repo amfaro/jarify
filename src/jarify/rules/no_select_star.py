@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlglot.expressions as exp
 
-from jarify.rules.base import FormatterRule
+from jarify.rules.base import FormatterRule, _node_pos
 from jarify.types import LintViolation
 
 
@@ -31,13 +31,14 @@ class NoSelectStarRule(FormatterRule):
             if isinstance(parent, exp.Select) or (
                 isinstance(parent, exp.Column) and isinstance(parent.parent, exp.Select)
             ):
+                _line, _col = _node_pos(star)
                 violations.append(
                     LintViolation(
                         rule=self.name,
                         message="Avoid SELECT *; list columns explicitly",
                         severity=self.severity,
-                        line=getattr(star, "line", None),
-                        column=getattr(star, "col", None),
+                        line=_line,
+                        column=_col,
                     )
                 )
         return violations

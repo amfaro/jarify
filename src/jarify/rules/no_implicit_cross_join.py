@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlglot.expressions as exp
 
-from jarify.rules.base import FormatterRule
+from jarify.rules.base import FormatterRule, _node_pos
 from jarify.types import LintViolation
 
 
@@ -34,11 +34,14 @@ class NoImplicitCrossJoinRule(FormatterRule):
                 and not join.args.get("using")
                 and not join.args.get("method")
             ):
+                _line, _col = _node_pos(join)
                 violations.append(
                     LintViolation(
                         rule=self.name,
                         severity=self.severity,
                         message=("Implicit CROSS JOIN detected; use explicit CROSS JOIN or add an ON/USING clause"),
+                        line=_line,
+                        column=_col,
                     )
                 )
         return violations

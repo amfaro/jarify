@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlglot.expressions as exp
 
-from jarify.rules.base import FormatterRule
+from jarify.rules.base import FormatterRule, _node_pos
 from jarify.types import LintViolation
 
 
@@ -56,11 +56,14 @@ class CteNamingRule(FormatterRule):
             return []
         for cte in with_clause.expressions:
             if cte.alias and not cte.alias.startswith("_"):
+                _line, _col = _node_pos(cte)
                 violations.append(
                     LintViolation(
                         rule=self.name,
                         severity=self.severity,
                         message=f"CTE '{cte.alias}' should start with an underscore (e.g. '_{cte.alias}')",
+                        line=_line,
+                        column=_col,
                     )
                 )
         return violations

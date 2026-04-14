@@ -206,3 +206,32 @@ class TestNoSelectStarInCte:
         rules = _lint(sql)
         assert "no-select-star-in-cte" not in rules
 
+
+class TestViolationPositions:
+    """Verify that violations report line/column from node.meta, not None."""
+
+    def _violations(self, sql: str, **overrides):
+        config = JarifyConfig(**overrides)
+        return lint_sql(sql, config)
+
+    def test_no_select_star_has_position(self):
+        violations = self._violations("SELECT * FROM t")
+        v = next(v for v in violations if v.rule == "no-select-star")
+        assert v.line is not None, "line should not be None"
+        assert v.column is not None, "column should not be None"
+
+    def test_no_unused_cte_has_position(self):
+        violations = self._violations("WITH unused AS (SELECT 1 AS x) SELECT 2")
+        v = next(v for v in violations if v.rule == "no-unused-cte")
+        assert v.line is not None, "line should not be None"
+
+    def test_cte_naming_has_position(self):
+        violations = self._violations("WITH people AS (SELECT 1 AS id) SELECT id FROM people")
+        v = next(v for v in violations if v.rule == "cte-naming")
+        assert v.line is not None, "line should not be None"
+
+    def test_prefer_using_over_on_has_position(self):
+        violations = self._violations("SELECT a.x FROM a INNER JOIN b ON a.id = b.id")
+        v = next(v for v in violations if v.rule == "prefer-using-over-on")
+        assert v.line is not None, "line should not be None"
+

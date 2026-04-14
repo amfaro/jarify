@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlglot.expressions as exp
 from sqlglot.expressions import DataType
 
-from jarify.rules.base import FormatterRule
+from jarify.rules.base import FormatterRule, _node_pos
 from jarify.types import LintViolation
 
 # DType variants that survive DuckDB parsing and are non-canonical.
@@ -47,11 +47,14 @@ class DuckdbTypeStyleRule(FormatterRule):
             canonical = _NON_CANONICAL.get(dtype.this)
             if canonical:
                 raw = dtype.this.name
+                _line, _col = _node_pos(dtype)
                 violations.append(
                     LintViolation(
                         rule=self.name,
                         severity=self.severity,
                         message=f"Prefer '{canonical}' over '{raw}' in DuckDB",
+                        line=_line,
+                        column=_col,
                     )
                 )
         return violations

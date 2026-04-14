@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlglot.expressions as exp
 from sqlglot.expressions import DataType
 
-from jarify.rules.base import FormatterRule
+from jarify.rules.base import FormatterRule, _node_pos
 from jarify.types import LintViolation
 
 
@@ -35,6 +35,7 @@ class ConsistentEmptyArrayRule(FormatterRule):
 
             # Pattern 1: '[]'::type[] — literal directly cast to array
             if isinstance(cast.this, exp.Literal) and cast.this.is_string and cast.this.name == "[]":
+                _line, _col = _node_pos(cast.this)
                 violations.append(
                     LintViolation(
                         rule=self.name,
@@ -43,6 +44,8 @@ class ConsistentEmptyArrayRule(FormatterRule):
                             f"Use the native empty array literal [] instead of '[]'::{canonical};"
                             " cast the COALESCE result to the target type when needed"
                         ),
+                        line=_line,
+                        column=_col,
                     )
                 )
 
@@ -50,6 +53,7 @@ class ConsistentEmptyArrayRule(FormatterRule):
             elif isinstance(cast.this, exp.Coalesce):
                 for arg in cast.this.expressions:
                     if isinstance(arg, exp.Literal) and arg.is_string and arg.name == "[]":
+                        _line, _col = _node_pos(arg)
                         violations.append(
                             LintViolation(
                                 rule=self.name,
@@ -58,6 +62,8 @@ class ConsistentEmptyArrayRule(FormatterRule):
                                     f"Use [] instead of '[]' as the COALESCE fallback in COALESCE(...)::{ canonical};"
                                     " prefer native empty array literal"
                                 ),
+                                line=_line,
+                                column=_col,
                             )
                         )
                         break

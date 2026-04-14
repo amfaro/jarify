@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlglot.expressions as exp
 
-from jarify.rules.base import FormatterRule
+from jarify.rules.base import FormatterRule, _node_pos
 from jarify.types import LintViolation
 
 
@@ -30,7 +30,8 @@ class NoUnusedCteRule(FormatterRule):
         if not with_clause:
             return []
 
-        cte_names = {cte.alias.lower() for cte in with_clause.expressions if cte.alias}
+        cte_nodes = {cte.alias.lower(): cte for cte in with_clause.expressions if cte.alias}
+        cte_names = set(cte_nodes)
 
         # Collect all table references in the query body (excluding the CTE definitions themselves)
         referenced: set[str] = set()
@@ -46,11 +47,14 @@ class NoUnusedCteRule(FormatterRule):
 
         for name in cte_names:
             if name not in referenced:
+                _line, _col = _node_pos(cte_nodes[name])
                 violations.append(
                     LintViolation(
                         rule=self.name,
                         severity=self.severity,
                         message=f"CTE '{name}' is defined but never referenced",
+                        line=_line,
+                        column=_col,
                     )
                 )
         return violations
