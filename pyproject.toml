@@ -1,9 +1,22 @@
 [project]
 name = "jarify"
-version = "0.0.1"
+version = "0.1.0"
 description = "Bespoke SQL linter and formatter for DuckDB, powered by sqlglot"
 readme = "README.md"
 requires-python = ">=3.12"
+license = "MIT"
+keywords = ["sql", "duckdb", "formatter", "linter", "sqlglot"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+    "Topic :: Software Development :: Quality Assurance",
+]
 dependencies = [
     "click>=8.3.2",
     "rich>=14.3.3",
