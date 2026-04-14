@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlglot.expressions as exp
 
-from jarify.rules.base import FormatterRule
+from jarify.rules.base import FormatterRule, _node_pos
 from jarify.types import LintViolation
 
 
@@ -37,11 +37,14 @@ class NoSelectStarInCteRule(FormatterRule):
                 if isinstance(parent, exp.Select) or (
                     isinstance(parent, exp.Column) and isinstance(parent.parent, exp.Select)
                 ):
+                    _line, _col = _node_pos(star)
                     violations.append(
                         LintViolation(
                             rule=self.name,
                             severity=self.severity,
                             message=f"Avoid SELECT * inside CTE '{cte_name}'; list columns explicitly",
+                            line=_line,
+                            column=_col,
                         )
                     )
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlglot.expressions as exp
 
-from jarify.rules.base import FormatterRule
+from jarify.rules.base import FormatterRule, _node_pos
 from jarify.types import LintViolation
 
 
@@ -49,6 +49,7 @@ class PreferUsingOverOnRule(FormatterRule):
 
             if rewritable:
                 cols = ", ".join(rewritable)
+                _line, _col = _node_pos(join)
                 violations.append(
                     LintViolation(
                         rule=self.name,
@@ -57,6 +58,8 @@ class PreferUsingOverOnRule(FormatterRule):
                             f"ON clause can be simplified to USING ({cols})"
                             " — both sides reference the same column name"
                         ),
+                        line=_line,
+                        column=_col,
                     )
                 )
 

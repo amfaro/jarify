@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import sqlglot.expressions as exp
 
-from jarify.rules.base import FormatterRule
+from jarify.rules.base import FormatterRule, _node_pos
 from jarify.types import LintViolation
 
 
@@ -50,11 +50,14 @@ class DuckdbPreferQualifyRule(FormatterRule):
             # Does the inner query have window functions?
             has_window = any(True for _ in inner.find_all(exp.Window))
             if has_window:
+                _line, _col = _node_pos(select)
                 violations.append(
                     LintViolation(
                         rule=self.name,
                         severity=self.severity,
                         message=("Consider using QUALIFY instead of a subquery to filter window function results"),
+                        line=_line,
+                        column=_col,
                     )
                 )
         return violations

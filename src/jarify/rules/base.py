@@ -11,6 +11,26 @@ if TYPE_CHECKING:
     from jarify.types import LintViolation
 
 
+def _node_pos(node: Expression) -> tuple[int | None, int | None]:
+    """Return (line, col) for a sqlglot node.
+
+    sqlglot stores position in ``node.meta`` for leaf-level nodes (Identifiers,
+    Literals, etc.). Higher-level nodes (CTE, Join, Select, …) often have an
+    empty ``meta``, so we fall back to the first descendant that carries a
+    position.
+    """
+    line = node.meta.get("line")
+    col = node.meta.get("col")
+    if line is not None:
+        return line, col
+    for child in node.walk():
+        line = child.meta.get("line")
+        col = child.meta.get("col")
+        if line is not None:
+            return line, col
+    return None, None
+
+
 class FormatterRule(ABC):
     """A rule that can both check (lint) and transform (format) a SQL AST."""
 

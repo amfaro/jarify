@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlglot.expressions as exp
 
-from jarify.rules.base import FormatterRule
+from jarify.rules.base import FormatterRule, _node_pos
 from jarify.types import LintViolation
 
 
@@ -48,11 +48,14 @@ class PreferGroupByAllRule(FormatterRule):
             non_agg_set = set(non_agg_sqls)
 
             if non_agg_set and non_agg_set == group_sqls:
+                _line, _col = _node_pos(group)
                 violations.append(
                     LintViolation(
                         rule=self.name,
                         severity=self.severity,
                         message="All non-aggregated SELECT columns are listed in GROUP BY; prefer GROUP BY ALL",
+                        line=_line,
+                        column=_col,
                     )
                 )
 
