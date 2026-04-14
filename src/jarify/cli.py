@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import difflib
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -16,7 +17,7 @@ from jarify.config import load_config
 from jarify.formatter import format_sql
 from jarify.linter import lint_sql
 
-console = Console(stderr=True)
+console = Console(stderr=True, no_color=bool(os.environ.get("NO_COLOR")))
 
 _STARTER_CONFIG = """\
 # jarify.toml — SQL linter & formatter configuration
@@ -269,4 +270,7 @@ def _print_diff(label: str, original: str, formatted: str) -> None:
     )
     if diff_lines:
         diff_text = "".join(diff_lines)
-        console.print(Syntax(diff_text, "diff", theme="monokai"))
+        if console.is_terminal and not console.no_color:
+            console.print(Syntax(diff_text, "diff", theme="monokai"))
+        else:
+            click.echo(diff_text, err=True)
