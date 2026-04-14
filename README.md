@@ -4,37 +4,28 @@ Bespoke SQL linter and formatter for [DuckDB](https://duckdb.org), built on [sql
 
 Existing SQL formatters can't be configured to enforce a specific team style, and none of them are DuckDB-aware. Jarify parses SQL with the DuckDB dialect and rewrites it through an opinionated, non-configurable formatter — no style debates, consistent output everywhere.
 
-## Quick start
-
-No installation required. Run directly with [`uvx`](https://docs.astral.sh/uv/guides/tools/).
-
-### From a GitHub Release (recommended)
-
-Releases publish a pre-built wheel to the [Releases page](https://github.com/amfaro/jarify/releases). Pinning to a wheel is the fastest option because uv skips the build step:
+## Installation
 
 ```bash
-uvx --from "https://github.com/amfaro/jarify/releases/download/v0.0.1/jarify-0.0.1-py3-none-any.whl" jarify fmt path/to/query.sql
+uv tool install jarify
 ```
 
-### From git
-
-Always runs the latest commit on `main` — useful during development:
+Or run one-off without installing:
 
 ```bash
-uvx --from git+https://github.com/amfaro/jarify.git jarify fmt path/to/query.sql
+uvx jarify fmt path/to/query.sql
 ```
 
-Pin to a specific release tag:
+### Upgrade
 
 ```bash
-uvx --from "git+https://github.com/amfaro/jarify.git@v0.0.1" jarify fmt path/to/query.sql
+uv tool upgrade jarify
 ```
 
-### Persistent install
+### Pin to a specific version
 
 ```bash
-uv tool install "https://github.com/amfaro/jarify/releases/download/v0.0.1/jarify-0.0.1-py3-none-any.whl"
-jarify fmt path/to/query.sql
+uv tool install 'jarify==0.1.0'
 ```
 
 ## Commands
@@ -124,9 +115,9 @@ mise run check   # lint + test
 
 ### Releases
 
-Push a `v*` tag to trigger the publish workflow. GitHub Actions builds the wheel and sdist, attaches them to a GitHub Release, and generates release notes automatically.
+Push a `v*` tag to trigger the publish workflow. GitHub Actions builds the wheel and sdist, publishes to PyPI via OIDC trusted publishing, attaches artifacts to a GitHub Release, and generates release notes automatically.
 
 ```bash
-git tag v0.0.1
-git push origin v0.0.1
+git tag v0.1.0
+git push origin v0.1.0
 ```

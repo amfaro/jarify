@@ -8,6 +8,7 @@ on:
 permissions:
   contents: write
   packages: write
+  id-token: write  # required for OIDC trusted publishing to PyPI
 
 jobs:
   publish:
@@ -42,6 +43,11 @@ jobs:
 
       - name: Build package
         run: uv build
+
+      - name: Publish to PyPI
+        run: uv publish
+        env:
+          UV_PUBLISH_TRUSTED_PUBLISHING: true
 
       - name: Create GitHub Release
         run: |
