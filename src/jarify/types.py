@@ -27,3 +27,13 @@ class LintViolation:
             if self.column is not None:
                 loc += f":{self.column}"
         return f"[{self.severity.upper()}][{self.rule}]{loc} {self.message}"
+
+    def to_dict(self, filename: str) -> dict:
+        return {
+            "filename": filename,
+            "line": self.line,
+            "column": self.column,
+            "severity": self.severity,
+            "rule": self.rule,
+            "message": self.message,
+        }

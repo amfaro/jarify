@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import difflib
+import json
 import sys
 from pathlib import Path
 
@@ -111,10 +112,18 @@ def fmt(
 @click.argument("files", nargs=-1, type=click.Path(path_type=Path))
 @click.option("--config", "config_path", type=click.Path(exists=True, path_type=Path), default=None)
 @click.option("--stdin-filename", default="<stdin>", help="Filename label when reading from stdin.")
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["text", "json"], case_sensitive=False),
+    default="text",
+    help="Output format: text (default) or json.",
+)
 def lint(
     files: tuple[Path, ...],
     config_path: Path | None,
     stdin_filename: str,
+    output_format: str,
 ) -> None:
     """Lint SQL files and report violations.
 
@@ -124,32 +133,57 @@ def lint(
     config = load_config(config_path)
     total_violations = 0
     has_errors = False
+    all_results: list[tuple[str, list]] = []
 
     inputs = _resolve_inputs(files, stdin_filename)
     if not inputs:
-        console.print("[yellow]No SQL files found.[/]")
+        if output_format == "json":
+            click.echo("[]")
+        else:
+            console.print("[yellow]No SQL files found.[/]")
         return
 
     for label, sql, _ in inputs:
         try:
             violations = lint_sql(sql, config)
         except Exception as exc:
-            console.print(f"[red]ERROR[/] {label}: {exc}")
+            if output_format == "json":
+                err = {
+                    "filename": label,
+                    "line": None,
+                    "column": None,
+                    "severity": "error",
+                    "rule": "internal-error",
+                    "message": str(exc),
+                }
+                click.echo(json.dumps([err]))
+            else:
+                console.print(f"[red]ERROR[/] {label}: {exc}")
             sys.exit(2)
 
+        all_results.append((label, violations))
         for v in violations:
-            color = "red" if v.severity == "error" else "yellow"
-            console.print(f"[{color}]{label}[/{color}]{v}")
             if v.severity == "error":
                 has_errors = True
         total_violations += len(violations)
 
-    if total_violations:
-        color = "red" if has_errors else "yellow"
-        console.print(f"\n[bold {color}]{total_violations} violation(s) found[/]")
-        sys.exit(1)
+    if output_format == "json":
+        output = [v.to_dict(label) for label, violations in all_results for v in violations]
+        click.echo(json.dumps(output))
     else:
-        console.print("[bold green]All clean![/]")
+        for label, violations in all_results:
+            for v in violations:
+                color = "red" if v.severity == "error" else "yellow"
+                console.print(f"[{color}]{label}[/{color}]{v}")
+
+        if total_violations:
+            color = "red" if has_errors else "yellow"
+            console.print(f"\n[bold {color}]{total_violations} violation(s) found[/]")
+        else:
+            console.print("[bold green]All clean![/]")
+
+    if total_violations:
+        sys.exit(1)
 
 
 @main.command("init")
