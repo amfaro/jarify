@@ -11,8 +11,9 @@ from jarify.types import LintViolation
 class NoSelectStarRule(FormatterRule):
     """Flag SELECT * (or table.*) as a lint violation."""
 
-    def __init__(self, severity: str = "warn") -> None:
+    def __init__(self, severity: str = "warn", prefer_from_first: bool = False) -> None:
         self.severity = severity
+        self.prefer_from_first = prefer_from_first
 
     @property
     def name(self) -> str:
@@ -31,6 +32,19 @@ class NoSelectStarRule(FormatterRule):
             if isinstance(parent, exp.Select) or (
                 isinstance(parent, exp.Column) and isinstance(parent.parent, exp.Select)
             ):
+                select = parent if isinstance(parent, exp.Select) else parent.parent
+                # When prefer_from_first is on, SELECT * FROM t gets rewritten to
+                # FROM t by the formatter. Linting the formatted output (FROM t)
+                # would re-parse to the same AST, so skip single-table star selects
+                # that the formatter already handles via FROM-first syntax.
+                if (
+                    self.prefer_from_first
+                    and len(select.expressions) == 1
+                    and isinstance(select.expressions[0], exp.Star)
+                    and not select.args.get("distinct")
+                    and not select.args.get("joins")
+                ):
+                    continue
                 _line, _col = _node_pos(star)
                 violations.append(
                     LintViolation(
