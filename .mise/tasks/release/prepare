@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+#MISE description="Prepare or update the release PR"
+#MISE hide=true
+
+set -euo pipefail
+
+# git-cliff computes the next version from conventional commits -- no manual parsing needed
+new_version=$(git-cliff --bump --next-version --stdout 2>/dev/null || true)
+new_version="${new_version#v}"  # strip leading 'v' if present
+
+if [[ -z "$new_version" ]]; then
+  echo "No releasable commits. Skipping."
+  exit 0
+fi
+
+current=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+
+if [[ "$current" == "$new_version" ]]; then
+  echo "Already at v${new_version}. Skipping."
+  exit 0
+fi
+
+echo "Bumping ${current} -> ${new_version}"
+
+branch="release/v${new_version}"
+
+git config user.name "github-actions"
+git config user.email "github-actions@github.com"
+git checkout -B "${branch}" origin/main
+
+sed -i "s/^version = \"${current}\"/version = \"${new_version}\"/" pyproject.toml
+
+# Generate CHANGELOG -- git-cliff knows the bump, tag it explicitly for consistency
+git-cliff --tag "v${new_version}" -o CHANGELOG.md
+
+git add pyproject.toml CHANGELOG.md
+if git diff --staged --quiet; then
+  echo "Release PR already up to date."
+  exit 0
+fi
+
+git commit -m "chore(release): v${new_version}"
+git push --force-with-lease origin "${branch}"
+
+# Create or update release PR
+pr_number=$(gh pr list \
+  --head "${branch}" \
+  --base main \
+  --state open \
+  --json number \
+  --jq '.[0].number // empty')
+
+pr_body="## Release v${new_version}
+
+Automated release PR (\`${current}\` -> \`${new_version}\`).
+
+### What happens on merge
+
+\`publish.yml\` triggers on the \`pyproject.toml\` change -> build -> publish to PyPI -> git tag -> GitHub Release.
+
+### Review checklist
+
+- [ ] CHANGELOG entries look accurate
+
+---
+*Automated by \`prepare-release.yml\`*"
+
+if [[ -n "${pr_number}" ]]; then
+  gh pr edit "${pr_number}" \
+    --title "chore(release): v${new_version}" \
+    --body "${pr_body}"
+  echo "Updated PR #${pr_number}"
+else
+  gh pr create \
+    --base main \
+    --head "${branch}" \
+    --title "chore(release): v${new_version}" \
+    --body "${pr_body}"
+fi

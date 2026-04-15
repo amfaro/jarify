@@ -1,5 +1,6 @@
 [tools]
 uv = "latest"
+git-cliff = "latest"
 
 [env]
 UV_LINK_MODE = "copy"
