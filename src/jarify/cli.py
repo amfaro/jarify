@@ -68,7 +68,8 @@ def fmt(
 
     Pass - as a file argument to read from stdin.
     """
-    config = load_config(config_path)
+    config_start = Path(stdin_filename).parent if stdin_filename != "<stdin>" else None
+    config = load_config(config_path, start=config_start)
     any_changed = False
 
     inputs = _resolve_inputs(files, stdin_filename)
@@ -131,7 +132,8 @@ def lint(
     Exit code: 0 = clean, 1 = violations found, 2 = error.
     Pass - as a file argument to read from stdin.
     """
-    config = load_config(config_path)
+    config_start = Path(stdin_filename).parent if stdin_filename != "<stdin>" else None
+    config = load_config(config_path, start=config_start)
     total_violations = 0
     has_errors = False
     all_results: list[tuple[str, list]] = []

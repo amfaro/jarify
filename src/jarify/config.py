@@ -74,9 +74,15 @@ def find_config(start: Path | None = None) -> Path | None:
     return None
 
 
-def load_config(path: Path | None = None) -> JarifyConfig:
-    """Load config from a file path, or discover one automatically."""
-    config_path = path or find_config()
+def load_config(path: Path | None = None, start: Path | None = None) -> JarifyConfig:
+    """Load config from a file path, or discover one automatically.
+
+    *start* seeds the upward search when no explicit *path* is given.
+    Pass the parent directory of the file being processed (e.g. from
+    ``--stdin-filename``) so config discovery anchors to that file rather
+    than ``cwd``.
+    """
+    config_path = path or find_config(start)
     if config_path is None:
         return JarifyConfig()
     with config_path.open("rb") as f:
