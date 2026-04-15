@@ -11,11 +11,11 @@ from __future__ import annotations
 
 import sqlglot.expressions as exp
 
-from jarify.rules.base import FormatterRule, _node_pos
+from jarify.rules.base import LintOnlyRule, _node_pos
 from jarify.types import LintViolation
 
 
-class DuckdbPreferQualifyRule(FormatterRule):
+class DuckdbPreferQualifyRule(LintOnlyRule):
     """Lint: suggest QUALIFY instead of filtering on a window function in a subquery."""
 
     def __init__(self, severity: str = "warn") -> None:
@@ -24,9 +24,6 @@ class DuckdbPreferQualifyRule(FormatterRule):
     @property
     def name(self) -> str:
         return "duckdb-prefer-qualify"
-
-    def apply(self, tree: exp.Expression) -> exp.Expression:
-        return tree
 
     def check(self, tree: exp.Expression) -> list[LintViolation]:
         if self.severity == "off":

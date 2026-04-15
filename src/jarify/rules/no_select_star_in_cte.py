@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import sqlglot.expressions as exp
 
-from jarify.rules.base import FormatterRule, _node_pos
+from jarify.rules.base import LintOnlyRule, _node_pos
 from jarify.types import LintViolation
 
 
-class NoSelectStarInCteRule(FormatterRule):
+class NoSelectStarInCteRule(LintOnlyRule):
     """Lint: flag SELECT * used inside a CTE body (stricter than no-select-star)."""
 
     def __init__(self, severity: str = "warn") -> None:
@@ -17,9 +17,6 @@ class NoSelectStarInCteRule(FormatterRule):
     @property
     def name(self) -> str:
         return "no-select-star-in-cte"
-
-    def apply(self, tree: exp.Expression) -> exp.Expression:
-        return tree
 
     def check(self, tree: exp.Expression) -> list[LintViolation]:
         if self.severity == "off":

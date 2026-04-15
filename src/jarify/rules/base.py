@@ -46,3 +46,10 @@ class FormatterRule(ABC):
     def check(self, tree: Expression) -> list[LintViolation]:
         """Return violations found in the tree. Default: no violations."""
         return []
+
+
+class LintOnlyRule(FormatterRule):
+    """Base class for rules that only check (lint) and never transform the AST."""
+
+    def apply(self, tree: Expression) -> Expression:
+        return tree
