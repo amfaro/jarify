@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import sqlglot.expressions as exp
 
-from jarify.rules.base import FormatterRule, _node_pos
+from jarify.rules.base import LintOnlyRule, _node_pos
 from jarify.types import LintViolation
 
 
-class NoSelectStarRule(FormatterRule):
+class NoSelectStarRule(LintOnlyRule):
     """Flag SELECT * (or table.*) as a lint violation."""
 
     def __init__(self, severity: str = "warn", prefer_from_first: bool = False) -> None:
@@ -18,9 +18,6 @@ class NoSelectStarRule(FormatterRule):
     @property
     def name(self) -> str:
         return "no-select-star"
-
-    def apply(self, tree: exp.Expression) -> exp.Expression:
-        return tree
 
     def check(self, tree: exp.Expression) -> list[LintViolation]:
         if self.severity == "off":

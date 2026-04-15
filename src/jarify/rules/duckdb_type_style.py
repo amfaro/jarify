@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlglot.expressions as exp
 from sqlglot.expressions import DataType
 
-from jarify.rules.base import FormatterRule, _node_pos
+from jarify.rules.base import LintOnlyRule, _node_pos
 from jarify.types import LintViolation
 
 # DType variants that survive DuckDB parsing and are non-canonical.
@@ -17,7 +17,7 @@ _NON_CANONICAL: dict[DataType.Type, str] = {
 }
 
 
-class DuckdbTypeStyleRule(FormatterRule):
+class DuckdbTypeStyleRule(LintOnlyRule):
     """Lint: warn when non-canonical DuckDB type names are used.
 
     Detectable non-canonical types after DuckDB parsing:
@@ -35,9 +35,6 @@ class DuckdbTypeStyleRule(FormatterRule):
     @property
     def name(self) -> str:
         return "duckdb-type-style"
-
-    def apply(self, tree: exp.Expression) -> exp.Expression:
-        return tree
 
     def check(self, tree: exp.Expression) -> list[LintViolation]:
         if self.severity == "off":

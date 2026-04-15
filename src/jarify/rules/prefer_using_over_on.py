@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import sqlglot.expressions as exp
 
-from jarify.rules.base import FormatterRule, _node_pos
+from jarify.rules.base import LintOnlyRule, _node_pos
 from jarify.types import LintViolation
 
 
-class PreferUsingOverOnRule(FormatterRule):
+class PreferUsingOverOnRule(LintOnlyRule):
     """Lint: flag ON a.col = b.col equi-joins where both sides share the same column name."""
 
     def __init__(self, severity: str = "warn") -> None:
@@ -17,9 +17,6 @@ class PreferUsingOverOnRule(FormatterRule):
     @property
     def name(self) -> str:
         return "prefer-using-over-on"
-
-    def apply(self, tree: exp.Expression) -> exp.Expression:
-        return tree
 
     def check(self, tree: exp.Expression) -> list[LintViolation]:
         if self.severity == "off":
