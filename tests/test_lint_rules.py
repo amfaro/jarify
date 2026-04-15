@@ -14,7 +14,8 @@ def _lint(sql: str, **config_overrides) -> list[str]:
 
 class TestNoSelectStar:
     def test_warns_on_select_star(self):
-        rules = _lint("SELECT * FROM t")
+        # prefer_from_first=False: formatter won't rewrite, so lint should warn
+        rules = _lint("SELECT * FROM t", prefer_from_first=False)
         assert "no-select-star" in rules
 
     def test_no_warn_on_explicit_columns(self):
@@ -22,12 +23,35 @@ class TestNoSelectStar:
         assert "no-select-star" not in rules
 
     def test_off_disables_rule(self):
-        rules = _lint("SELECT * FROM t", no_select_star="off")
+        rules = _lint("SELECT * FROM t", no_select_star="off", prefer_from_first=False)
         assert "no-select-star" not in rules
 
     def test_count_star_not_flagged(self):
         rules = _lint("SELECT COUNT(*) FROM t")
         assert "no-select-star" not in rules
+
+    def test_no_warn_on_from_first_when_prefer_from_first_enabled(self):
+        # fmt rewrites SELECT * FROM t → FROM t when prefer_from_first=True.
+        # Linting the formatted output must not re-fire no-select-star.
+        rules = _lint("FROM t", prefer_from_first=True)
+        assert "no-select-star" not in rules
+
+    def test_no_warn_on_select_star_when_prefer_from_first_enabled(self):
+        # SELECT * FROM single-table is what the formatter handles via FROM-first.
+        # Both SELECT * FROM t and FROM t parse to the same AST, so linting
+        # SELECT * FROM t should also not warn when prefer_from_first=True.
+        rules = _lint("SELECT * FROM t", prefer_from_first=True)
+        assert "no-select-star" not in rules
+
+    def test_warns_on_select_star_with_joins_even_when_prefer_from_first_enabled(self):
+        # SELECT * with joins is not a FROM-first candidate; still flag it.
+        rules = _lint("SELECT * FROM t JOIN u ON t.id = u.id", prefer_from_first=True)
+        assert "no-select-star" in rules
+
+    def test_warns_when_prefer_from_first_disabled(self):
+        # FROM t parses as SELECT * FROM t; should fire when prefer_from_first=False.
+        rules = _lint("FROM t", prefer_from_first=False)
+        assert "no-select-star" in rules
 
 
 class TestNoUnusedCte:
@@ -56,7 +80,7 @@ class TestLintSeverity:
         from jarify.config import JarifyConfig
         from jarify.linter import lint_sql
 
-        config = JarifyConfig(no_select_star="error")
+        config = JarifyConfig(no_select_star="error", prefer_from_first=False)
         violations = lint_sql("SELECT * FROM t", config)
         star_violations = [v for v in violations if v.rule == "no-select-star"]
         assert star_violations
@@ -66,7 +90,7 @@ class TestLintSeverity:
         from jarify.config import JarifyConfig
         from jarify.linter import lint_sql
 
-        config = JarifyConfig(no_select_star="warn")
+        config = JarifyConfig(no_select_star="warn", prefer_from_first=False)
         violations = lint_sql("SELECT * FROM t", config)
         star_violations = [v for v in violations if v.rule == "no-select-star"]
         assert star_violations
@@ -215,7 +239,7 @@ class TestViolationPositions:
         return lint_sql(sql, config)
 
     def test_no_select_star_has_position(self):
-        violations = self._violations("SELECT * FROM t")
+        violations = self._violations("SELECT * FROM t", prefer_from_first=False)
         v = next(v for v in violations if v.rule == "no-select-star")
         assert v.line is not None, "line should not be None"
         assert v.column is not None, "column should not be None"

@@ -37,7 +37,7 @@ def get_default_rules(config: JarifyConfig) -> list[FormatterRule]:
 
     # --- General lint rules (checkers, no AST mutation) ---
     if config.no_select_star != "off":
-        rules.append(NoSelectStarRule(severity=config.no_select_star))
+        rules.append(NoSelectStarRule(severity=config.no_select_star, prefer_from_first=config.prefer_from_first))
     if config.no_implicit_cross_join != "off":
         rules.append(NoImplicitCrossJoinRule(severity=config.no_implicit_cross_join))
     if config.no_unused_cte != "off":

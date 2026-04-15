@@ -706,7 +706,9 @@ Lint rules report violations but do not modify the SQL. All rules default to `wa
 
 Flag `SELECT *`. `COUNT(*)` is exempt.
 
-**Bad**
+When `prefer_from_first = true` (the default), single-table `SELECT *` queries are not flagged because the formatter already rewrites them to FROM-first syntax (`FROM t`). The rule still fires for `SELECT *` with JOINs, since those are not rewritten.
+
+**Bad** (with `prefer_from_first = false`)
 ```sql
 SELECT * FROM products
 ```
@@ -717,6 +719,12 @@ SELECT
    id
   ,name
   ,price
+FROM products
+;
+```
+
+**Also good** (formatter rewrites `SELECT * FROM products` to this when `prefer_from_first = true`)
+```sql
 FROM products
 ;
 ```
