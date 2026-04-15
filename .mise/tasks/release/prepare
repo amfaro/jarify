@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # git-cliff computes the next version from conventional commits -- no manual parsing needed
-new_version=$(git-cliff --bump --next-version --stdout 2>/dev/null || true)
+new_version=$(git-cliff --bumped-version 2>/dev/null || true)
 new_version="${new_version#v}"  # strip leading 'v' if present
 
 if [[ -z "$new_version" ]]; then
