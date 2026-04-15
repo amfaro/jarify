@@ -1,0 +1,50 @@
+name: Release - Prepare
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  prepare:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+
+    steps:
+      - name: Fetch secrets from Doppler
+        uses: dopplerhq/secrets-fetch-action@v2.0.0
+        id: doppler
+        with:
+          doppler-token: ${{ secrets.DOPPLER_TOKEN }}
+          doppler-project: shared
+          doppler-config: prod
+          inject-env-vars: false
+
+      - name: Generate token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ steps.doppler.outputs.WORKFLOW_CLIENT_ID }}
+          private-key: ${{ steps.doppler.outputs.WORKFLOW_CLIENT_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Install mise
+        uses: jdx/mise-action@v4
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Prepare release
+        run: mise run release:prepare
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
