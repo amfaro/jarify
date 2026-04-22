@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.5] - 2026-04-22
+### Bug Fixes
+
+- preserve list_contains function name ([#94](https://github.com/amfaro/jarify/pull/94)) ([#94](https://github.com/amfaro/jarify/pull/94))
+
 ## [0.1.4] - 2026-04-22
 ### Bug Fixes
 
