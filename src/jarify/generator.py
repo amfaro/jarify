@@ -42,7 +42,14 @@ class JarifyGenerator(DuckDB.Generator):
     # DuckDB's TRANSFORMS maps exp.Pivot to a preprocess([unqualify_columns]) transform,
     # which strips all table qualifiers from columns inside PIVOT subqueries.
     # We remove it so the dispatch falls through to pivot_sql directly, preserving qualifiers.
-    TRANSFORMS: ClassVar[dict] = {k: v for k, v in DuckDB.Generator.TRANSFORMS.items() if k is not exp.Pivot}
+    #
+    # We also remove exp.ArrayContains so dispatch falls through to arraycontains_sql,
+    # which emits `list_contains` (DuckDB's canonical name) instead of `array_contains`.
+    TRANSFORMS: ClassVar[dict] = {
+        k: v
+        for k, v in DuckDB.Generator.TRANSFORMS.items()
+        if k not in (exp.Pivot, exp.ArrayContains)
+    }
 
     # Aggregate and window function names that should be uppercased in output.
     # Derived from sqlglot's AggFunc hierarchy + RowNumber (window-only) + the
@@ -679,6 +686,15 @@ class JarifyGenerator(DuckDB.Generator):
             expressions_sql = self.expressions(expression, flat=False)
             return f"{self.seg(f'GROUP BY{modifier}')}{self.sep() if expressions_sql else ''}{expressions_sql}"
         return super().group_sql(expression)
+
+    # ------------------------------------------------------------------
+    # list_contains: preserve DuckDB's canonical name (sqlglot normalises
+    # both list_contains and array_contains to ArrayContains and emits
+    # array_contains; we override to always emit list_contains).
+    # ------------------------------------------------------------------
+
+    def arraycontains_sql(self, expression: exp.ArrayContains) -> str:
+        return self.func("list_contains", expression.this, expression.expression)
 
     # ------------------------------------------------------------------
     # Cast: prefer :: shorthand over CAST()
