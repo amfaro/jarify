@@ -285,7 +285,17 @@ class JarifyGenerator(DuckDB.Generator):
 
     def from_sql(self, expression: exp.From) -> str:
         table = expression.this
-        if not self.pretty or not isinstance(table, exp.Table):
+        if not self.pretty:
+            return super().from_sql(expression)
+
+        if isinstance(table, exp.Subquery):
+            # Render compactly; non-pretty seg() prepends a space, so strip it.
+            compact = self._compact_sql(expression).strip()
+            if not self.too_wide([compact]):
+                return self.seg(compact)
+            return super().from_sql(expression)
+
+        if not isinstance(table, exp.Table):
             return super().from_sql(expression)
 
         alias_str = self._table_alias_str(table)

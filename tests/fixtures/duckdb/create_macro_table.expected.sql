@@ -14,10 +14,7 @@ CREATE OR REPLACE MACRO aggregated_amount_qualification
   (
     SELECT
        filter
-    FROM (
-      SELECT
-         unnest(_filters) AS filter
-    )
+    FROM (SELECT unnest(_filters) AS filter)
     WHERE filter.context = 'direct'
   )
   FROM _direct_filters
