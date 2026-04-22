@@ -60,15 +60,15 @@ class JarifyGenerator(DuckDB.Generator):
                 # DuckDB renames these aggregate expressions; add the dialect output
                 # names so normalize_func can uppercase them too.
                 "approx_count_distinct",  # ApproxDistinct
-                "bool_and",               # LogicalAnd
-                "bool_or",                # LogicalOr
-                "boolxor",                # BoolxorAgg
-                "json_arrayagg",          # JSONArrayAgg
-                "json_group_object",      # JSONObjectAgg / JSONBObjectAgg
-                "listagg",                # GroupConcat
-                "quantile_cont",          # PercentileCont
-                "quantile_disc",          # PercentileDisc
-                "var_pop",                # VariancePop
+                "bool_and",  # LogicalAnd
+                "bool_or",  # LogicalOr
+                "boolxor",  # BoolxorAgg
+                "json_arrayagg",  # JSONArrayAgg
+                "json_group_object",  # JSONObjectAgg / JSONBObjectAgg
+                "listagg",  # GroupConcat
+                "quantile_cont",  # PercentileCont
+                "quantile_disc",  # PercentileDisc
+                "var_pop",  # VariancePop
             ]
         )
     )
@@ -88,7 +88,7 @@ class JarifyGenerator(DuckDB.Generator):
         self._as_align_width: int | None = None  # set during SELECT expression rendering
         self._col_name_align: int | None = None  # set during CREATE TABLE column rendering
         self._col_type_align: int | None = None  # set during CREATE TABLE column rendering
-        self._join_alias_col: int | None = None   # set during FROM/JOIN block rendering
+        self._join_alias_col: int | None = None  # set during FROM/JOIN block rendering
 
     # ------------------------------------------------------------------
     # Function name casing: aggregates/window functions → UPPER, rest → lower
@@ -457,9 +457,7 @@ class JarifyGenerator(DuckDB.Generator):
             if target > 0 and isinstance(cond, exp.EQ):
                 lhs = self.sql(cond.this)
                 rhs = self.sql(cond.expression)
-                cond_str = (
-                    f"{lhs.ljust(target)}= {rhs}" if "\n" not in lhs else self.sql(cond)
-                )
+                cond_str = f"{lhs.ljust(target)}= {rhs}" if "\n" not in lhs else self.sql(cond)
             elif isinstance(cond, exp.Paren):
                 cond_str = self._compact_sql(cond)
             else:
@@ -475,9 +473,7 @@ class JarifyGenerator(DuckDB.Generator):
     def _flatten_and(self, condition: exp.Expression) -> list[exp.Expression]:
         """Return the flat list of operands from a nested AND chain."""
         if isinstance(condition, exp.And):
-            return self._flatten_and(condition.this) + self._flatten_and(
-                condition.expression
-            )
+            return self._flatten_and(condition.this) + self._flatten_and(condition.expression)
         return [condition]
 
     def _compact_sql(self, expression: exp.Expression) -> str:
@@ -627,10 +623,7 @@ class JarifyGenerator(DuckDB.Generator):
         if not rows:
             return "VALUES"
 
-        rendered: list[list[str]] = [
-            [self.sql(cell) for cell in tup.expressions]
-            for tup in rows
-        ]
+        rendered: list[list[str]] = [[self.sql(cell) for cell in tup.expressions] for tup in rows]
 
         num_cols = max(len(r) for r in rendered) if rendered else 0
         if num_cols == 0:
@@ -638,8 +631,7 @@ class JarifyGenerator(DuckDB.Generator):
 
         # Max rendered width per non-last column for padding alignment
         col_widths: list[int] = [
-            max((len(r[col_idx]) for r in rendered if col_idx < len(r)), default=0)
-            for col_idx in range(num_cols - 1)
+            max((len(r[col_idx]) for r in rendered if col_idx < len(r)), default=0) for col_idx in range(num_cols - 1)
         ]
 
         # Build each row: (val0,<pad>val1,<pad>val2,...,last_val)

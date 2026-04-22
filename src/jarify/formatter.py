@@ -9,7 +9,13 @@ from sqlglot.expressions import Expression
 
 from jarify.config import JarifyConfig
 from jarify.generator import JarifyGenerator
-from jarify.parser import parse_sql
+from jarify.parser import (
+    _extract_line_rust_fmt_placeholders,
+    _mask_rust_fmt_placeholders,
+    _reinsert_line_rust_fmt_placeholders,
+    _unmask_rust_fmt_placeholders,
+    parse_sql,
+)
 from jarify.rules import get_default_rules
 from jarify.rules.base import FormatterRule
 
@@ -37,15 +43,20 @@ def format_sql(
     config = config or JarifyConfig()
     warnings: list[FormatWarning] = []
 
+    # Strip whole-line Rust format placeholders so sqlglot never sees them.
+    # They are re-inserted verbatim after formatting using the recorded anchors.
+    # Inline placeholders are masked with dummy identifiers that survive the AST.
+    stripped_sql, line_insertions = _extract_line_rust_fmt_placeholders(sql)
+    masked_sql, inline_mask = _mask_rust_fmt_placeholders(stripped_sql)
+
     try:
-        trees = parse_sql(sql, dialect=config.dialect)
+        trees = parse_sql(masked_sql, dialect=config.dialect)
     except ParseError as exc:
-        result = _try_pivot_order_by_workaround(sql, config)
+        result = _try_pivot_order_by_workaround(masked_sql, config)
         if result is not None:
-            return result, warnings
-        warnings.append(
-            FormatWarning(f"could not parse SQL (formatting skipped): {exc}")
-        )
+            result = _unmask_rust_fmt_placeholders(result, inline_mask)
+            return _reinsert_line_rust_fmt_placeholders(result, line_insertions), warnings
+        warnings.append(FormatWarning(f"could not parse SQL (formatting skipped): {exc}"))
         return sql, warnings
 
     rules = get_default_rules(config)
@@ -59,7 +70,8 @@ def format_sql(
         formatted_parts.append(generator.generate(tree))
 
     formatted = "\n;\n\n".join(formatted_parts) + ("\n;\n" if formatted_parts else "")
-    return formatted, warnings
+    formatted = _unmask_rust_fmt_placeholders(formatted, inline_mask)
+    return _reinsert_line_rust_fmt_placeholders(formatted, line_insertions), warnings
 
 
 # ---------------------------------------------------------------------------

@@ -259,3 +259,28 @@ class TestViolationPositions:
         v = next(v for v in violations if v.rule == "prefer-using-over-on")
         assert v.line is not None, "line should not be None"
 
+
+class TestRustFormatSyntax:
+    """SQL files used as Rust format-string templates must not emit parse errors."""
+
+    def test_clause_placeholder_no_parse_error(self):
+        sql = "FROM examples\n{where_clause}\n;"
+        rules = _lint(sql)
+        assert "parse-error" not in rules
+
+    def test_multiple_placeholders_no_parse_error(self):
+        sql = "FROM {table_name}\n{where_clause}\n;"
+        rules = _lint(sql)
+        assert "parse-error" not in rules
+
+    def test_other_lint_rules_still_fire(self):
+        # no-select-star should still fire for explicit SELECT *
+        sql = "SELECT * FROM examples\n{where_clause}\n;"
+        rules = _lint(sql, prefer_from_first=False)
+        assert "parse-error" not in rules
+        assert "no-select-star" in rules
+
+    def test_plain_invalid_sql_still_errors(self):
+        # Non-template gibberish must still be caught
+        rules = _lint("THIS IS NOT VALID SQL @@@!!!")
+        assert "parse-error" in rules

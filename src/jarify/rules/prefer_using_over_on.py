@@ -52,8 +52,7 @@ class PreferUsingOverOnRule(LintOnlyRule):
                         rule=self.name,
                         severity=self.severity,
                         message=(
-                            f"ON clause can be simplified to USING ({cols})"
-                            " — both sides reference the same column name"
+                            f"ON clause can be simplified to USING ({cols}) — both sides reference the same column name"
                         ),
                         line=_line,
                         column=_col,

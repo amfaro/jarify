@@ -43,9 +43,7 @@ def test_semicolon_own_line_multi_statement():
         # No line should end with a semicolon — semicolons always on their own line
         stripped = line.rstrip()
         if stripped:
-            assert not stripped.endswith(";") or stripped == ";", (
-                f"Semicolon at end of non-blank line: {stripped!r}"
-            )
+            assert not stripped.endswith(";") or stripped == ";", f"Semicolon at end of non-blank line: {stripped!r}"
 
 
 def test_as_alignment():
@@ -92,34 +90,40 @@ def test_pivot_order_by_formats_without_warning():
 class TestFromFirst:
     def test_select_star_becomes_from_first(self):
         from jarify.formatter import format_sql
+
         out, _ = format_sql("SELECT * FROM people")
         assert out.startswith("FROM people")
         assert "SELECT" not in out
 
     def test_select_star_with_where(self):
         from jarify.formatter import format_sql
+
         out, _ = format_sql("SELECT * FROM people WHERE age > 18")
         assert "FROM people" in out
         assert "SELECT" not in out
 
     def test_select_star_with_join_keeps_select(self):
         from jarify.formatter import format_sql
+
         out, _ = format_sql("SELECT * FROM people LEFT JOIN orders ON people.id = orders.person_id")
         assert "SELECT" in out
 
     def test_select_distinct_star_keeps_select(self):
         from jarify.formatter import format_sql
+
         out, _ = format_sql("SELECT DISTINCT * FROM people")
         assert "SELECT DISTINCT" in out
 
     def test_explicit_columns_unaffected(self):
         from jarify.formatter import format_sql
+
         out, _ = format_sql("SELECT id, name FROM people")
         assert "SELECT" in out
 
     def test_prefer_from_first_false_keeps_select(self):
         from jarify.config import JarifyConfig
         from jarify.formatter import format_sql
+
         out, _ = format_sql("SELECT * FROM people", JarifyConfig(prefer_from_first=False))
         assert "SELECT" in out
 
@@ -151,9 +155,7 @@ class TestJoinFormatting:
         assert "LEFT JOIN bar ON foo.id = bar.id" in out
 
     def test_on_multi_condition_inline(self):
-        out, _ = format_sql(
-            "SELECT a FROM foo JOIN bar ON foo.id = bar.id AND foo.x = bar.x"
-        )
+        out, _ = format_sql("SELECT a FROM foo JOIN bar ON foo.id = bar.id AND foo.x = bar.x")
         assert "INNER JOIN bar ON foo.id = bar.id AND foo.x = bar.x" in out
 
     def test_as_omitted_from_join_table_alias(self):
@@ -187,14 +189,10 @@ class TestJoinFormatting:
         o_end = o_col + len("o")
         u_end = u_col + len("u")
         addr_end = addr_col + len("addr")
-        assert o_end == u_end == addr_end, (
-            f"Alias end columns differ: o={o_end}, u={u_end}, addr={addr_end}"
-        )
+        assert o_end == u_end == addr_end, f"Alias end columns differ: o={o_end}, u={u_end}, addr={addr_end}"
 
     def test_no_alignment_with_subquery_join(self):
-        out, _ = format_sql(
-            "SELECT a FROM t CROSS JOIN (SELECT b FROM s) AS sub LEFT JOIN u AS x ON x.id = t.id"
-        )
+        out, _ = format_sql("SELECT a FROM t CROSS JOIN (SELECT b FROM s) AS sub LEFT JOIN u AS x ON x.id = t.id")
         # Subquery in block disables alignment but AS stays on subquery
         assert "CROSS JOIN" in out
         # Simple table alias still drops AS even without alignment
@@ -212,9 +210,7 @@ class TestGroupByPerLine:
         group_by_idx = next(i for i, line in enumerate(lines) if "GROUP BY" in line)
         # The line with GROUP BY should not contain column names on the same line
         group_by_line = lines[group_by_idx]
-        assert group_by_line.strip() == "GROUP BY", (
-            f"Expected 'GROUP BY' on its own line, got: {group_by_line!r}"
-        )
+        assert group_by_line.strip() == "GROUP BY", f"Expected 'GROUP BY' on its own line, got: {group_by_line!r}"
 
     def test_group_by_all_stays_inline(self):
         out, _ = format_sql("SELECT a, b, count(*) FROM t GROUP BY ALL")
