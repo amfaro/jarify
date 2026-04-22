@@ -115,9 +115,15 @@ mise run check   # lint + test
 
 ### Releases
 
-Push a `v*` tag to trigger the publish workflow. GitHub Actions builds the wheel and sdist, publishes to PyPI via OIDC trusted publishing, attaches artifacts to a GitHub Release, and generates release notes automatically.
+Releases are fully automated across two workflows — no manual tagging required.
 
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
+**`prepare-release.yml`** runs on every push to `main` that touches `src/**` or `tests/**`. It uses `git-cliff` to compute the next semver from unreleased conventional commits, bumps the version in `pyproject.toml`, regenerates `CHANGELOG.md`, and opens (or updates) a `release/vX.Y.Z` PR. If there are no new conventional commits since the last tag, it exits silently.
+
+**`publish.yml`** triggers when `pyproject.toml` changes on `main` (i.e., when the release PR is merged). It builds the package with `uv build`, publishes to PyPI via OIDC trusted publishing, creates the `vX.Y.Z` git tag, and creates a GitHub Release with auto-generated notes and dist artifacts.
+
+**Human steps:**
+1. Land a feature or fix on `main` using conventional commit messages (`feat:`, `fix:`, etc.) → the release PR is opened automatically.
+2. Review the CHANGELOG entries in the release PR, then merge it → PyPI publish, git tag, and GitHub Release happen automatically.
+
+> [!IMPORTANT]
+> Squash-merge PR titles must follow conventional commits format (`feat:`, `fix:`, etc.) so `git-cliff` counts them as releasable commits. A plain-language PR title will cause the release PR to be skipped.
