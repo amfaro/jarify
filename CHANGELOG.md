@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.4] - 2026-04-22
+### Bug Fixes
+
+- keep inline subquery in FROM on one line when it fits ([#92](https://github.com/amfaro/jarify/pull/92)) ([#92](https://github.com/amfaro/jarify/pull/92))
+
 ## [0.1.3] - 2026-04-22
 ### Bug Fixes
 
