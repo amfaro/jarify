@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.3] - 2026-04-22
+### Bug Fixes
+
+- prevent double space before TABLE in AS TABLE macro return type ([#90](https://github.com/amfaro/jarify/pull/90)) ([#90](https://github.com/amfaro/jarify/pull/90))
+
+### Documentation
+
+- document automated release workflow ([#86](https://github.com/amfaro/jarify/pull/86)) ([#86](https://github.com/amfaro/jarify/pull/86))
+
 ## [0.1.2] - 2026-04-15
 ### Bug Fixes
 
