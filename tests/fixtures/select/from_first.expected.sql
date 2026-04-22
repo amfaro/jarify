@@ -9,3 +9,6 @@ FROM products
 ORDER BY
    name
 ;
+
+FROM _actual, _target, _threshold
+;
