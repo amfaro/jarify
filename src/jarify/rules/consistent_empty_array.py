@@ -59,7 +59,7 @@ class ConsistentEmptyArrayRule(FormatterRule):
                                 rule=self.name,
                                 severity=self.severity,
                                 message=(
-                                    f"Use [] instead of '[]' as the COALESCE fallback in COALESCE(...)::{ canonical};"
+                                    f"Use [] instead of '[]' as the COALESCE fallback in COALESCE(...)::{canonical};"
                                     " prefer native empty array literal"
                                 ),
                                 line=_line,

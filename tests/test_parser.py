@@ -5,7 +5,15 @@ import sys
 
 import pytest
 
-from jarify.parser import _quote_reserved_cast_types, parse_sql, parse_sql_lenient
+from jarify.parser import (
+    _extract_line_rust_fmt_placeholders,
+    _mask_rust_fmt_placeholders,
+    _quote_reserved_cast_types,
+    _reinsert_line_rust_fmt_placeholders,
+    _unmask_rust_fmt_placeholders,
+    parse_sql,
+    parse_sql_lenient,
+)
 
 
 def test_parse_simple_select():
@@ -94,3 +102,107 @@ class TestReservedKeywordTypeCasts:
         sql = 'SELECT []::"filter"[]'
         result = _quote_reserved_cast_types(sql)
         assert '""' not in result
+
+
+class TestRustFmtPlaceholderMasking:
+    """_mask/_unmask_rust_fmt_placeholders must round-trip cleanly."""
+
+    def test_single_placeholder_masked(self) -> None:
+        sql = "FROM examples\n{where_clause}\n;"
+        masked, mapping = _mask_rust_fmt_placeholders(sql)
+        assert "{where_clause}" not in masked
+        assert len(mapping) == 1
+        assert "{where_clause}" in mapping.values()
+
+    def test_multiple_placeholders_get_unique_markers(self) -> None:
+        sql = "FROM {table_name}\n{where_clause}\n;"
+        _masked, mapping = _mask_rust_fmt_placeholders(sql)
+        assert len(mapping) == 2
+        assert len(set(mapping.keys())) == 2
+
+    def test_unmask_restores_original(self) -> None:
+        sql = "FROM examples\n{where_clause}\n;"
+        masked, mapping = _mask_rust_fmt_placeholders(sql)
+        restored = _unmask_rust_fmt_placeholders(masked, mapping)
+        assert restored == sql
+
+    def test_no_placeholders_returns_empty_mapping(self) -> None:
+        sql = "SELECT a FROM t WHERE x = 1"
+        masked, mapping = _mask_rust_fmt_placeholders(sql)
+        assert masked == sql
+        assert mapping == {}
+
+    def test_duckdb_struct_literal_not_masked(self) -> None:
+        # {key: value} struct syntax must not be treated as a Rust placeholder
+        sql = "SELECT {name: 'alice', age: 30}"
+        masked, mapping = _mask_rust_fmt_placeholders(sql)
+        assert masked == sql
+        assert mapping == {}
+
+    def test_line_level_placeholder_uses_comment_marker(self) -> None:
+        # Whole-line placeholder → block comment so it is valid between clauses
+        sql = "FROM examples\n{where_clause}\n;"
+        _masked, mapping = _mask_rust_fmt_placeholders(sql)
+        marker = next(iter(mapping))
+        assert marker.startswith("/*") and marker.endswith("*/")
+
+    def test_inline_placeholder_uses_identifier_marker(self) -> None:
+        # Inline placeholder → dummy identifier so it is valid as a name/expression
+        sql = "FROM {table_name} WHERE x = 1"
+        _masked, mapping = _mask_rust_fmt_placeholders(sql)
+        marker = next(iter(mapping))
+        assert not marker.startswith("/*")
+
+    def test_masked_sql_parses_without_error(self) -> None:
+        sql = "FROM examples\n{where_clause}\n;"
+        masked, _ = _mask_rust_fmt_placeholders(sql)
+        trees = parse_sql(masked)
+        assert len(trees) == 1
+        assert trees[0] is not None
+
+    def test_inline_masked_sql_parses_without_error(self) -> None:
+        sql = "FROM {table_name} WHERE x = 1"
+        masked, _ = _mask_rust_fmt_placeholders(sql)
+        trees = parse_sql(masked)
+        assert len(trees) == 1
+        assert trees[0] is not None
+
+
+class TestExtractReinsertLinePlaceholders:
+    """Strip/reinsert helpers used by the formatter must preserve placeholder lines."""
+
+    def test_strip_removes_placeholder_line(self) -> None:
+        sql = "FROM examples\n{where_clause}\n;"
+        stripped, insertions = _extract_line_rust_fmt_placeholders(sql)
+        assert "{where_clause}" not in stripped
+        assert len(insertions) == 1
+        assert insertions[0][0] == "{where_clause}"
+
+    def test_anchor_is_next_non_blank_line(self) -> None:
+        sql = "FROM examples\n{where_clause}\n;"
+        _, insertions = _extract_line_rust_fmt_placeholders(sql)
+        assert insertions[0][1] == ";"
+
+    def test_reinsert_restores_before_anchor(self) -> None:
+        sql = "FROM examples\n{where_clause}\n;"
+        stripped, insertions = _extract_line_rust_fmt_placeholders(sql)
+        # Simulate a trivial "format" that just strips trailing whitespace
+        formatted = stripped.rstrip() + "\n"
+        result = _reinsert_line_rust_fmt_placeholders(formatted, insertions)
+        assert "{where_clause}" in result
+        lines = result.splitlines()
+        placeholder_idx = lines.index("{where_clause}")
+        semicolon_idx = lines.index(";")
+        assert placeholder_idx < semicolon_idx
+
+    def test_round_trip_preserves_sql(self) -> None:
+        sql = "FROM examples\n{where_clause}\n;\n"
+        stripped, insertions = _extract_line_rust_fmt_placeholders(sql)
+        restored = _reinsert_line_rust_fmt_placeholders(stripped, insertions)
+        assert restored == sql
+
+    def test_no_placeholders_returns_unchanged(self) -> None:
+        sql = "SELECT a FROM t WHERE x = 1\n;\n"
+        stripped, insertions = _extract_line_rust_fmt_placeholders(sql)
+        assert stripped == sql
+        assert insertions == []
