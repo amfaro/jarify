@@ -115,7 +115,7 @@ class JarifyGenerator(DuckDB.Generator):
         dynamic: bool = False,
         new_line: bool = False,
     ) -> str:
-        if not (self.pretty and self.leading_comma):
+        if not (self.pretty and self.leading_comma) or isinstance(expression, exp.Properties):
             return super().expressions(
                 expression=expression,
                 key=key,
