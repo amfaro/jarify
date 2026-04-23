@@ -201,6 +201,14 @@ class TestExtractReinsertLinePlaceholders:
         restored = _reinsert_line_rust_fmt_placeholders(stripped, insertions)
         assert restored == sql
 
+    def test_round_trip_preserves_indented_placeholder(self) -> None:
+        sql = "(\n  FROM programs\n    {where_clause}\n)\n;\n"
+        stripped, insertions = _extract_line_rust_fmt_placeholders(sql)
+        assert "{where_clause}" not in stripped
+        assert insertions[0][0] == "    {where_clause}"
+        restored = _reinsert_line_rust_fmt_placeholders(stripped, insertions)
+        assert restored == sql
+
     def test_no_placeholders_returns_unchanged(self) -> None:
         sql = "SELECT a FROM t WHERE x = 1\n;\n"
         stripped, insertions = _extract_line_rust_fmt_placeholders(sql)

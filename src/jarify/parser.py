@@ -92,7 +92,7 @@ def _extract_line_rust_fmt_placeholders(sql: str) -> tuple[str, list[tuple[str, 
         if _RUST_FMT_LINE_RE.match(lines[i]):
             m = _RUST_FMT_RE.search(lines[i])
             assert m is not None
-            placeholder = m.group(0)
+            placeholder = lines[i].rstrip("\r\n")
             anchor: str | None = None
             for j in range(i + 1, len(lines)):
                 candidate = lines[j].strip()
