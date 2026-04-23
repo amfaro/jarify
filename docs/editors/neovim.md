@@ -22,8 +22,8 @@ require("conform").setup({
     },
   },
   format_on_save = {
-    timeout_ms = 2000,
-    lsp_fallback = false,
+    timeout_ms = 500,
+    lsp_format = "fallback",
   },
 })
 ```
@@ -33,31 +33,54 @@ require("conform").setup({
 ```lua
 local lint = require("lint")
 
+local severity_map = {
+  error = vim.diagnostic.severity.ERROR,
+  warn  = vim.diagnostic.severity.WARN,
+}
+
 lint.linters.jarify = {
   cmd = "jarify",
   stdin = true,
-  args = { "lint", "--format", "json", "--stdin-filename", function() return vim.fn.expand("%") end, "-" },
-  stream = "stdout",
+  args = {
+    "lint", "--format", "json",
+    "--stdin-filename", function() return vim.api.nvim_buf_get_name(0) end,
+    "-",
+  },
   ignore_exitcode = true,
-  parser = function(output)
+  parser = function(output, bufnr)
+    if output == nil or vim.trim(output) == "" then return {} end
+
+    local ok, decoded = pcall(vim.json.decode, output)
+    if not ok then return {} end
+
+    local filename = vim.fs.normalize(vim.api.nvim_buf_get_name(bufnr))
     local diagnostics = {}
-    for _, v in ipairs(output ~= "" and vim.json.decode(output) or {}) do
-      table.insert(diagnostics, {
-        lnum     = (v.line or 1) - 1,
-        col      = (v.column or 1) - 1,
-        message  = ("[%s] %s"):format(v.rule, v.message),
-        severity = v.severity == "error" and vim.diagnostic.severity.ERROR or vim.diagnostic.severity.WARN,
-        source   = "jarify",
-      })
+
+    for _, item in ipairs(decoded or {}) do
+      local item_file = item.filename and vim.fs.normalize(item.filename) or filename
+      if item_file == filename then
+        local lnum = math.max((item.line or 1) - 1, 0)
+        local col  = math.max((item.column or 1) - 1, 0)
+        table.insert(diagnostics, {
+          lnum     = lnum,
+          col      = col,
+          end_lnum = lnum,
+          end_col  = col,
+          message  = string.format("[%s] %s", item.rule or "jarify", item.message),
+          code     = item.rule,
+          source   = "jarify",
+          severity = severity_map[item.severity] or vim.diagnostic.severity.WARN,
+        })
+      end
     end
+
     return diagnostics
   end,
 }
 
 lint.linters_by_ft = { sql = { "jarify" } }
 
-vim.api.nvim_create_autocmd({ "BufWritePost", "BufReadPost", "InsertLeave" }, {
-  callback = function() lint.try_lint() end,
+vim.api.nvim_create_autocmd({ "BufReadPost", "BufEnter", "InsertLeave", "BufWritePost" }, {
+  callback = function() vim.schedule(lint.try_lint) end,
 })
 ```
-
