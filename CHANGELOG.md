@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.6] - 2026-04-23
+### Bug Fixes
+
+- preserve comma joins and extend FROM-first to multi-table queries ([#97](https://github.com/amfaro/jarify/pull/97)) ([#97](https://github.com/amfaro/jarify/pull/97))
+
 ## [0.1.5] - 2026-04-22
 ### Bug Fixes
 
