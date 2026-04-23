@@ -46,9 +46,7 @@ class JarifyGenerator(DuckDB.Generator):
     # We also remove exp.ArrayContains so dispatch falls through to arraycontains_sql,
     # which emits `list_contains` (DuckDB's canonical name) instead of `array_contains`.
     TRANSFORMS: ClassVar[dict] = {
-        k: v
-        for k, v in DuckDB.Generator.TRANSFORMS.items()
-        if k not in (exp.Pivot, exp.ArrayContains)
+        k: v for k, v in DuckDB.Generator.TRANSFORMS.items() if k not in (exp.Pivot, exp.ArrayContains)
     }
 
     # Aggregate and window function names that should be uppercased in output.
