@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.7] - 2026-04-23
+### Bug Fixes
+
+- auto-rewrite comma joins to explicit CROSS JOIN ([#100](https://github.com/amfaro/jarify/pull/100)) ([#100](https://github.com/amfaro/jarify/pull/100))
+
 ## [0.1.6] - 2026-04-23
 ### Bug Fixes
 
