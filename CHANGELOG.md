@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.11] - 2026-04-23
+### Bug Fixes
+
+- lowercase boolean literals (true/false) ([#114](https://github.com/amfaro/jarify/pull/114)) ([#114](https://github.com/amfaro/jarify/pull/114))
+
 ## [0.1.10] - 2026-04-23
 ### Bug Fixes
 
