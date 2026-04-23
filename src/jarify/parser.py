@@ -73,67 +73,83 @@ def _unmask_rust_fmt_placeholders(sql: str, mapping: dict[str, str]) -> str:
     return sql
 
 
-def _extract_line_rust_fmt_placeholders(sql: str) -> tuple[str, list[tuple[str, str | None]]]:
+def _extract_line_rust_fmt_placeholders(
+    sql: str,
+) -> tuple[str, list[tuple[list[str], str | None]]]:
     """Strip whole-line Rust format placeholder lines from ``sql``.
 
     Used by the formatter so the stripped SQL can be formatted normally, then
     the placeholders can be re-inserted at the correct positions afterward.
 
-    Returns ``(stripped_sql, [(placeholder, anchor), ...])``.  *anchor* is the
-    stripped text of the first non-blank line that followed the placeholder; it
-    is ``None`` when the placeholder is at the very end of the file.
+    Returns ``(stripped_sql, [(group, anchor), ...])``.  *group* is a list of
+    one or more consecutive placeholder lines (their full text, leading
+    whitespace preserved).  *anchor* is the stripped text of the first
+    non-blank, non-placeholder line after the group; it is ``None`` when no
+    such line exists.  Grouping consecutive placeholders together ensures they
+    are re-inserted in their original order before the same anchor occurrence.
     """
     lines = sql.splitlines(keepends=True)
     result_lines: list[str] = []
-    insertions: list[tuple[str, str | None]] = []
+    insertions: list[tuple[list[str], str | None]] = []
 
     i = 0
     while i < len(lines):
         if _RUST_FMT_LINE_RE.match(lines[i]):
-            m = _RUST_FMT_RE.search(lines[i])
-            assert m is not None
-            placeholder = lines[i].rstrip("\r\n")
+            # Collect all adjacent placeholder lines into one group so they
+            # are re-inserted together (preserving relative order) before a
+            # single anchor occurrence.
+            group: list[str] = []
+            while i < len(lines) and _RUST_FMT_LINE_RE.match(lines[i]):
+                m = _RUST_FMT_RE.search(lines[i])
+                assert m is not None
+                group.append(lines[i].rstrip("\r\n"))
+                i += 1
             anchor: str | None = None
-            for j in range(i + 1, len(lines)):
+            for j in range(i, len(lines)):
                 candidate = lines[j].strip()
-                if candidate:
+                if candidate and not _RUST_FMT_LINE_RE.match(lines[j]):
                     anchor = candidate
                     break
-            insertions.append((placeholder, anchor))
+            insertions.append((group, anchor))
         else:
             result_lines.append(lines[i])
-        i += 1
+            i += 1
 
     return "".join(result_lines), insertions
 
 
-def _reinsert_line_rust_fmt_placeholders(sql: str, insertions: list[tuple[str, str | None]]) -> str:
-    """Re-insert whole-line placeholders into formatted SQL before their anchor lines.
+def _reinsert_line_rust_fmt_placeholders(sql: str, insertions: list[tuple[list[str], str | None]]) -> str:
+    """Re-insert whole-line placeholder groups into formatted SQL.
 
-    Each placeholder is inserted on its own line immediately before the first
-    occurrence of its anchor text (compared after stripping whitespace).
-    Placeholders with no anchor are appended at the end before the final newline.
+    Each group is inserted immediately before the first occurrence of its
+    anchor line (compared after stripping whitespace), preserving all lines in
+    the group in their original order.  Groups with no anchor are appended at
+    the end.
     """
     if not insertions:
         return sql
 
     lines = sql.splitlines(keepends=True)
-    # Work through insertions in order; pop the first matching anchor each time
+    # Work through groups in order; pop the first matching anchor each time so
+    # that two groups with the same anchor text land before different
+    # occurrences of that anchor in the formatted SQL.
     pending = list(insertions)
     result: list[str] = []
 
     for line in lines:
         stripped = line.strip()
-        for idx, (placeholder, anchor) in enumerate(pending):
+        for idx, (group, anchor) in enumerate(pending):
             if anchor is not None and stripped == anchor:
-                result.append(placeholder + "\n")
+                for placeholder in group:
+                    result.append(placeholder + "\n")
                 pending.pop(idx)
                 break
         result.append(line)
 
-    # Append any remaining (no-anchor) placeholders before the trailing newline
-    for placeholder, _ in pending:
-        result.append(placeholder + "\n")
+    # Append any remaining (no-anchor) groups before the trailing newline
+    for group, _ in pending:
+        for placeholder in group:
+            result.append(placeholder + "\n")
 
     return "".join(result)
 
