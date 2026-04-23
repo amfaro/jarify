@@ -27,6 +27,8 @@ Always run `mise run check` before committing and ensure all tests pass.
 
 ## Adding or changing a rule
 
+Load `.agents/skills/add-formatter-rule.md` before implementing a new or changed formatting rule — it covers the full workflow including sqlglot default auditing, fixture generation, and style-guide updates.
+
 1. **Formatting rules** live in `src/jarify/generator.py` (override a generator method) or `src/jarify/rules/` (subclass `FormatterRule` and implement `apply()`).
 2. **Lint-only rules** live in `src/jarify/rules/` (implement `check()`, leave `apply()` as a no-op).
 3. Register new rules in `src/jarify/rules/__init__.py` and add a config knob to `src/jarify/config.py`.

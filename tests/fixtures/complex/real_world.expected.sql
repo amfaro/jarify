@@ -17,7 +17,7 @@ WITH _latest_version AS
 (
   FROM read_parquet(
      's3://' || getvariable('tigris_bucket') || '/dataops/*/*/relevant_skus.parquet'
-    ,hive_partitioning = TRUE
+    ,hive_partitioning = true
     ,hive_types = {'program_supplier_key': text, 'time_frame': int}
   )
   WHERE time_frame = getvariable('time_frame')
@@ -26,7 +26,7 @@ WITH _latest_version AS
 (
   FROM read_parquet(
      's3://' || getvariable('tigris_bucket') || '/dataops/*/*/enrollments.parquet'
-    ,hive_partitioning = TRUE
+    ,hive_partitioning = true
     ,hive_types = {'program_supplier_key': text, 'time_frame': int}
   )
   WHERE time_frame = getvariable('time_frame')
@@ -37,7 +37,7 @@ WITH _latest_version AS
      *
   FROM read_parquet(
      's3://' || getvariable('tigris_bucket') || '/global-catalog/*/sku_catalog.parquet'
-    ,hive_partitioning = TRUE
+    ,hive_partitioning = true
     ,hive_types = {'version': text}
   )
   SEMI JOIN _latest_version USING (version)
@@ -48,7 +48,7 @@ WITH _latest_version AS
      *
   FROM read_parquet(
      's3://' || getvariable('tigris_bucket') || '/global-catalog/*/prices.parquet'
-    ,hive_partitioning = TRUE
+    ,hive_partitioning = true
     ,hive_types = {'version': text}
   )
   SEMI JOIN _latest_version USING (version)
@@ -70,7 +70,7 @@ CROSS JOIN (
      participant_key
   FROM _enrollments
 ) AS all_e
-LEFT JOIN _enrollments e ON e.participant_key = all_e.participant_key AND e.program_supplier_key = rs.program_supplier_key AND e.enabled = TRUE
+LEFT JOIN _enrollments e ON e.participant_key = all_e.participant_key AND e.program_supplier_key = rs.program_supplier_key AND e.enabled = true
 LEFT JOIN _prices p ON sc.version = p.version AND sc.sku_key = p.sku_key AND p.end_date IS NULL
 ORDER BY
    manufacturer_label

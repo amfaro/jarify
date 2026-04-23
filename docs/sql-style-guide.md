@@ -51,6 +51,27 @@ CREATE TABLE t
 
 ---
 
+### Boolean literals — lowercase
+
+Boolean literals are always lowercase: `true` and `false`.
+
+**Bad**
+```sql
+SELECT a FROM t WHERE a.active = TRUE AND a.deleted = FALSE
+```
+
+**Good**
+```sql
+SELECT
+   a
+FROM t
+WHERE a.active = true
+  AND a.deleted = false
+;
+```
+
+---
+
 ### Functions — aggregate and window uppercase, scalar lowercase
 
 Aggregate and window functions (`COUNT`, `SUM`, `AVG`, `ROW_NUMBER`, `RANK`, `LEAD`, etc.) are always uppercase. All other DuckDB built-in functions (`regexp_extract`, `strftime`, `date_trunc`, etc.) remain lowercase.

@@ -767,6 +767,9 @@ class JarifyGenerator(DuckDB.Generator):
     def datatype_sql(self, expression: exp.DataType) -> str:
         return super().datatype_sql(expression).lower()
 
+    def boolean_sql(self, expression: exp.Boolean) -> str:
+        return "true" if expression.this else "false"
+
     # ------------------------------------------------------------------
     # CREATE MACRO: opening paren on its own line, leading-comma params
     # ------------------------------------------------------------------
