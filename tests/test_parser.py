@@ -176,7 +176,7 @@ class TestExtractReinsertLinePlaceholders:
         stripped, insertions = _extract_line_rust_fmt_placeholders(sql)
         assert "{where_clause}" not in stripped
         assert len(insertions) == 1
-        assert insertions[0][0] == "{where_clause}"
+        assert insertions[0][0] == ["{where_clause}"]
 
     def test_anchor_is_next_non_blank_line(self) -> None:
         sql = "FROM examples\n{where_clause}\n;"
@@ -205,7 +205,7 @@ class TestExtractReinsertLinePlaceholders:
         sql = "(\n  FROM programs\n    {where_clause}\n)\n;\n"
         stripped, insertions = _extract_line_rust_fmt_placeholders(sql)
         assert "{where_clause}" not in stripped
-        assert insertions[0][0] == "    {where_clause}"
+        assert insertions[0][0] == ["    {where_clause}"]
         restored = _reinsert_line_rust_fmt_placeholders(stripped, insertions)
         assert restored == sql
 
@@ -214,3 +214,24 @@ class TestExtractReinsertLinePlaceholders:
         stripped, insertions = _extract_line_rust_fmt_placeholders(sql)
         assert stripped == sql
         assert insertions == []
+
+    def test_consecutive_placeholders_form_one_group(self) -> None:
+        sql = "{program_filter}\n{example_filter}\n\nCREATE TABLE t AS SELECT 1\n;\n"
+        _, insertions = _extract_line_rust_fmt_placeholders(sql)
+        # Consecutive placeholders collapse into a single group with a shared
+        # SQL anchor so they are re-inserted together in their original order.
+        assert len(insertions) == 1
+        assert insertions[0] == (
+            ["{program_filter}", "{example_filter}"],
+            "CREATE TABLE t AS SELECT 1",
+        )
+
+    def test_consecutive_placeholders_reinserted_in_order(self) -> None:
+        sql = "{program_filter}\n{example_filter}\n\nCREATE TABLE t AS SELECT 1\n;\n"
+        stripped, insertions = _extract_line_rust_fmt_placeholders(sql)
+        restored = _reinsert_line_rust_fmt_placeholders(stripped, insertions)
+        lines = restored.splitlines()
+        prog_idx = lines.index("{program_filter}")
+        ex_idx = lines.index("{example_filter}")
+        create_idx = next(i for i, ln in enumerate(lines) if ln.startswith("CREATE TABLE"))
+        assert prog_idx < ex_idx < create_idx
