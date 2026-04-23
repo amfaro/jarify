@@ -447,6 +447,54 @@ class JarifyGenerator(DuckDB.Generator):
             terms.append(self.sql(node))
 
     # ------------------------------------------------------------------
+    # CASE: keep WHEN/THEN on one line; align THEN across branches;
+    # compact THEN/ELSE values so OR/AND chains don't expand.
+    # ------------------------------------------------------------------
+
+    def case_sql(self, expression: exp.Case) -> str:
+        this = self.sql(expression, "this")
+
+        when_parts: list[str] = []
+        then_parts: list[str] = []
+        for e in expression.args["ifs"]:
+            wp = self.sql(e, "this")
+            true_expr = e.args.get("true")
+            if self.pretty and true_expr is not None:
+                compact = self._compact_sql(true_expr)
+                tp = compact if not self.too_wide([f"WHEN {wp} THEN {compact}"]) else self.sql(e, "true")
+            else:
+                tp = self.sql(e, "true")
+            when_parts.append(wp)
+            then_parts.append(tp)
+
+        default_expr = expression.args.get("default")
+        default_sql: str | None = None
+        if default_expr is not None:
+            if self.pretty:
+                compact = self._compact_sql(default_expr)
+                default_sql = compact if not self.too_wide([f"ELSE {compact}"]) else self.sql(expression, "default")
+            else:
+                default_sql = self.sql(expression, "default")
+
+        def _build(align: bool) -> list[str]:
+            max_w = max((len(w) for w in when_parts), default=0) if align else 0
+            stmts = [f"CASE {this}" if this else "CASE"]
+            for wp, tp in zip(when_parts, then_parts, strict=True):
+                stmts.append(f"WHEN {wp.ljust(max_w)} THEN {tp}")
+            if default_sql is not None:
+                stmts.append(f"ELSE {default_sql}")
+            stmts.append("END")
+            return stmts
+
+        compact_stmts = _build(align=False)
+        if not (self.pretty and self.too_wide(compact_stmts)):
+            return " ".join(compact_stmts)
+
+        # Multi-line: align THEN when all branches have single-line THEN values
+        align = len(when_parts) >= 2 and all("\n" not in tp for tp in then_parts)
+        return self.indent("\n".join(_build(align=align)), skip_first=True, skip_last=True)
+
+    # ------------------------------------------------------------------
     # WHERE / HAVING: first condition inline, AND/OR right-justified
     # ------------------------------------------------------------------
 
