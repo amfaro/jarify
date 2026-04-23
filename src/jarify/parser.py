@@ -75,22 +75,26 @@ def _unmask_rust_fmt_placeholders(sql: str, mapping: dict[str, str]) -> str:
 
 def _extract_line_rust_fmt_placeholders(
     sql: str,
-) -> tuple[str, list[tuple[list[str], str | None]]]:
+) -> tuple[str, list[tuple[list[str], list[str], str | None]]]:
     """Strip whole-line Rust format placeholder lines from ``sql``.
 
     Used by the formatter so the stripped SQL can be formatted normally, then
     the placeholders can be re-inserted at the correct positions afterward.
 
-    Returns ``(stripped_sql, [(group, anchor), ...])``.  *group* is a list of
-    one or more consecutive placeholder lines (their full text, leading
-    whitespace preserved).  *anchor* is the stripped text of the first
-    non-blank, non-placeholder line after the group; it is ``None`` when no
-    such line exists.  Grouping consecutive placeholders together ensures they
-    are re-inserted in their original order before the same anchor occurrence.
+    Returns ``(stripped_sql, [(group, trailing_blanks, anchor), ...])``.
+    *group* is a list of one or more consecutive placeholder lines (their full
+    text, leading whitespace preserved).  *trailing_blanks* is a list of blank
+    lines that immediately follow the group — they are consumed here so the
+    formatter does not strip them as leading whitespace, and re-emitted by
+    ``_reinsert_line_rust_fmt_placeholders``.  *anchor* is the stripped text
+    of the first non-blank, non-placeholder line after the group; it is
+    ``None`` when no such line exists.  Grouping consecutive placeholders
+    together ensures they are re-inserted in their original order before the
+    same anchor occurrence.
     """
     lines = sql.splitlines(keepends=True)
     result_lines: list[str] = []
-    insertions: list[tuple[list[str], str | None]] = []
+    insertions: list[tuple[list[str], list[str], str | None]] = []
 
     i = 0
     while i < len(lines):
@@ -104,13 +108,22 @@ def _extract_line_rust_fmt_placeholders(
                 assert m is not None
                 group.append(lines[i].rstrip("\r\n"))
                 i += 1
+            # Consume blank lines that immediately follow the placeholder
+            # group.  Without this, the formatter receives SQL beginning with
+            # blank lines and strips them, making fmt non-idempotent on files
+            # that separate a placeholder block from the first SQL statement
+            # with a blank line.
+            trailing_blanks: list[str] = []
+            while i < len(lines) and not lines[i].strip():
+                trailing_blanks.append(lines[i])
+                i += 1
             anchor: str | None = None
             for j in range(i, len(lines)):
                 candidate = lines[j].strip()
                 if candidate and not _RUST_FMT_LINE_RE.match(lines[j]):
                     anchor = candidate
                     break
-            insertions.append((group, anchor))
+            insertions.append((group, trailing_blanks, anchor))
         else:
             result_lines.append(lines[i])
             i += 1
@@ -118,13 +131,14 @@ def _extract_line_rust_fmt_placeholders(
     return "".join(result_lines), insertions
 
 
-def _reinsert_line_rust_fmt_placeholders(sql: str, insertions: list[tuple[list[str], str | None]]) -> str:
+def _reinsert_line_rust_fmt_placeholders(sql: str, insertions: list[tuple[list[str], list[str], str | None]]) -> str:
     """Re-insert whole-line placeholder groups into formatted SQL.
 
     Each group is inserted immediately before the first occurrence of its
     anchor line (compared after stripping whitespace), preserving all lines in
-    the group in their original order.  Groups with no anchor are appended at
-    the end.
+    the group in their original order.  Trailing blank lines recorded during
+    extraction are emitted after the group and before the anchor.  Groups with
+    no anchor are appended at the end.
     """
     if not insertions:
         return sql
@@ -138,18 +152,20 @@ def _reinsert_line_rust_fmt_placeholders(sql: str, insertions: list[tuple[list[s
 
     for line in lines:
         stripped = line.strip()
-        for idx, (group, anchor) in enumerate(pending):
+        for idx, (group, trailing_blanks, anchor) in enumerate(pending):
             if anchor is not None and stripped == anchor:
                 for placeholder in group:
                     result.append(placeholder + "\n")
+                result.extend(trailing_blanks)
                 pending.pop(idx)
                 break
         result.append(line)
 
     # Append any remaining (no-anchor) groups before the trailing newline
-    for group, _ in pending:
+    for group, trailing_blanks, _ in pending:
         for placeholder in group:
             result.append(placeholder + "\n")
+        result.extend(trailing_blanks)
 
     return "".join(result)
 

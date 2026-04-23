@@ -181,7 +181,7 @@ class TestExtractReinsertLinePlaceholders:
     def test_anchor_is_next_non_blank_line(self) -> None:
         sql = "FROM examples\n{where_clause}\n;"
         _, insertions = _extract_line_rust_fmt_placeholders(sql)
-        assert insertions[0][1] == ";"
+        assert insertions[0][2] == ";"
 
     def test_reinsert_restores_before_anchor(self) -> None:
         sql = "FROM examples\n{where_clause}\n;"
@@ -223,8 +223,20 @@ class TestExtractReinsertLinePlaceholders:
         assert len(insertions) == 1
         assert insertions[0] == (
             ["{program_filter}", "{example_filter}"],
+            ["\n"],
             "CREATE TABLE t AS SELECT 1",
         )
+
+    def test_blank_lines_after_placeholder_block_are_preserved(self) -> None:
+        sql = "{program_filter}\n{example_filter}\n\nCREATE TABLE t AS SELECT 1\n;\n"
+        stripped, insertions = _extract_line_rust_fmt_placeholders(sql)
+        # The blank line between the placeholder block and the SQL must be
+        # consumed during extraction so the formatter does not see it as
+        # leading whitespace (and strip it).
+        assert not stripped.startswith("\n"), "blank line must not leak into stripped SQL"
+        # After reinsertion the blank line must be restored.
+        restored = _reinsert_line_rust_fmt_placeholders(stripped, insertions)
+        assert restored == sql
 
     def test_consecutive_placeholders_reinserted_in_order(self) -> None:
         sql = "{program_filter}\n{example_filter}\n\nCREATE TABLE t AS SELECT 1\n;\n"

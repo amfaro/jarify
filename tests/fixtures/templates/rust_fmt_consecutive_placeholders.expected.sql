@@ -1,5 +1,6 @@
 {program_filter}
 {example_filter}
+
 CREATE OR REPLACE TABLE offers AS
 SELECT
    o.*
