@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.8] - 2026-04-23
+### Bug Fixes
+
+- preserve indentation of whole-line template placeholders ([#105](https://github.com/amfaro/jarify/pull/105)) ([#105](https://github.com/amfaro/jarify/pull/105))
+
 ## [0.1.7] - 2026-04-23
 ### Bug Fixes
 
