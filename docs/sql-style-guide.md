@@ -209,27 +209,20 @@ HAVING COUNT(*) > 1
 
 ### WHERE — `=` operator column alignment
 
-When a `WHERE` clause contains two or more equality (`=`) comparisons anywhere in the condition tree, the left-hand sides of all **top-level** `AND` equality conditions are right-padded so that the `=` signs align vertically. The target column is the longest LHS (across all `=` in the clause, including nested ones) plus two spaces.
+When a `WHERE` clause contains two or more equality (`=`) comparisons anywhere in the condition tree, the left-hand sides of all **top-level** `AND` equality conditions are right-padded so that the `=` signs align vertically. The target column is the longest LHS (across all `=` in the clause, including nested ones) plus one space.
 
 Parenthesised compound conditions (e.g. `(a = b OR c IS NULL)`) that appear as direct `AND` operands are kept on a single line.
 
 **Bad**
 ```sql
-WHERE p.time_frame = _time_frame
-  AND e.participant_key = _participant_key
-  AND e.enabled
-  AND (
-    p.program_supplier_key = _program_supplier_key
-    OR _program_supplier_key IS NULL
-  )
+WHERE type = _property_type
+  AND level_type = _property_level_type
 ```
 
 **Good**
 ```sql
-WHERE p.time_frame            = _time_frame
-  AND e.participant_key       = _participant_key
-  AND e.enabled
-  AND (p.program_supplier_key = _program_supplier_key OR _program_supplier_key IS NULL)
+WHERE type       = _property_type
+  AND level_type = _property_level_type
 ```
 
 ---
