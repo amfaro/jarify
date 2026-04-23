@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.10] - 2026-04-23
+### Bug Fixes
+
+- preserve blank lines between placeholder blocks and SQL ([#111](https://github.com/amfaro/jarify/pull/111)) ([#111](https://github.com/amfaro/jarify/pull/111))
+
 ## [0.1.9] - 2026-04-23
 ### Bug Fixes
 
