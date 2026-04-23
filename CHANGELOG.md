@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.14] - 2026-04-23
+### Bug Fixes
+
+- convert 2-argument coalesce to ifnull ([#124](https://github.com/amfaro/jarify/pull/124)) ([#124](https://github.com/amfaro/jarify/pull/124))
+
 ## [0.1.13] - 2026-04-23
 ### Bug Fixes
 
