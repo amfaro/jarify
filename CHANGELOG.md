@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.9] - 2026-04-23
+### Bug Fixes
+
+- preserve consecutive whole-line template placeholder order ([#108](https://github.com/amfaro/jarify/pull/108)) ([#108](https://github.com/amfaro/jarify/pull/108))
+
 ## [0.1.8] - 2026-04-23
 ### Bug Fixes
 
