@@ -10,5 +10,9 @@ ORDER BY
    name
 ;
 
-FROM _actual, _target, _threshold
+SELECT
+   *
+FROM _actual
+CROSS JOIN _target
+CROSS JOIN _threshold
 ;
