@@ -7,7 +7,7 @@ Subclasses sqlglot's DuckDBGenerator to enforce jarify's opinionated rules:
 - AND/OR conditions always on separate lines in pretty mode
 - WHERE/HAVING/ON: first condition inline with keyword, AND/OR right-justified
   so all condition content aligns at the same column; = operators in WHERE
-  top-level AND conditions are column-aligned (padded to max LHS width + 2)
+  top-level AND conditions are column-aligned (padded to max LHS width + 1)
 - CTE: opening paren on its own line, comma-prefix separator
 - Consistent keyword casing; DuckDB functions in lowercase
 - IS NOT NULL preserved (not rewritten to NOT x IS NULL)
@@ -455,7 +455,8 @@ class JarifyGenerator(DuckDB.Generator):
 
         When the top-level condition is a pure AND chain the = signs in simple
         equality conditions are padded so they all align at the same column.
-        The target column is max(LHS width across all EQ in WHERE) + 2.
+        The target column is max(LHS width across all EQ in WHERE) + 1,
+        ensuring exactly one space between the longest LHS and its = sign.
 
         Parenthesised conditions that are direct AND operands (e.g. compound OR
         filters) are rendered on a single line rather than expanded.
@@ -471,7 +472,7 @@ class JarifyGenerator(DuckDB.Generator):
         # Max EQ LHS width across entire WHERE tree (including nested EQs)
         eq_lhs_widths = [len(self.sql(eq.this)) for eq in expression.find_all(exp.EQ)]
         # Only align when there are at least 2 EQ comparisons total
-        target = (max(eq_lhs_widths) + 2) if len(eq_lhs_widths) >= 2 else 0
+        target = (max(eq_lhs_widths) + 1) if len(eq_lhs_widths) >= 2 else 0
 
         result: list[str] = []
         for i, cond in enumerate(conditions):
@@ -479,10 +480,8 @@ class JarifyGenerator(DuckDB.Generator):
                 lhs = self.sql(cond.this)
                 rhs = self.sql(cond.expression)
                 cond_str = f"{lhs.ljust(target)}= {rhs}" if "\n" not in lhs else self.sql(cond)
-            elif isinstance(cond, exp.Paren):
-                cond_str = self._compact_sql(cond)
             else:
-                cond_str = self.sql(cond)
+                cond_str = self._compact_sql(cond) if isinstance(cond, exp.Paren) else self.sql(cond)
 
             if i == 0:
                 result.append(f"WHERE {cond_str}")

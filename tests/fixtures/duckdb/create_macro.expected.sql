@@ -8,8 +8,8 @@ CREATE OR REPLACE MACRO get_programs_json
   SELECT
      json_object('programs', json_group_array(json_object('name', program_name, 'supplier', supplier_name)))
   FROM programs
-  WHERE participant_key  = _participant_key
-    AND time_frame       = _time_frame
-    AND supplier_key     = _program_supplier_key
+  WHERE participant_key = _participant_key
+    AND time_frame      = _time_frame
+    AND supplier_key    = _program_supplier_key
 )
 ;
