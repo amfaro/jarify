@@ -252,10 +252,16 @@ class JarifyGenerator(DuckDB.Generator):
     # ------------------------------------------------------------------
 
     def join_sql(self, expression: exp.Join) -> str:
+        has_condition = expression.args.get("on") or expression.args.get("using")
         if not expression.side and not expression.kind and not expression.method:
-            # Bare JOIN with no qualifier — normalize to INNER JOIN
-            expression = expression.copy()
-            expression.set("kind", "INNER")
+            if has_condition:
+                # Bare JOIN with a condition — normalize to INNER JOIN
+                expression = expression.copy()
+                expression.set("kind", "INNER")
+            else:
+                # Comma join (no condition) — delegate to DuckDB's renderer,
+                # which emits comma-separated syntax instead of a bare JOIN keyword
+                return super().join_sql(expression)
         elif expression.side in ("LEFT", "RIGHT") and expression.kind == "OUTER":
             # DROP redundant OUTER: LEFT OUTER JOIN → LEFT JOIN
             expression = expression.copy()
@@ -612,12 +618,26 @@ class JarifyGenerator(DuckDB.Generator):
             ):
                 return self._cte_values_sql(from_.this)
 
+            # FROM-first is safe when there are no explicit joins. Comma joins
+            # (kind=None, no on/using) are fine — sqlglot round-trips them
+            # correctly. Explicit joins (INNER, LEFT, SEMI, etc.) are excluded
+            # because sqlglot re-parses `FROM t JOIN u` differently from
+            # `SELECT * FROM t JOIN u`, breaking idempotency.
+            joins = expression.args.get("joins") or []
+            only_comma_joins = all(
+                not j.args.get("kind")
+                and not j.args.get("side")
+                and not j.args.get("method")
+                and not j.args.get("on")
+                and not j.args.get("using")
+                for j in joins
+            )
             if (
                 self._config.prefer_from_first
                 and len(exprs) == 1
                 and isinstance(exprs[0], exp.Star)
                 and not expression.args.get("distinct")
-                and not expression.args.get("joins")
+                and only_comma_joins
             ):
                 expr_copy = expression.copy()
                 expr_copy.set("expressions", [])
