@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.12] - 2026-04-23
+### Bug Fixes
+
+- remove = operator alignment in WHERE clauses ([#117](https://github.com/amfaro/jarify/pull/117)) ([#117](https://github.com/amfaro/jarify/pull/117))
+
 ## [0.1.11] - 2026-04-23
 ### Bug Fixes
 
