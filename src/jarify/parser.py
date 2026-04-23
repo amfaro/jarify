@@ -178,7 +178,9 @@ def _reinsert_line_rust_fmt_placeholders(sql: str, insertions: list[tuple[list[s
 # sqlglot treats it as an unknown (Anonymous) function and preserves the name,
 # then restore it after generation.
 
-_IFNULL_SENTINEL = "__jarify_ifnull"
+# Sentinel must be the same length as "ifnull" (6 chars) so that AS-column
+# alignment computed during generation is not thrown off before the unmask.
+_IFNULL_SENTINEL = "_ifnl_"
 _IFNULL_RE = re.compile(r"\bifnull\b", re.IGNORECASE)
 
 

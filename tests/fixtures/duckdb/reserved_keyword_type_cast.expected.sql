@@ -3,7 +3,7 @@ SELECT
     WHEN 'a'
     THEN (
        y
-      ,array_transform(coalesce(z, []::filter[]), f -> (
+      ,array_transform(ifnull(z, []::filter[]), f -> (
          f.a
         ,f.b
       )::s)
@@ -11,7 +11,7 @@ SELECT
     WHEN 'b'
     THEN (
        y
-      ,array_transform(coalesce(z, []::filter[]), f -> (
+      ,array_transform(ifnull(z, []::filter[]), f -> (
          f.a
         ,f.b
       )::s)

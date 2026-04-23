@@ -714,6 +714,18 @@ class JarifyGenerator(DuckDB.Generator):
         return self.func("list_contains", expression.this, expression.expression)
 
     # ------------------------------------------------------------------
+    # ifnull: prefer ifnull(a, b) over coalesce(a, b) for 2-arg case.
+    # 3+ args have no ifnull equivalent so coalesce is kept as-is.
+    # Idempotent: formatted ifnull(...) re-enters as exp.Anonymous (masked
+    # by the ifnull pre-processor in formatter.py), never hitting this path.
+    # ------------------------------------------------------------------
+
+    def coalesce_sql(self, expression: exp.Coalesce) -> str:
+        if len(expression.expressions) == 1:
+            return self.func("ifnull", expression.this, expression.expressions[0])
+        return self.func("coalesce", expression.this, *expression.expressions)
+
+    # ------------------------------------------------------------------
     # Cast: prefer :: shorthand over CAST()
     # ------------------------------------------------------------------
 
