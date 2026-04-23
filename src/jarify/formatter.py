@@ -11,8 +11,10 @@ from jarify.config import JarifyConfig
 from jarify.generator import JarifyGenerator
 from jarify.parser import (
     _extract_line_rust_fmt_placeholders,
+    _mask_ifnull,
     _mask_rust_fmt_placeholders,
     _reinsert_line_rust_fmt_placeholders,
+    _unmask_ifnull,
     _unmask_rust_fmt_placeholders,
     parse_sql,
 )
@@ -48,6 +50,7 @@ def format_sql(
     # Inline placeholders are masked with dummy identifiers that survive the AST.
     stripped_sql, line_insertions = _extract_line_rust_fmt_placeholders(sql)
     masked_sql, inline_mask = _mask_rust_fmt_placeholders(stripped_sql)
+    masked_sql = _mask_ifnull(masked_sql)
 
     try:
         trees = parse_sql(masked_sql, dialect=config.dialect)
@@ -55,6 +58,7 @@ def format_sql(
         result = _try_pivot_order_by_workaround(masked_sql, config)
         if result is not None:
             result = _unmask_rust_fmt_placeholders(result, inline_mask)
+            result = _unmask_ifnull(result)
             return _reinsert_line_rust_fmt_placeholders(result, line_insertions), warnings
         warnings.append(FormatWarning(f"could not parse SQL (formatting skipped): {exc}"))
         return sql, warnings
@@ -71,6 +75,7 @@ def format_sql(
 
     formatted = "\n;\n\n".join(formatted_parts) + ("\n;\n" if formatted_parts else "")
     formatted = _unmask_rust_fmt_placeholders(formatted, inline_mask)
+    formatted = _unmask_ifnull(formatted)
     return _reinsert_line_rust_fmt_placeholders(formatted, line_insertions), warnings
 
 

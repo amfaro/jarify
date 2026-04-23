@@ -171,6 +171,28 @@ def _reinsert_line_rust_fmt_placeholders(sql: str, insertions: list[tuple[list[s
 
 
 # ---------------------------------------------------------------------------
+# ifnull preservation
+# ---------------------------------------------------------------------------
+# sqlglot's DuckDB dialect maps IFNULL to exp.Coalesce at parse time, losing
+# the original function name.  We mask it with a sentinel before parsing so
+# sqlglot treats it as an unknown (Anonymous) function and preserves the name,
+# then restore it after generation.
+
+_IFNULL_SENTINEL = "__jarify_ifnull"
+_IFNULL_RE = re.compile(r"\bifnull\b", re.IGNORECASE)
+
+
+def _mask_ifnull(sql: str) -> str:
+    """Replace ifnull with a sentinel so sqlglot doesn't normalize it to coalesce."""
+    return _IFNULL_RE.sub(_IFNULL_SENTINEL, sql)
+
+
+def _unmask_ifnull(sql: str) -> str:
+    """Restore ifnull from its sentinel."""
+    return sql.replace(_IFNULL_SENTINEL, "ifnull")
+
+
+# ---------------------------------------------------------------------------
 # Reserved-keyword type-cast pre-processor
 # ---------------------------------------------------------------------------
 # DuckDB allows user-defined types whose names are SQL reserved words, e.g.
