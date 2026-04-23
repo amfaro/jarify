@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.13] - 2026-04-23
+### Bug Fixes
+
+- preserve ifnull instead of converting to coalesce ([#120](https://github.com/amfaro/jarify/pull/120)) ([#120](https://github.com/amfaro/jarify/pull/120))
+
 ## [0.1.12] - 2026-04-23
 ### Bug Fixes
 
