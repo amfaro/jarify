@@ -12,6 +12,54 @@ def _lint(sql: str, **config_overrides) -> list[str]:
     return [v.rule for v in lint_sql(sql, config)]
 
 
+class TestNoImplicitCrossJoin:
+    def test_warns_on_comma_join(self):
+        rules = _lint("SELECT a FROM t1, t2")
+        assert "no-implicit-cross-join" in rules
+
+    def test_no_warn_on_explicit_cross_join(self):
+        rules = _lint("SELECT a FROM t1 CROSS JOIN t2")
+        assert "no-implicit-cross-join" not in rules
+
+    def test_no_warn_on_inner_join(self):
+        rules = _lint("SELECT a FROM t1 INNER JOIN t2 ON t1.id = t2.id")
+        assert "no-implicit-cross-join" not in rules
+
+    def test_off_disables_lint(self):
+        rules = _lint("SELECT a FROM t1, t2", no_implicit_cross_join="off")
+        assert "no-implicit-cross-join" not in rules
+
+    def test_autofix_rewrites_to_cross_join(self):
+        from jarify.formatter import format_sql
+
+        out, _ = format_sql("SELECT a FROM t1, t2")
+        assert "CROSS JOIN t2" in out
+        assert "t1, t2" not in out
+
+    def test_autofix_rewrites_multiple_comma_joins(self):
+        from jarify.formatter import format_sql
+
+        out, _ = format_sql("SELECT a FROM t1, t2, t3")
+        assert "CROSS JOIN t2" in out
+        assert "CROSS JOIN t3" in out
+        assert "," not in out.split("FROM")[1].split("WHERE")[0]
+
+    def test_off_preserves_comma_join_in_fmt(self):
+        from jarify.config import JarifyConfig
+        from jarify.formatter import format_sql
+
+        config = JarifyConfig(no_implicit_cross_join="off")
+        out, _ = format_sql("SELECT a FROM t1, t2", config)
+        assert "CROSS JOIN" not in out
+
+    def test_formatted_sql_passes_lint(self):
+        from jarify.formatter import format_sql
+
+        formatted, _ = format_sql("SELECT a FROM t1, t2")
+        rules = _lint(formatted)
+        assert "no-implicit-cross-join" not in rules
+
+
 class TestNoSelectStar:
     def test_warns_on_select_star(self):
         # prefer_from_first=False: formatter won't rewrite, so lint should warn
