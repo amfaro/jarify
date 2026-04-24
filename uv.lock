@@ -34,7 +34,7 @@ wheels = [
 
 [[package]]
 name = "jarify"
-version = "0.1.5"
+version = "0.1.16"
 source = { editable = "." }
 dependencies = [
     { name = "click" },

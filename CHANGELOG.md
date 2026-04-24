@@ -1,6 +1,12 @@
 # Changelog
 
-## [0.1.15] - 2026-04-23
+## [0.1.16] - 2026-04-24
+### Bug Fixes
+
+- regenerate uv.lock after version bump ([#129](https://github.com/amfaro/jarify/pull/129)) ([#129](https://github.com/amfaro/jarify/pull/129))
+- guard FROM-first conversion behind self.pretty in select_sql ([#131](https://github.com/amfaro/jarify/pull/131)) ([#131](https://github.com/amfaro/jarify/pull/131))
+
+## [0.1.15] - 2026-04-24
 ### Bug Fixes
 
 - keep WHEN/THEN inline and suppress connector expansion in CASE branches ([#127](https://github.com/amfaro/jarify/pull/127)) ([#127](https://github.com/amfaro/jarify/pull/127))
