@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.21] - 2026-04-24
+### Bug Fixes
+
+- preserve SELECT when * EXCLUDE or * REPLACE is used ([#146](https://github.com/amfaro/jarify/pull/146)) ([#146](https://github.com/amfaro/jarify/pull/146))
+
 ## [0.1.20] - 2026-04-24
 ### Bug Fixes
 
