@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.27] - 2026-04-24
+### Bug Fixes
+
+- preserve AS alignment when SELECT contains Rust format placeholder strings ([#164](https://github.com/amfaro/jarify/pull/164)) ([#164](https://github.com/amfaro/jarify/pull/164))
+
 ## [0.1.26] - 2026-04-24
 ### Bug Fixes
 
