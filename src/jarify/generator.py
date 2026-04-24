@@ -244,28 +244,58 @@ class JarifyGenerator(DuckDB.Generator):
         return f"{alias} {columns_sql}" if alias and columns_sql else f"{alias}{columns_sql}"
 
     def cte_sql(self, expression: exp.CTE) -> str:
-        # Pop comments from the CTE node to prevent double-rendering when sql()
-        # calls maybe_comment on the result.  Render them after AS on the same
-        # line: use -- for single-line comments, /* */ for multi-line.
+        # Pop comments to prevent double-rendering.  sqlglot attaches leading
+        # comments to the TableAlias child, not the CTE node itself, so we
+        # must pop from both.  Leading comments (own-line before the CTE name)
+        # are prepended as separate lines; trailing comments stay inline after AS.
         comments = expression.pop_comments() or []
+        alias_node = expression.args.get("alias")
+        if alias_node:
+            comments = comments + (alias_node.pop_comments() or [])
         alias_sql = self.sql(expression, "alias")
-        comment_parts: list[str] = []
-        for c in comments:
+
+        if self._leading_comment_texts:
+            lead = [c for c in comments if c.strip() in self._leading_comment_texts]
+            trail = [c for c in comments if c.strip() not in self._leading_comment_texts]
+        else:
+            lead, trail = [], comments
+
+        trail_parts: list[str] = []
+        for c in trail:
             text = c.strip()
-            if not text:
-                continue
-            comment_parts.append(f"/*{c}*/" if "\n" in c else f"-- {text}")
-        comment_suffix = (" " + " ".join(comment_parts)) if comment_parts else ""
-        return f"{alias_sql} AS{comment_suffix}\n{self.wrap(expression)}"
+            if text:
+                trail_parts.append(f"/*{c}*/" if "\n" in c else f"-- {text}")
+        comment_suffix = (" " + " ".join(trail_parts)) if trail_parts else ""
+        body = f"{alias_sql} AS{comment_suffix}\n{self.wrap(expression)}"
+
+        if lead:
+            prefix = "\n".join(f"-- {c.strip()}" for c in lead if c.strip())
+            return f"{prefix}\n{body}"
+        return body
 
     def with_sql(self, expression: exp.With) -> str:
         ctes = expression.expressions
         if not ctes:
             return ""
         recursive = "RECURSIVE " if self.CTE_RECURSIVE_KEYWORD_REQUIRED and expression.args.get("recursive") else ""
-        parts = [f"WITH {recursive}{self.cte_sql(ctes[0])}"]
+
+        def _entry(cte: exp.CTE, sep: str) -> str:
+            rendered = self.cte_sql(cte)
+            if not rendered.startswith("--"):
+                return sep + rendered
+            # Leading comment lines must appear before the separator
+            lines = rendered.split("\n")
+            comment_lines, body_lines = [], []
+            for line in lines:
+                if not body_lines and line.startswith("--"):
+                    comment_lines.append(line)
+                else:
+                    body_lines.append(line)
+            return "\n".join(comment_lines) + "\n" + sep + "\n".join(body_lines)
+
+        parts = [_entry(ctes[0], f"WITH {recursive}")]
         for cte in ctes[1:]:
-            parts.append(f",{self.cte_sql(cte)}")
+            parts.append(_entry(cte, ","))
         return "\n".join(parts)
 
     # ------------------------------------------------------------------
