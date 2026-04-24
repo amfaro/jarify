@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.18] - 2026-04-24
+### Bug Fixes
+
+- preserve -- line comments on SELECT column expressions ([#137](https://github.com/amfaro/jarify/pull/137)) ([#137](https://github.com/amfaro/jarify/pull/137))
+
 ## [0.1.17] - 2026-04-24
 ### Bug Fixes
 
