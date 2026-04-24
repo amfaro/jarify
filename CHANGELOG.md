@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.22] - 2026-04-24
+### Bug Fixes
+
+- preserve leading comments on their own line in SELECT columns ([#149](https://github.com/amfaro/jarify/pull/149)) ([#149](https://github.com/amfaro/jarify/pull/149))
+
 ## [0.1.21] - 2026-04-24
 ### Bug Fixes
 
