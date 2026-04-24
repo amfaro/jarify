@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.19] - 2026-04-24
+### Bug Fixes
+
+- keep CASE WHEN conditions compact when AND chain is present ([#140](https://github.com/amfaro/jarify/pull/140)) ([#140](https://github.com/amfaro/jarify/pull/140))
+
 ## [0.1.18] - 2026-04-24
 ### Bug Fixes
 
