@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.29] - 2026-04-24
+### Bug Fixes
+
+- preserve multi-line leading comment blocks ([#170](https://github.com/amfaro/jarify/pull/170)) ([#170](https://github.com/amfaro/jarify/pull/170))
+
 ## [0.1.28] - 2026-04-24
 ### Bug Fixes
 
