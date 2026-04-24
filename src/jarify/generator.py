@@ -204,7 +204,7 @@ class JarifyGenerator(DuckDB.Generator):
                     inline = self._render_comments(trail)
                     result_sqls.append(f"{leader}{prefix}{sql}{inline}")
                     for c in trail_sep:
-                        result_sqls.append(f" {prefix}-- {c.strip()}")
+                        result_sqls.append(f"{prefix}-- {c.strip()}")
                 else:
                     inline = self._inline_comments(e) if isinstance(e, exp.Expr) else ""
                     result_sqls.append(f"{leader}{prefix}{sql}{inline}")
