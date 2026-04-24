@@ -1,4 +1,4 @@
-/* CASE WHEN condition with AND chain stays compact (no line breaks inside WHEN) */
+-- CASE WHEN condition with AND chain stays compact (no line breaks inside WHEN)
 SELECT
    t.*
   ,s.sku_set

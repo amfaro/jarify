@@ -104,6 +104,28 @@ class JarifyGenerator(DuckDB.Generator):
         return name.upper() if name.lower() in self._UPPERCASE_FUNCS else name.lower()
 
     # ------------------------------------------------------------------
+    # Comment rendering: use -- for single-line, /* */ for multi-line
+    # ------------------------------------------------------------------
+
+    def maybe_comment(
+        self,
+        sql: str,
+        expression: exp.Expr | None = None,
+        comments: list[str] | None = None,
+        separated: bool = False,
+    ) -> str:
+        effective = ((expression.comments if expression else None) if comments is None else comments) if self.comments else None
+        if not effective or (expression is not None and isinstance(expression, self.EXCLUDE_COMMENTS)):
+            return sql
+        rendered = self._render_comments(effective)
+        if not rendered:
+            return sql
+        if separated or isinstance(expression, self.WITH_SEPARATED_COMMENTS):
+            sep = self.sep()
+            return f"{sep}{rendered}{sql}" if not sql or sql[0].isspace() else f"{rendered}{sep}{sql}"
+        return f"{sql}{rendered}"
+
+    # ------------------------------------------------------------------
     # Leading-comma style: ,col  (comma at pad, content at pad+1)
     # ------------------------------------------------------------------
 
