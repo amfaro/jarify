@@ -45,8 +45,13 @@ class JarifyGenerator(DuckDB.Generator):
     #
     # We also remove exp.ArrayContains so dispatch falls through to arraycontains_sql,
     # which emits `list_contains` (DuckDB's canonical name) instead of `array_contains`.
+    #
+    # We also remove exp.JSONExtract so dispatch falls through to jsonextract_sql, which
+    # renders -> and ->> without surrounding spaces (DuckDB style: value->>'key').
     TRANSFORMS: ClassVar[dict] = {
-        k: v for k, v in DuckDB.Generator.TRANSFORMS.items() if k not in (exp.Pivot, exp.ArrayContains)
+        k: v
+        for k, v in DuckDB.Generator.TRANSFORMS.items()
+        if k not in (exp.Pivot, exp.ArrayContains, exp.JSONExtract)
     }
 
     # Aggregate and window function names that should be uppercased in output.
@@ -876,6 +881,31 @@ class JarifyGenerator(DuckDB.Generator):
             expressions_sql = self.expressions(expression, flat=False)
             return f"{self.seg(f'GROUP BY{modifier}')}{self.sep() if expressions_sql else ''}{expressions_sql}"
         return super().group_sql(expression)
+
+    # ------------------------------------------------------------------
+    # -> / ->>: render without surrounding spaces (value->>'key' not value ->> 'key').
+    # sqlglot's default binary() always adds " op " padding; we bypass it here.
+    # For simple single-key paths, also strip the $.  prefix that sqlglot adds
+    # during AST normalisation ($.offer_key → offer_key), matching DuckDB's
+    # short-form syntax.  Complex multi-segment paths keep their $. prefix.
+    # ------------------------------------------------------------------
+
+    def jsonextract_sql(self, expression: exp.JSONExtract) -> str:
+        return f"{self.sql(expression, 'this')}->{self._json_path_sql(expression.expression)}"
+
+    def jsonextractscalar_sql(self, expression: exp.JSONExtractScalar) -> str:
+        return f"{self.sql(expression, 'this')}->>{self._json_path_sql(expression.expression)}"
+
+    def _json_path_sql(self, path_expr: exp.Expression) -> str:
+        """Render a JSON path, using bare 'key' for simple root+key paths."""
+        if (
+            isinstance(path_expr, exp.JSONPath)
+            and len(path_expr.expressions) == 2
+            and isinstance(path_expr.expressions[0], exp.JSONPathRoot)
+            and isinstance(path_expr.expressions[1], exp.JSONPathKey)
+        ):
+            return f"'{path_expr.expressions[1].this}'"
+        return self.sql(path_expr)
 
     # ------------------------------------------------------------------
     # list_contains: preserve DuckDB's canonical name (sqlglot normalises
