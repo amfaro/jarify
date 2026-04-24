@@ -31,6 +31,7 @@ DUCKDB_DIALECT = "duckdb"
 
 _RUST_FMT_RE = re.compile(r"\{[A-Za-z_]\w*\}")
 _RUST_FMT_LINE_RE = re.compile(r"^\s*\{[A-Za-z_]\w*\}\s*$")
+_AS_TRAILING_RE = re.compile(r"\bAS$", re.IGNORECASE)
 
 
 def _mask_rust_fmt_placeholders(sql: str) -> tuple[str, dict[str, str]]:
@@ -78,6 +79,64 @@ def _unmask_rust_fmt_placeholders(sql: str, mapping: dict[str, str]) -> str:
     for marker, original in mapping.items():
         sql = sql.replace(marker, original)
     return sql
+
+
+def _extract_ctas_body_placeholders(sql: str) -> tuple[str, dict[str, str]]:
+    """Replace whole-line placeholders that serve as a CTAS body with dummy markers.
+
+    A placeholder is a CTAS body when it immediately follows a line ending with
+    the keyword ``AS`` (case-insensitive).  The dummy body ``SELECT * FROM
+    __J_CTAS_BODY_N__`` lets sqlglot parse a complete, valid CTAS so neither
+    the ``AS`` keyword nor surrounding structure is dropped.
+
+    Returns ``(modified_sql, {marker: original_placeholder_line})``.  When no
+    such pattern exists the SQL is returned unchanged with an empty mapping.
+    """
+    ctas_body_map: dict[str, str] = {}
+    counter = 0
+    lines = sql.splitlines(keepends=True)
+    result: list[str] = []
+
+    for i, line in enumerate(lines):
+        if _RUST_FMT_LINE_RE.match(line):
+            # Find the previous non-blank line to check for a trailing AS.
+            prev_content = ""
+            for j in range(i - 1, -1, -1):
+                stripped = lines[j].strip()
+                if stripped:
+                    prev_content = stripped
+                    break
+            if _AS_TRAILING_RE.search(prev_content):
+                marker = f"__J_CTAS_BODY_{counter}__"
+                ctas_body_map[marker] = line.rstrip("\r\n")
+                result.append(f"SELECT * FROM {marker}\n")
+                counter += 1
+                continue
+        result.append(line)
+
+    return "".join(result), ctas_body_map
+
+
+def _restore_ctas_body_placeholders(sql: str, ctas_body_map: dict[str, str]) -> str:
+    """Restore CTAS body placeholders from their dummy markers.
+
+    Replaces the entire formatted line that contains a CTAS body marker with
+    the original placeholder text.
+    """
+    if not ctas_body_map:
+        return sql
+    lines = sql.splitlines(keepends=True)
+    result: list[str] = []
+    for line in lines:
+        replaced = False
+        for marker, original in ctas_body_map.items():
+            if marker in line:
+                result.append(original + "\n")
+                replaced = True
+                break
+        if not replaced:
+            result.append(line)
+    return "".join(result)
 
 
 def _extract_line_rust_fmt_placeholders(

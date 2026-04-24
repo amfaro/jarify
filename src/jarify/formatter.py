@@ -11,10 +11,12 @@ from sqlglot.tokens import Tokenizer as SqlglotTokenizer
 from jarify.config import JarifyConfig
 from jarify.generator import JarifyGenerator
 from jarify.parser import (
+    _extract_ctas_body_placeholders,
     _extract_line_rust_fmt_placeholders,
     _mask_ifnull,
     _mask_rust_fmt_placeholders,
     _reinsert_line_rust_fmt_placeholders,
+    _restore_ctas_body_placeholders,
     _unmask_ifnull,
     _unmask_rust_fmt_placeholders,
     parse_sql,
@@ -46,10 +48,15 @@ def format_sql(
     config = config or JarifyConfig()
     warnings: list[FormatWarning] = []
 
+    # Pre-process: replace whole-line placeholders used as CTAS bodies (those
+    # following a line that ends with AS) with a dummy SELECT so sqlglot
+    # receives a complete, parseable CTAS and does not silently drop the AS.
+    processed_sql, ctas_body_map = _extract_ctas_body_placeholders(sql)
+
     # Strip whole-line Rust format placeholders so sqlglot never sees them.
     # They are re-inserted verbatim after formatting using the recorded anchors.
     # Inline placeholders are masked with dummy identifiers that survive the AST.
-    stripped_sql, line_insertions = _extract_line_rust_fmt_placeholders(sql)
+    stripped_sql, line_insertions = _extract_line_rust_fmt_placeholders(processed_sql)
     masked_sql, inline_mask = _mask_rust_fmt_placeholders(stripped_sql)
     masked_sql = _mask_ifnull(masked_sql)
 
@@ -60,7 +67,8 @@ def format_sql(
         if result is not None:
             result = _unmask_rust_fmt_placeholders(result, inline_mask)
             result = _unmask_ifnull(result)
-            return _reinsert_line_rust_fmt_placeholders(result, line_insertions), warnings
+            result = _reinsert_line_rust_fmt_placeholders(result, line_insertions)
+            return _restore_ctas_body_placeholders(result, ctas_body_map), warnings
         warnings.append(FormatWarning(f"could not parse SQL (formatting skipped): {exc}"))
         return sql, warnings
 
@@ -78,7 +86,8 @@ def format_sql(
     formatted = "\n;\n\n".join(formatted_parts) + ("\n;\n" if formatted_parts else "")
     formatted = _unmask_rust_fmt_placeholders(formatted, inline_mask)
     formatted = _unmask_ifnull(formatted)
-    return _reinsert_line_rust_fmt_placeholders(formatted, line_insertions), warnings
+    result = _reinsert_line_rust_fmt_placeholders(formatted, line_insertions)
+    return _restore_ctas_body_placeholders(result, ctas_body_map), warnings
 
 
 # ---------------------------------------------------------------------------
