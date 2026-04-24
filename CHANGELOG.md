@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.26] - 2026-04-24
+### Bug Fixes
+
+- render -> and ->> operators without surrounding spaces ([#161](https://github.com/amfaro/jarify/pull/161)) ([#161](https://github.com/amfaro/jarify/pull/161))
+
 ## [0.1.25] - 2026-04-24
 ### Bug Fixes
 
