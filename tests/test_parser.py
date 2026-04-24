@@ -6,10 +6,12 @@ import sys
 import pytest
 
 from jarify.parser import (
+    _extract_ctas_body_placeholders,
     _extract_line_rust_fmt_placeholders,
     _mask_rust_fmt_placeholders,
     _quote_reserved_cast_types,
     _reinsert_line_rust_fmt_placeholders,
+    _restore_ctas_body_placeholders,
     _unmask_rust_fmt_placeholders,
     parse_sql,
     parse_sql_lenient,
@@ -247,3 +249,50 @@ class TestExtractReinsertLinePlaceholders:
         ex_idx = lines.index("{example_filter}")
         create_idx = next(i for i, ln in enumerate(lines) if ln.startswith("CREATE TABLE"))
         assert prog_idx < ex_idx < create_idx
+
+
+class TestCtasBodyPlaceholders:
+    """_extract/_restore_ctas_body_placeholders must handle CTAS body placeholders."""
+
+    def test_ctas_body_placeholder_detected(self) -> None:
+        sql = "CREATE OR REPLACE TABLE {t} AS\n{query_body}\n"
+        modified, ctas_body_map = _extract_ctas_body_placeholders(sql)
+        assert len(ctas_body_map) == 1
+        assert "{query_body}" in ctas_body_map.values()
+        assert "{query_body}" not in modified
+        assert "SELECT * FROM" in modified
+
+    def test_non_ctas_placeholder_not_affected(self) -> None:
+        sql = "FROM examples\n{where_clause}\n;\n"
+        modified, ctas_body_map = _extract_ctas_body_placeholders(sql)
+        assert ctas_body_map == {}
+        assert modified == sql
+
+    def test_inline_placeholder_not_affected(self) -> None:
+        sql = "SELECT * FROM {table_name}\n;\n"
+        modified, ctas_body_map = _extract_ctas_body_placeholders(sql)
+        assert ctas_body_map == {}
+        assert modified == sql
+
+    def test_restore_replaces_marker_line(self) -> None:
+        sql = "CREATE OR REPLACE TABLE {t} AS\n{query_body}\n"
+        _modified, ctas_body_map = _extract_ctas_body_placeholders(sql)
+        # Simulate a formatted line containing the marker
+        marker = next(iter(ctas_body_map))
+        formatted = f"CREATE OR REPLACE TABLE t AS\nFROM {marker}\n;\n"
+        restored = _restore_ctas_body_placeholders(formatted, ctas_body_map)
+        assert marker not in restored
+        assert "{query_body}" in restored
+        assert "FROM" not in restored
+
+    def test_restore_no_op_when_map_empty(self) -> None:
+        sql = "SELECT 1\n;\n"
+        assert _restore_ctas_body_placeholders(sql, {}) == sql
+
+    def test_multiple_ctas_bodies_get_unique_markers(self) -> None:
+        sql = "CREATE TABLE {t1} AS\n{body1}\n;\n\nCREATE TABLE {t2} AS\n{body2}\n"
+        _modified, ctas_body_map = _extract_ctas_body_placeholders(sql)
+        assert len(ctas_body_map) == 2
+        assert len(set(ctas_body_map.keys())) == 2
+        assert "{body1}" in ctas_body_map.values()
+        assert "{body2}" in ctas_body_map.values()
