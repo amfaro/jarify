@@ -276,7 +276,7 @@ class TestCtasBodyPlaceholders:
 
     def test_restore_replaces_marker_line(self) -> None:
         sql = "CREATE OR REPLACE TABLE {t} AS\n{query_body}\n"
-        modified, ctas_body_map = _extract_ctas_body_placeholders(sql)
+        _modified, ctas_body_map = _extract_ctas_body_placeholders(sql)
         # Simulate a formatted line containing the marker
         marker = next(iter(ctas_body_map))
         formatted = f"CREATE OR REPLACE TABLE t AS\nFROM {marker}\n;\n"
@@ -291,7 +291,7 @@ class TestCtasBodyPlaceholders:
 
     def test_multiple_ctas_bodies_get_unique_markers(self) -> None:
         sql = "CREATE TABLE {t1} AS\n{body1}\n;\n\nCREATE TABLE {t2} AS\n{body2}\n"
-        modified, ctas_body_map = _extract_ctas_body_placeholders(sql)
+        _modified, ctas_body_map = _extract_ctas_body_placeholders(sql)
         assert len(ctas_body_map) == 2
         assert len(set(ctas_body_map.keys())) == 2
         assert "{body1}" in ctas_body_map.values()
