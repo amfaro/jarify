@@ -542,9 +542,10 @@ class JarifyGenerator(DuckDB.Generator):
 
         conditions = self._flatten_and(expression.this)
 
-        # Max EQ LHS width across entire WHERE tree (including nested EQs)
-        eq_lhs_widths = [len(self.sql(eq.this)) for eq in expression.find_all(exp.EQ)]
-        # Only align when there are at least 2 EQ comparisons total
+        # Max EQ LHS width across top-level AND operands only — nested EQs (inside
+        # Paren, subqueries, etc.) must not influence padding of sibling conditions.
+        eq_lhs_widths = [len(self.sql(cond.this)) for cond in conditions if isinstance(cond, exp.EQ)]
+        # Only align when there are at least 2 top-level EQ comparisons
         target = (max(eq_lhs_widths) + 1) if len(eq_lhs_widths) >= 2 else 0
 
         result: list[str] = []
