@@ -29,11 +29,12 @@ git config user.email "github-actions@github.com"
 git checkout -B "${branch}" origin/main
 
 sed -i "s/^version = \"${current}\"/version = \"${new_version}\"/" pyproject.toml
+uv lock
 
 # Generate CHANGELOG -- git-cliff knows the bump, tag it explicitly for consistency
 git-cliff --tag "v${new_version}" -o CHANGELOG.md
 
-git add pyproject.toml CHANGELOG.md
+git add pyproject.toml uv.lock CHANGELOG.md
 if git diff --staged --quiet; then
   echo "Release PR already up to date."
   exit 0
