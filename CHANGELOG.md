@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.28] - 2026-04-24
+### Bug Fixes
+
+- handle whole-line placeholder as CTAS body ([#167](https://github.com/amfaro/jarify/pull/167)) ([#167](https://github.com/amfaro/jarify/pull/167))
+
 ## [0.1.27] - 2026-04-24
 ### Bug Fixes
 
