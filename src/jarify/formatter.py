@@ -6,6 +6,7 @@ import re
 
 from sqlglot.errors import ParseError
 from sqlglot.expressions import Expression
+from sqlglot.tokens import Tokenizer as SqlglotTokenizer
 
 from jarify.config import JarifyConfig
 from jarify.generator import JarifyGenerator
@@ -65,6 +66,7 @@ def format_sql(
 
     rules = get_default_rules(config)
     generator = JarifyGenerator(config)
+    generator._leading_comment_texts = _find_leading_comment_texts(masked_sql)
     formatted_parts: list[str] = []
 
     for tree in trees:
@@ -77,6 +79,34 @@ def format_sql(
     formatted = _unmask_rust_fmt_placeholders(formatted, inline_mask)
     formatted = _unmask_ifnull(formatted)
     return _reinsert_line_rust_fmt_placeholders(formatted, line_insertions), warnings
+
+
+# ---------------------------------------------------------------------------
+# Leading-comment detection
+# ---------------------------------------------------------------------------
+
+
+def _find_leading_comment_texts(sql: str) -> frozenset[str]:
+    """Return stripped texts of comments that appear on their own line before a token.
+
+    A comment is "leading" when it occupies the region between the previous
+    token's end and the current token's start in the source text.  This lets
+    the generator distinguish ``-- note\\nfoo`` (leading) from ``foo -- note``
+    (trailing) even though sqlglot stores both in the same ``node.comments``
+    list.
+    """
+    tokens = SqlglotTokenizer().tokenize(sql)
+    leading: set[str] = set()
+    for idx, tok in enumerate(tokens):
+        if not tok.comments:
+            continue
+        prev_end = tokens[idx - 1].end if idx > 0 else 0
+        before = sql[prev_end : tok.start]
+        for comment in tok.comments:
+            stripped = comment.strip()
+            if stripped and f"-- {stripped}" in before:
+                leading.add(stripped)
+    return frozenset(leading)
 
 
 # ---------------------------------------------------------------------------
