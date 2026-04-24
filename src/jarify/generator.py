@@ -228,12 +228,19 @@ class JarifyGenerator(DuckDB.Generator):
             return None
 
         col_widths: list[int] = []
-        for a in aliased:
-            col_sql = self.sql(a.this)
-            if "\n" in col_sql:
-                # Multi-line expression — skip alignment for the whole SELECT
-                return None
-            col_widths.append(len(col_sql))
+        for e in expressions_list:
+            if isinstance(e, exp.Alias):
+                col_sql = self.sql(e.this)
+                if "\n" in col_sql:
+                    # Multi-line aliased expression — skip alignment for the whole SELECT
+                    return None
+                col_widths.append(len(col_sql))
+            else:
+                # Non-aliased columns count toward the alignment width so AS
+                # keywords clear the longest expression in the list.
+                col_sql = self.sql(e)
+                if "\n" not in col_sql:
+                    col_widths.append(len(col_sql))
 
         return max(col_widths)
 
