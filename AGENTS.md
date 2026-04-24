@@ -23,7 +23,7 @@ uv sync --all-groups
 | Run both | `mise run check` |
 | Format source | `mise run fmt` |
 
-Always run `mise run check` before committing and ensure all tests pass.
+**Always run `mise run check` before committing** — this runs both lint (`ruff check`) and tests. Never push without a clean check. CI will fail if you do.
 
 ## Adding or changing a rule
 

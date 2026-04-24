@@ -1,10 +1,10 @@
-/* simple searched case: short THEN values stay on one line */
+-- simple searched case: short THEN values stay on one line
 SELECT
    CASE status WHEN 'active' THEN true WHEN 'inactive' THEN false ELSE NULL END AS is_active
 FROM accounts
 ;
 
-/* simple searched case: OR connectors in THEN stay compact */
+-- simple searched case: OR connectors in THEN stay compact
 SELECT
    CASE _operator
     WHEN 'equal_to'                 THEN _actual = _target
@@ -16,7 +16,7 @@ SELECT
 FROM t
 ;
 
-/* general case expression: short THEN values stay on one line */
+-- general case expression: short THEN values stay on one line
 SELECT
    CASE WHEN x > 0 THEN 'positive' WHEN x < 0 THEN 'negative' ELSE 'zero' END AS sign
 FROM t

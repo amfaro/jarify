@@ -1,4 +1,4 @@
-/* CASE THEN values containing SELECT * FROM subqueries stay compact */
+-- CASE THEN values containing SELECT * FROM subqueries stay compact
 SELECT
    CASE _op
     WHEN 'variants' THEN (SELECT * FROM (SELECT unnest(_variants) AS variant))
