@@ -703,11 +703,12 @@ class JarifyGenerator(DuckDB.Generator):
                 and not j.args.get("using")
                 for j in joins
             )
+            star = exprs[0] if len(exprs) == 1 and isinstance(exprs[0], exp.Star) else None
+            plain_star = star is not None and not star.args.get("except_") and not star.args.get("replace")
             if (
                 self.pretty
                 and self._config.prefer_from_first
-                and len(exprs) == 1
-                and isinstance(exprs[0], exp.Star)
+                and plain_star
                 and not expression.args.get("distinct")
                 and only_comma_joins
             ):
