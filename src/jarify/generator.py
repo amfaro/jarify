@@ -664,6 +664,19 @@ class JarifyGenerator(DuckDB.Generator):
             this = self.sql(expression, "this")
             return f"{self.seg(keyword)} {this}"
 
+        # For a flat same-type connector chain (pure OR or pure AND, no mixing),
+        # try compact first — mirrors paren_sql's inline-if-fits logic.
+        # Mixed AND/OR chains and IN-subquery expressions keep their expanded form.
+        this = expression.this
+        if isinstance(this, exp.Connector):
+            terms_temp: list[str] = []
+            ops_list: list[str] = []
+            self._flatten_connector(this, terms_temp, ops_list)
+            if len(set(ops_list)) <= 1:
+                compact = self._compact_sql(this)
+                if not self.too_wide([f"{keyword} {compact}"]):
+                    return self.seg(f"{keyword} {compact}")
+
         condition_sql = self.sql(expression, "this")
         lines = condition_sql.split("\n")
 
@@ -788,9 +801,7 @@ class JarifyGenerator(DuckDB.Generator):
                 for j in joins
             )
             star = exprs[0] if len(exprs) == 1 and isinstance(exprs[0], exp.Star) else None
-            plain_star = star is not None and not any(
-                star.args.get(k) for k in ("except_", "replace", "rename")
-            )
+            plain_star = star is not None and not any(star.args.get(k) for k in ("except_", "replace", "rename"))
             if (
                 self.pretty
                 and self._config.prefer_from_first
