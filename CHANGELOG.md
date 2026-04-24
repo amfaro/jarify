@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.25] - 2026-04-24
+### Bug Fixes
+
+- keep short OR/AND conditions inline in WHERE/HAVING when they fit ([#158](https://github.com/amfaro/jarify/pull/158)) ([#158](https://github.com/amfaro/jarify/pull/158))
+
 ## [0.1.24] - 2026-04-24
 ### Bug Fixes
 
