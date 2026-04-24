@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.24] - 2026-04-24
+### Bug Fixes
+
+- use -- for single-line comments instead of /* */ everywhere ([#155](https://github.com/amfaro/jarify/pull/155)) ([#155](https://github.com/amfaro/jarify/pull/155))
+
 ## [0.1.23] - 2026-04-24
 ### Bug Fixes
 
