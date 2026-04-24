@@ -447,6 +447,18 @@ class JarifyGenerator(DuckDB.Generator):
             terms.append(self.sql(node))
 
     # ------------------------------------------------------------------
+    # Paren: keep inline when the content fits within max_line_length
+    # ------------------------------------------------------------------
+
+    def paren_sql(self, expression: exp.Paren) -> str:
+        if not self.pretty:
+            return super().paren_sql(expression)
+        compact = self._compact_sql(expression.this)
+        if not self.too_wide([f"({compact})"]):
+            return f"({compact})"
+        return super().paren_sql(expression)
+
+    # ------------------------------------------------------------------
     # CASE: keep WHEN/THEN on one line; align THEN across branches;
     # compact THEN/ELSE values so OR/AND chains don't expand.
     # ------------------------------------------------------------------
