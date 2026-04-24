@@ -124,10 +124,11 @@ class JarifyGenerator(DuckDB.Generator):
         effective = comments if self.comments else None
         if not effective or (expression is not None and isinstance(expression, self.EXCLUDE_COMMENTS)):
             return sql
-        rendered = self._render_comments(effective)
+        is_separated = separated or isinstance(expression, self.WITH_SEPARATED_COMMENTS)
+        rendered = self._render_comments(effective, leading=is_separated)
         if not rendered:
             return sql
-        if separated or isinstance(expression, self.WITH_SEPARATED_COMMENTS):
+        if is_separated:
             sep = self.sep()
             return f"{sep}{rendered}{sql}" if not sql or sql[0].isspace() else f"{rendered}{sep}{sql}"
         return f"{sql}{rendered}"
@@ -207,7 +208,7 @@ class JarifyGenerator(DuckDB.Generator):
             return ""
         return self._render_comments(expression.comments)
 
-    def _render_comments(self, comments: list[str]) -> str:
+    def _render_comments(self, comments: list[str], *, leading: bool = False) -> str:
         if not self.comments or not comments:
             return ""
         parts = []
@@ -215,7 +216,11 @@ class JarifyGenerator(DuckDB.Generator):
             if not c or not c.strip():
                 continue
             parts.append(f"/*{c}*/" if "\n" in c else f"-- {c.strip()}")
-        return (" " + " ".join(parts)) if parts else ""
+        if not parts:
+            return ""
+        if leading:
+            return "\n".join(parts)
+        return " " + " ".join(parts)
 
     def _compute_as_align_width(self, expressions_list: list) -> int | None:
         """Compute the column width for AS alignment in a SELECT expression list.
