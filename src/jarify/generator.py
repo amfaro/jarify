@@ -94,6 +94,7 @@ class JarifyGenerator(DuckDB.Generator):
         self._col_name_align: int | None = None  # set during CREATE TABLE column rendering
         self._col_type_align: int | None = None  # set during CREATE TABLE column rendering
         self._join_alias_col: int | None = None  # set during FROM/JOIN block rendering
+        self._leading_comment_texts: frozenset[str] = frozenset()  # set by formatter before generate()
 
     # ------------------------------------------------------------------
     # Function name casing: aggregates/window functions → UPPER, rest → lower
@@ -155,10 +156,16 @@ class JarifyGenerator(DuckDB.Generator):
                 sql = self.sql(e, comment=False)
                 if not sql:
                     continue
-                comments = self._inline_comments(e) if isinstance(e, exp.Expr) else ""
-                # First item gets one extra leading space (aligns content with ,item lines)
                 leader = " " if i == 0 else ","
-                result_sqls.append(f"{leader}{prefix}{sql}{comments}")
+                if isinstance(e, exp.Expr) and e.comments and self._leading_comment_texts:
+                    lead = [c for c in e.comments if c.strip() in self._leading_comment_texts]
+                    trail = [c for c in e.comments if c.strip() not in self._leading_comment_texts]
+                    for c in lead:
+                        result_sqls.append(f" {prefix}-- {c.strip()}")
+                    inline = self._render_comments(trail)
+                else:
+                    inline = self._inline_comments(e) if isinstance(e, exp.Expr) else ""
+                result_sqls.append(f"{leader}{prefix}{sql}{inline}")
         finally:
             self._as_align_width = saved_align
 
@@ -169,8 +176,13 @@ class JarifyGenerator(DuckDB.Generator):
         """Render inline comments using -- for single-line, /* */ for multi-line."""
         if not self.comments or not expression.comments:
             return ""
+        return self._render_comments(expression.comments)
+
+    def _render_comments(self, comments: list[str]) -> str:
+        if not self.comments or not comments:
+            return ""
         parts = []
-        for c in expression.comments:
+        for c in comments:
             if not c or not c.strip():
                 continue
             parts.append(f"/*{c}*/" if "\n" in c else f"-- {c.strip()}")
