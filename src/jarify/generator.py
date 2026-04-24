@@ -480,7 +480,8 @@ class JarifyGenerator(DuckDB.Generator):
         when_parts: list[str] = []
         then_parts: list[str] = []
         for e in expression.args["ifs"]:
-            wp = self.sql(e, "this")
+            wp_expr = e.args.get("this")
+            wp = self._compact_sql(wp_expr) if wp_expr is not None else self.sql(e, "this")
             true_expr = e.args.get("true")
             if self.pretty and true_expr is not None:
                 compact = self._compact_sql(true_expr)
@@ -510,8 +511,9 @@ class JarifyGenerator(DuckDB.Generator):
             return stmts
 
         compact_stmts = _build(align=False)
-        if not (self.pretty and self.too_wide(compact_stmts)):
-            return " ".join(compact_stmts)
+        compact_inline = " ".join(compact_stmts)
+        if not (self.pretty and self.too_wide([compact_inline])):
+            return compact_inline
 
         # Multi-line: align THEN when all branches have single-line THEN values
         align = len(when_parts) >= 2 and all("\n" not in tp for tp in then_parts)
