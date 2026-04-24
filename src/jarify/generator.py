@@ -648,6 +648,24 @@ class JarifyGenerator(DuckDB.Generator):
         return super().in_sql(expression)
 
     # ------------------------------------------------------------------
+    # Star: keep * EXCLUDE / REPLACE / RENAME inline when it fits
+    # ------------------------------------------------------------------
+
+    def star_sql(self, expression: exp.Star) -> str:
+        except_ = self.expressions(expression, key="except_", flat=True)
+        replace = self.expressions(expression, key="replace", flat=True)
+        rename = self.expressions(expression, key="rename", flat=True)
+
+        except_sql = f" {self.STAR_EXCEPT} ({except_})" if except_ else ""
+        replace_sql = f" REPLACE ({replace})" if replace else ""
+        rename_sql = f" RENAME ({rename})" if rename else ""
+
+        inline = f"*{except_sql}{replace_sql}{rename_sql}"
+        if self.pretty and not self.too_wide([inline]):
+            return inline
+        return super().star_sql(expression)
+
+    # ------------------------------------------------------------------
     # IS NOT NULL: preserve original form instead of NOT x IS NULL
     # ------------------------------------------------------------------
 
@@ -703,11 +721,14 @@ class JarifyGenerator(DuckDB.Generator):
                 and not j.args.get("using")
                 for j in joins
             )
+            star = exprs[0] if len(exprs) == 1 and isinstance(exprs[0], exp.Star) else None
+            plain_star = star is not None and not any(
+                star.args.get(k) for k in ("except_", "replace", "rename")
+            )
             if (
                 self.pretty
                 and self._config.prefer_from_first
-                and len(exprs) == 1
-                and isinstance(exprs[0], exp.Star)
+                and plain_star
                 and not expression.args.get("distinct")
                 and only_comma_joins
             ):
