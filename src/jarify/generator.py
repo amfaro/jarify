@@ -155,7 +155,7 @@ class JarifyGenerator(DuckDB.Generator):
                 sql = self.sql(e, comment=False)
                 if not sql:
                     continue
-                comments = self.maybe_comment("", e) if isinstance(e, exp.Expr) else ""
+                comments = self._inline_comments(e) if isinstance(e, exp.Expr) else ""
                 # First item gets one extra leading space (aligns content with ,item lines)
                 leader = " " if i == 0 else ","
                 result_sqls.append(f"{leader}{prefix}{sql}{comments}")
@@ -164,6 +164,17 @@ class JarifyGenerator(DuckDB.Generator):
 
         result_sql = "\n".join(s.rstrip() for s in result_sqls)
         return self.indent(result_sql, skip_first=skip_first, skip_last=skip_last) if indent else result_sql
+
+    def _inline_comments(self, expression: exp.Expr) -> str:
+        """Render inline comments using -- for single-line, /* */ for multi-line."""
+        if not self.comments or not expression.comments:
+            return ""
+        parts = []
+        for c in expression.comments:
+            if not c or not c.strip():
+                continue
+            parts.append(f"/*{c}*/" if "\n" in c else f"-- {c.strip()}")
+        return (" " + " ".join(parts)) if parts else ""
 
     def _compute_as_align_width(self, expressions_list: list) -> int | None:
         """Compute the column width for AS alignment in a SELECT expression list.
