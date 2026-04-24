@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.23] - 2026-04-24
+### Bug Fixes
+
+- preserve leading comments before CTE definitions ([#152](https://github.com/amfaro/jarify/pull/152)) ([#152](https://github.com/amfaro/jarify/pull/152))
+
 ## [0.1.22] - 2026-04-24
 ### Bug Fixes
 
