@@ -114,7 +114,9 @@ class JarifyGenerator(DuckDB.Generator):
         comments: list[str] | None = None,
         separated: bool = False,
     ) -> str:
-        effective = ((expression.comments if expression else None) if comments is None else comments) if self.comments else None
+        if comments is None:
+            comments = expression.comments if expression else None
+        effective = comments if self.comments else None
         if not effective or (expression is not None and isinstance(expression, self.EXCLUDE_COMMENTS)):
             return sql
         rendered = self._render_comments(effective)
