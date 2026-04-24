@@ -885,13 +885,27 @@ class JarifyGenerator(DuckDB.Generator):
     # ------------------------------------------------------------------
     # -> / ->>: render without surrounding spaces (value->>'key' not value ->> 'key').
     # sqlglot's default binary() always adds " op " padding; we bypass it here.
+    # For simple single-key paths, also strip the $.  prefix that sqlglot adds
+    # during AST normalisation ($.offer_key → offer_key), matching DuckDB's
+    # short-form syntax.  Complex multi-segment paths keep their $. prefix.
     # ------------------------------------------------------------------
 
     def jsonextract_sql(self, expression: exp.JSONExtract) -> str:
-        return f"{self.sql(expression, 'this')}->{self.sql(expression, 'expression')}"
+        return f"{self.sql(expression, 'this')}->{self._json_path_sql(expression.expression)}"
 
     def jsonextractscalar_sql(self, expression: exp.JSONExtractScalar) -> str:
-        return f"{self.sql(expression, 'this')}->>{self.sql(expression, 'expression')}"
+        return f"{self.sql(expression, 'this')}->>{self._json_path_sql(expression.expression)}"
+
+    def _json_path_sql(self, path_expr: exp.Expression) -> str:
+        """Render a JSON path, using bare 'key' for simple root+key paths."""
+        if (
+            isinstance(path_expr, exp.JSONPath)
+            and len(path_expr.expressions) == 2
+            and isinstance(path_expr.expressions[0], exp.JSONPathRoot)
+            and isinstance(path_expr.expressions[1], exp.JSONPathKey)
+        ):
+            return f"'{path_expr.expressions[1].this}'"
+        return self.sql(path_expr)
 
     # ------------------------------------------------------------------
     # list_contains: preserve DuckDB's canonical name (sqlglot normalises
