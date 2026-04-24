@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.17] - 2026-04-24
+### Bug Fixes
+
+- keep parenthesized expressions inline when they fit within max_line_length ([#134](https://github.com/amfaro/jarify/pull/134)) ([#134](https://github.com/amfaro/jarify/pull/134))
+
 ## [0.1.16] - 2026-04-24
 ### Bug Fixes
 
