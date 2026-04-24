@@ -50,7 +50,14 @@ def _mask_rust_fmt_placeholders(sql: str) -> tuple[str, dict[str, str]]:
     def _next_marker(placeholder: str, *, inline: bool) -> str:
         n = seq[0]
         seq[0] += 1
-        marker = f"__jrfp{n}__" if inline else f"/* __J_RFP_{n}__ */"
+        if inline:
+            base = f"__jrfp{n}__"
+            # Pad to original length so string-literal widths are preserved
+            # during AS-alignment computation (see _compute_as_align_width).
+            extra = max(0, len(placeholder) - len(base))
+            marker = base + "_" * extra
+        else:
+            marker = f"/* __J_RFP_{n}__ */"
         mapping[marker] = placeholder
         return marker
 
