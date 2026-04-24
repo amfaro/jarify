@@ -678,7 +678,8 @@ class JarifyGenerator(DuckDB.Generator):
                 for j in joins
             )
             if (
-                self._config.prefer_from_first
+                self.pretty
+                and self._config.prefer_from_first
                 and len(exprs) == 1
                 and isinstance(exprs[0], exp.Star)
                 and not expression.args.get("distinct")
