@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.31] - 2026-04-25
+### Bug Fixes
+
+- preserve string_agg name and inline ORDER BY in aggregates ([#176](https://github.com/amfaro/jarify/pull/176)) ([#176](https://github.com/amfaro/jarify/pull/176))
+
 ## [0.1.30] - 2026-04-25
 ### Bug Fixes
 
