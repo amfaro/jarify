@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.30] - 2026-04-25
+### Bug Fixes
+
+- preserve between-column -- comments in SELECT lists ([#173](https://github.com/amfaro/jarify/pull/173)) ([#173](https://github.com/amfaro/jarify/pull/173))
+
 ## [0.1.29] - 2026-04-24
 ### Bug Fixes
 
