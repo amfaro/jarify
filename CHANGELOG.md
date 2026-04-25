@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.32] - 2026-04-25
+### Bug Fixes
+
+- remove extra space before column list in UNNEST table aliases ([#179](https://github.com/amfaro/jarify/pull/179)) ([#179](https://github.com/amfaro/jarify/pull/179))
+
 ## [0.1.31] - 2026-04-25
 ### Bug Fixes
 
