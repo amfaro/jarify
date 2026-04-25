@@ -49,9 +49,7 @@ class JarifyGenerator(DuckDB.Generator):
     # We also remove exp.JSONExtract so dispatch falls through to jsonextract_sql, which
     # renders -> and ->> without surrounding spaces (DuckDB style: value->>'key').
     TRANSFORMS: ClassVar[dict] = {
-        k: v
-        for k, v in DuckDB.Generator.TRANSFORMS.items()
-        if k not in (exp.Pivot, exp.ArrayContains, exp.JSONExtract)
+        k: v for k, v in DuckDB.Generator.TRANSFORMS.items() if k not in (exp.Pivot, exp.ArrayContains, exp.JSONExtract)
     }
 
     # Aggregate and window function names that should be uppercased in output.
@@ -100,6 +98,7 @@ class JarifyGenerator(DuckDB.Generator):
         self._col_type_align: int | None = None  # set during CREATE TABLE column rendering
         self._join_alias_col: int | None = None  # set during FROM/JOIN block rendering
         self._leading_comment_texts: frozenset[str] = frozenset()  # set by formatter before generate()
+        self._trailing_sep_comment_texts: frozenset[str] = frozenset()  # set by formatter before generate()
 
     # ------------------------------------------------------------------
     # Function name casing: aggregates/window functions → UPPER, rest → lower
@@ -187,15 +186,28 @@ class JarifyGenerator(DuckDB.Generator):
                 if not sql:
                     continue
                 leader = " " if i == 0 else ","
-                if isinstance(e, exp.Expr) and e.comments and self._leading_comment_texts:
+                if isinstance(e, exp.Expr) and e.comments and (
+                    self._leading_comment_texts or self._trailing_sep_comment_texts
+                ):
                     lead = [c for c in e.comments if c.strip() in self._leading_comment_texts]
-                    trail = [c for c in e.comments if c.strip() not in self._leading_comment_texts]
+                    trail_sep = [
+                        c for c in e.comments if c.strip() in self._trailing_sep_comment_texts
+                    ]
+                    trail = [
+                        c
+                        for c in e.comments
+                        if c.strip() not in self._leading_comment_texts
+                        and c.strip() not in self._trailing_sep_comment_texts
+                    ]
                     for c in lead:
                         result_sqls.append(f" {prefix}-- {c.strip()}")
                     inline = self._render_comments(trail)
+                    result_sqls.append(f"{leader}{prefix}{sql}{inline}")
+                    for c in trail_sep:
+                        result_sqls.append(f"{prefix}-- {c.strip()}")
                 else:
                     inline = self._inline_comments(e) if isinstance(e, exp.Expr) else ""
-                result_sqls.append(f"{leader}{prefix}{sql}{inline}")
+                    result_sqls.append(f"{leader}{prefix}{sql}{inline}")
         finally:
             self._as_align_width = saved_align
 

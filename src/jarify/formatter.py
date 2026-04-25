@@ -75,6 +75,7 @@ def format_sql(
     rules = get_default_rules(config)
     generator = JarifyGenerator(config)
     generator._leading_comment_texts = _find_leading_comment_texts(masked_sql)
+    generator._trailing_sep_comment_texts = _find_trailing_sep_comment_texts(masked_sql)
     formatted_parts: list[str] = []
 
     for tree in trees:
@@ -100,10 +101,16 @@ def _find_leading_comment_texts(sql: str) -> frozenset[str]:
 
     A comment is "leading" when it occupies the region between the previous
     token's end and the current token's start in the source text.  This lets
-    the generator distinguish ``-- note\\nfoo`` (leading) from ``foo -- note``
+    the generator distinguish ``-- note\nfoo`` (leading) from ``foo -- note``
     (trailing) even though sqlglot stores both in the same ``node.comments``
     list.
+
+    See also :func:`_find_trailing_sep_comment_texts` for comments that appear
+    on their own line *after* an expression but before its following comma
+    separator (e.g. between two SELECT columns).
     """
+    from sqlglot.tokens import TokenType
+
     tokens = SqlglotTokenizer().tokenize(sql)
     leading: set[str] = set()
     for idx, tok in enumerate(tokens):
@@ -111,11 +118,56 @@ def _find_leading_comment_texts(sql: str) -> frozenset[str]:
             continue
         prev_end = tokens[idx - 1].end if idx > 0 else 0
         before = sql[prev_end : tok.start]
+        prev_type = tokens[idx - 1].token_type if idx > 0 else None
+        for comment in tok.comments:
+            stripped = comment.strip()
+            if not stripped or f"-- {stripped}" not in before:
+                continue
+            # When the owning token is a comma AND the preceding token is a
+            # plain expression (not a closing paren), sqlglot's parser moves
+            # the comment to the *preceding* expression node.  That makes it
+            # trailing-sep, not leading.  Skip it here; captured by
+            # _find_trailing_sep_comment_texts instead.
+            if tok.token_type == TokenType.COMMA and prev_type != TokenType.R_PAREN:
+                continue
+            leading.add(stripped)
+    return frozenset(leading)
+
+
+def _find_trailing_sep_comment_texts(sql: str) -> frozenset[str]:
+    """Return stripped texts of comments that sit on their own line *after* an
+    expression and *before* the comma separator that follows it.
+
+    Example::
+
+        ,qualifier
+         -- this comment lives between qualifier and str_split_regex
+        ,str_split_regex(...)
+
+    sqlglot attaches such a comment to the preceding expression (``qualifier``)
+    because the comma token that follows the comment owns it at tokenise-time
+    and the parser moves it backwards.  The generator must render these after
+    the expression's line so they stay between the two columns.
+    """
+    from sqlglot.tokens import TokenType
+
+    tokens = SqlglotTokenizer().tokenize(sql)
+    trailing_sep: set[str] = set()
+    for idx, tok in enumerate(tokens):
+        if not tok.comments or tok.token_type != TokenType.COMMA:
+            continue
+        prev_type = tokens[idx - 1].token_type if idx > 0 else None
+        # Closing paren before comma = end of a body/subquery; the comment
+        # belongs to the *next* expression (e.g. a CTE name), not this rule.
+        if prev_type == TokenType.R_PAREN:
+            continue
+        prev_end = tokens[idx - 1].end if idx > 0 else 0
+        before = sql[prev_end : tok.start]
         for comment in tok.comments:
             stripped = comment.strip()
             if stripped and f"-- {stripped}" in before:
-                leading.add(stripped)
-    return frozenset(leading)
+                trailing_sep.add(stripped)
+    return frozenset(trailing_sep)
 
 
 # ---------------------------------------------------------------------------
