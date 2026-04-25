@@ -192,13 +192,13 @@ class JarifyGenerator(DuckDB.Generator):
                 if not sql:
                     continue
                 leader = " " if i == 0 else ","
-                if isinstance(e, exp.Expr) and e.comments and (
-                    self._leading_comment_texts or self._trailing_sep_comment_texts
+                if (
+                    isinstance(e, exp.Expr)
+                    and e.comments
+                    and (self._leading_comment_texts or self._trailing_sep_comment_texts)
                 ):
                     lead = [c for c in e.comments if c.strip() in self._leading_comment_texts]
-                    trail_sep = [
-                        c for c in e.comments if c.strip() in self._trailing_sep_comment_texts
-                    ]
+                    trail_sep = [c for c in e.comments if c.strip() in self._trailing_sep_comment_texts]
                     trail = [
                         c
                         for c in e.comments
@@ -283,8 +283,7 @@ class JarifyGenerator(DuckDB.Generator):
         return f"{this_sql} AS {alias_name}"
 
     # ------------------------------------------------------------------
-    # CTE formatting: paren on its own line, comma-prefix separator;
-    # table alias with columns gets a space before the column list
+    # CTE formatting: paren on its own line, comma-prefix separator
     # ------------------------------------------------------------------
 
     def tablealias_sql(self, expression: exp.TableAlias) -> str:
@@ -299,8 +298,10 @@ class JarifyGenerator(DuckDB.Generator):
         if not alias and not self.dialect.UNNEST_COLUMN_ONLY:
             alias = self._next_name()
 
-        # Add a space between name and column list: "t (a, b)" not "t(a, b)"
-        return f"{alias} {columns_sql}" if alias and columns_sql else f"{alias}{columns_sql}"
+        # Space before column list only in CTE context: "cte_name (col1, col2)"
+        # Table function aliases like UNNEST keep no space: "t(col)"
+        sep = " " if isinstance(expression.parent, exp.CTE) else ""
+        return f"{alias}{sep}{columns_sql}" if alias and columns_sql else f"{alias}{columns_sql}"
 
     def cte_sql(self, expression: exp.CTE) -> str:
         # Pop comments to prevent double-rendering.  sqlglot attaches leading
