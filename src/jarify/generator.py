@@ -30,6 +30,7 @@ import typing as t
 from typing import TYPE_CHECKING, ClassVar
 
 import sqlglot.expressions as exp
+from sqlglot.dialects.dialect import groupconcat_sql as _groupconcat_sql
 from sqlglot.dialects.duckdb import DuckDB
 
 if TYPE_CHECKING:
@@ -48,8 +49,13 @@ class JarifyGenerator(DuckDB.Generator):
     #
     # We also remove exp.JSONExtract so dispatch falls through to jsonextract_sql, which
     # renders -> and ->> without surrounding spaces (DuckDB style: value->>'key').
+    #
+    # We also remove exp.GroupConcat so dispatch falls through to groupconcat_sql, which
+    # emits `string_agg` (PostgreSQL-compatible) instead of the Oracle-style `listagg` alias.
     TRANSFORMS: ClassVar[dict] = {
-        k: v for k, v in DuckDB.Generator.TRANSFORMS.items() if k not in (exp.Pivot, exp.ArrayContains, exp.JSONExtract)
+        k: v
+        for k, v in DuckDB.Generator.TRANSFORMS.items()
+        if k not in (exp.Pivot, exp.ArrayContains, exp.JSONExtract, exp.GroupConcat)
     }
 
     # Aggregate and window function names that should be uppercased in output.
@@ -73,7 +79,7 @@ class JarifyGenerator(DuckDB.Generator):
                 "boolxor",  # BoolxorAgg
                 "json_arrayagg",  # JSONArrayAgg
                 "json_group_object",  # JSONObjectAgg / JSONBObjectAgg
-                "listagg",  # GroupConcat
+                "string_agg",  # GroupConcat (prefer string_agg over listagg alias)
                 "quantile_cont",  # PercentileCont
                 "quantile_disc",  # PercentileDisc
                 "var_pop",  # VariancePop
@@ -939,6 +945,24 @@ class JarifyGenerator(DuckDB.Generator):
 
     def arraycontains_sql(self, expression: exp.ArrayContains) -> str:
         return self.func("list_contains", expression.this, expression.expression)
+
+    # ------------------------------------------------------------------
+    # string_agg: prefer string_agg (PostgreSQL-compatible) over the
+    # Oracle-style listagg alias that sqlglot's DuckDB generator emits.
+    # ORDER BY inside the aggregate is rendered compactly (non-pretty)
+    # to keep it inline: STRING_AGG(x, ', ' ORDER BY x).
+    # ------------------------------------------------------------------
+
+    def groupconcat_sql(self, expression: exp.GroupConcat) -> str:
+        # _groupconcat_sql mutates the expression via order.this.pop(); copy to
+        # avoid corruption when the generator visits the same node twice (e.g.
+        # during AS-alignment width computation and then actual rendering).
+        saved = self.pretty
+        self.pretty = False
+        try:
+            return _groupconcat_sql(self, expression.copy(), func_name="string_agg", within_group=False)
+        finally:
+            self.pretty = saved
 
     # ------------------------------------------------------------------
     # ifnull: prefer ifnull(a, b) over coalesce(a, b) for 2-arg case.
