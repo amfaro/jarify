@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.4.0] - 2026-04-27
+### Features
+
+- add prefer-neq-operator rule — rewrite <> to != ([#206](https://github.com/amfaro/jarify/pull/206)) ([#206](https://github.com/amfaro/jarify/pull/206))
+
 ## [0.3.3] - 2026-04-27
 ### Bug Fixes
 
