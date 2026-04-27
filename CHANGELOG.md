@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.3.0] - 2026-04-27
+### Features
+
+- promote prefer-group-by-all to auto-fix formatter rule ([#192](https://github.com/amfaro/jarify/pull/192)) ([#192](https://github.com/amfaro/jarify/pull/192))
+
 ## [0.2.0] - 2026-04-27
 ### Features
 
