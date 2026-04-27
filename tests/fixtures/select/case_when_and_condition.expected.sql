@@ -2,9 +2,7 @@
 SELECT
    t.*
   ,s.sku_set
-  ,CASE
-    WHEN s.transform IS NOT NULL AND s.transform.type = 'coverage' THEN t.quantity / s.conversion_rate
-    ELSE t.quantity
-  END AS coverage
+  ,if(s.transform IS NOT NULL
+  AND s.transform.type = 'coverage', t.quantity / s.conversion_rate, t.quantity) AS coverage
 FROM transactions t
 ;

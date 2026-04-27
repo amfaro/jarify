@@ -1010,3 +1010,31 @@ FROM t
 WHERE x != y
 ;
 ```
+
+---
+
+### `prefer-if-over-case`
+
+Rewrite single-branch `CASE WHEN … THEN … [ELSE …] END` expressions to DuckDB's
+`IF(condition, true_val[, false_val])` function. The IF form is shorter and more
+idiomatic for simple conditionals.
+
+Applies only to *searched* CASE with exactly one WHEN branch. Multi-branch CASE and
+simple CASE (`CASE expr WHEN lit …`) are left unchanged.
+
+**Bad**
+```sql
+SELECT
+   CASE WHEN a > 1 THEN 'big' ELSE 'small' END AS size
+  ,CASE WHEN b IS NULL THEN 0 END AS b_or_zero
+FROM t
+```
+
+**Good**
+```sql
+SELECT
+   if(a > 1, 'big', 'small') AS size
+  ,if(b IS NULL, 0) AS b_or_zero
+FROM t
+;
+```

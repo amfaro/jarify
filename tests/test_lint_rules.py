@@ -349,3 +349,35 @@ class TestRustFormatSyntax:
         # Non-template gibberish must still be caught
         rules = _lint("THIS IS NOT VALID SQL @@@!!!")
         assert "parse-error" in rules
+
+
+class TestPreferIfOverCase:
+    def test_warns_on_single_when_with_else(self):
+        sql = "SELECT CASE WHEN a > 1 THEN 'big' ELSE 'small' END FROM t"
+        rules = _lint(sql)
+        assert "prefer-if-over-case" in rules
+
+    def test_warns_on_single_when_no_else(self):
+        sql = "SELECT CASE WHEN b IS NULL THEN 0 END FROM t"
+        rules = _lint(sql)
+        assert "prefer-if-over-case" in rules
+
+    def test_no_warn_on_multi_when(self):
+        sql = "SELECT CASE WHEN a = 1 THEN 'one' WHEN a = 2 THEN 'two' END FROM t"
+        rules = _lint(sql)
+        assert "prefer-if-over-case" not in rules
+
+    def test_no_warn_on_simple_case(self):
+        sql = "SELECT CASE a WHEN 1 THEN 'one' ELSE 'other' END FROM t"
+        rules = _lint(sql)
+        assert "prefer-if-over-case" not in rules
+
+    def test_no_warn_on_already_rewritten(self):
+        sql = "SELECT if(a > 1, 'big', 'small') FROM t"
+        rules = _lint(sql)
+        assert "prefer-if-over-case" not in rules
+
+    def test_off_disables_rule(self):
+        sql = "SELECT CASE WHEN a > 1 THEN 'big' ELSE 'small' END FROM t"
+        rules = _lint(sql, prefer_if_over_case="off")
+        assert "prefer-if-over-case" not in rules
