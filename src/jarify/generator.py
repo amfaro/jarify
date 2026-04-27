@@ -416,20 +416,23 @@ class JarifyGenerator(DuckDB.Generator):
             table_ref = self.table_parts(this)
             alias_str = self._table_alias_str(this)
             if alias_str:
-                # Pad so the alias STARTS at _join_alias_col (start-alignment).
-                pad = " " * max(1, self._join_alias_col - len(op_sql) - 1 - len(table_ref))
+                pad = " " * max(1, self._join_alias_col - len(op_sql) - 1 - len(table_ref) - len(alias_str))
                 return self.seg(f"{op_sql} {table_ref}{pad}{alias_str}{on_sql}")
             return self.seg(f"{op_sql} {table_ref}{on_sql}")
 
         if self._join_alias_col is not None and isinstance(this, exp.Unnest):
             alias_node = this.args.get("alias")
             if alias_node:
-                alias_str = self.sql(alias_node)
+                full_alias = self.sql(alias_node)  # e.g. "gbv(group_by_value)"
+                name_node = alias_node.args.get("this")
+                alias_name = self.sql(name_node) if name_node else full_alias
                 unnest_no_alias = this.copy()
                 unnest_no_alias.set("alias", None)
                 unnest_ref = self.sql(unnest_no_alias)
-                pad = " " * max(1, self._join_alias_col - len(op_sql) - 1 - len(unnest_ref))
-                return self.seg(f"{op_sql} {unnest_ref}{pad}{alias_str}{on_sql}")
+                # Measure by alias name only (end-alignment: alias name ends at
+                # _join_alias_col; column definitions extend past that column).
+                pad = " " * max(1, self._join_alias_col - len(op_sql) - 1 - len(unnest_ref) - len(alias_name))
+                return self.seg(f"{op_sql} {unnest_ref}{pad}{full_alias}{on_sql}")
 
         # No alignment path: render table ref, drop AS for simple tables
         if isinstance(this, exp.Table):
@@ -466,8 +469,7 @@ class JarifyGenerator(DuckDB.Generator):
 
         table_ref = self.table_parts(table)
         if self._join_alias_col is not None:
-            # Pad so the alias STARTS at _join_alias_col (start-alignment).
-            pad = " " * max(1, self._join_alias_col - len("FROM") - 1 - len(table_ref))
+            pad = " " * max(1, self._join_alias_col - len("FROM") - 1 - len(table_ref) - len(alias_str))
             return self.seg(f"FROM {table_ref}{pad}{alias_str}")
         return self.seg(f"FROM {table_ref} {alias_str}")
 
@@ -572,17 +574,26 @@ class JarifyGenerator(DuckDB.Generator):
         max_total = 0
         has_alias = False
         for kw_len, ref, table_expr in entries:
-            alias = self._entry_alias_str(table_expr)
-            if alias:
-                has_alias = True
-                # Start-alignment: measure only kw+ref (not alias length) so
-                # every alias starts at the same column regardless of its width.
-                max_total = max(max_total, kw_len + 1 + len(ref))
+            if isinstance(table_expr, exp.Table):
+                alias = self._table_alias_str(table_expr)
+                if alias:
+                    has_alias = True
+                    max_total = max(max_total, kw_len + 1 + len(ref) + len(alias))
+            elif isinstance(table_expr, exp.Unnest):
+                alias_node = table_expr.args.get("alias")
+                if alias_node:
+                    # Measure by alias name only (e.g. "gbv" not "gbv(col)") so
+                    # column definitions don't inflate the alignment width.
+                    name_node = alias_node.args.get("this")
+                    alias_name = self.sql(name_node) if name_node else ""
+                    if alias_name:
+                        has_alias = True
+                        max_total = max(max_total, kw_len + 1 + len(ref) + len(alias_name))
 
         if not has_alias:
             return None
 
-        return max_total + 1  # +1 for minimum one space before alias
+        return max_total + 1  # +1 for minimum one space before ON/EOL
 
     # ------------------------------------------------------------------
     # Connector: always break AND/OR onto separate lines in pretty mode
