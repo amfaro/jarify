@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.3.2] - 2026-04-27
+### Bug Fixes
+
+- handle mixed agg/non-agg SELECT exprs in prefer-group-by-all ([#198](https://github.com/amfaro/jarify/pull/198)) ([#198](https://github.com/amfaro/jarify/pull/198))
+
 ## [0.3.1] - 2026-04-27
 ### Bug Fixes
 
