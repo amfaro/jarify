@@ -1,15 +1,15 @@
-"""Rule: suggest GROUP BY ALL when all non-aggregated SELECT columns are listed."""
+"""Rule: rewrite explicit GROUP BY column list to GROUP BY ALL when equivalent."""
 
 from __future__ import annotations
 
 import sqlglot.expressions as exp
 
-from jarify.rules.base import LintOnlyRule, _node_pos
+from jarify.rules.base import FormatterRule, _node_pos
 from jarify.types import LintViolation
 
 
-class PreferGroupByAllRule(LintOnlyRule):
-    """Lint: flag explicit GROUP BY col list when GROUP BY ALL would be equivalent."""
+class PreferGroupByAllRule(FormatterRule):
+    """Format and lint: rewrite explicit GROUP BY col list to GROUP BY ALL when equivalent."""
 
     def __init__(self, severity: str = "warn") -> None:
         self.severity = severity
@@ -17,6 +17,31 @@ class PreferGroupByAllRule(LintOnlyRule):
     @property
     def name(self) -> str:
         return "prefer-group-by-all"
+
+    def apply(self, tree: exp.Expression) -> exp.Expression:
+        """Rewrite GROUP BY <cols> → GROUP BY ALL when all non-agg SELECT cols are covered."""
+        for select in tree.find_all(exp.Select):
+            group = select.args.get("group")
+            if not group or not group.expressions:
+                continue
+            if group.args.get("all"):
+                continue
+
+            non_agg_sqls: list[str] = []
+            for item in select.expressions:
+                inner = item.this if isinstance(item, exp.Alias) else item
+                if not inner.find(exp.AggFunc):
+                    non_agg_sqls.append(inner.sql(dialect="duckdb"))
+
+            if not non_agg_sqls:
+                continue
+
+            group_sqls = {e.sql(dialect="duckdb") for e in group.expressions}
+            if set(non_agg_sqls) == group_sqls:
+                group.set("all", True)
+                group.set("expressions", [])
+
+        return tree
 
     def check(self, tree: exp.Expression) -> list[LintViolation]:
         if self.severity == "off":
