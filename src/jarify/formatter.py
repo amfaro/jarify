@@ -14,10 +14,12 @@ from jarify.parser import (
     _extract_ctas_body_placeholders,
     _extract_line_rust_fmt_placeholders,
     _mask_ifnull,
+    _mask_numeric,
     _mask_rust_fmt_placeholders,
     _reinsert_line_rust_fmt_placeholders,
     _restore_ctas_body_placeholders,
     _unmask_ifnull,
+    _unmask_numeric,
     _unmask_rust_fmt_placeholders,
     parse_sql,
 )
@@ -59,6 +61,7 @@ def format_sql(
     stripped_sql, line_insertions = _extract_line_rust_fmt_placeholders(processed_sql)
     masked_sql, inline_mask = _mask_rust_fmt_placeholders(stripped_sql)
     masked_sql = _mask_ifnull(masked_sql)
+    masked_sql = _mask_numeric(masked_sql)
 
     try:
         trees = parse_sql(masked_sql, dialect=config.dialect)
@@ -67,6 +70,7 @@ def format_sql(
         if result is not None:
             result = _unmask_rust_fmt_placeholders(result, inline_mask)
             result = _unmask_ifnull(result)
+            result = _unmask_numeric(result)
             result = _reinsert_line_rust_fmt_placeholders(result, line_insertions)
             return _restore_ctas_body_placeholders(result, ctas_body_map), warnings
         warnings.append(FormatWarning(f"could not parse SQL (formatting skipped): {exc}"))
@@ -87,6 +91,7 @@ def format_sql(
     formatted = "\n;\n\n".join(formatted_parts) + ("\n;\n" if formatted_parts else "")
     formatted = _unmask_rust_fmt_placeholders(formatted, inline_mask)
     formatted = _unmask_ifnull(formatted)
+    formatted = _unmask_numeric(formatted)
     result = _reinsert_line_rust_fmt_placeholders(formatted, line_insertions)
     return _restore_ctas_body_placeholders(result, ctas_body_map), warnings
 
