@@ -46,3 +46,9 @@ uv run pytest tests/test_fixtures.py --update-fixtures
 
 # 3. Review the generated .expected.sql, then commit both files
 ```
+
+## When tests fail
+
+Load `.agents/skills/test-failure-diagnosis/SKILL.md` before editing any test
+assertion or running `--update-fixtures` after an algorithm change. A failing
+test is signal — diagnose before suppressing.
