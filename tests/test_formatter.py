@@ -225,3 +225,27 @@ class TestGroupByPerLine:
         out, _ = format_sql("SELECT a, count(*) FROM t GROUP BY a")
         assert "GROUP BY" in out
         assert "a" in out
+
+
+class TestTrailingRustFmtPlaceholder:
+    """Trailing whole-line Rust format placeholders must land *before* the
+    statement-terminating semicolon, not after it.
+
+    Regression for: formatter inserts ';' between the last SQL clause and a
+    trailing {placeholder}, producing invalid SQL when Rust substitutes a
+    non-empty value (e.g. 'WHERE seller_key = ...').
+    """
+
+    def test_placeholder_before_semicolon(self):
+        sql = "SELECT a, b\nFROM t\n{filter}"
+        out, _ = format_sql(sql)
+        lines = out.splitlines()
+        filter_idx = next(i for i, line in enumerate(lines) if "{filter}" in line)
+        semi_idx = next(i for i, line in enumerate(lines) if line.strip() == ";")
+        assert filter_idx < semi_idx, f"{{filter}} (line {filter_idx}) must appear before ';' (line {semi_idx}):\n{out}"
+
+    def test_idempotent(self):
+        sql = "SELECT a, b\nFROM t\n{filter}"
+        out, _ = format_sql(sql)
+        out2, _ = format_sql(out)
+        assert out == out2, f"Formatting is not idempotent:\nFirst pass:\n{out}\nSecond pass:\n{out2}"
