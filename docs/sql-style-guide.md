@@ -384,6 +384,22 @@ FROM my_table t
 ;
 ```
 
+This applies equally to **table-function aliases** such as `UNNEST`. The `AS` keyword is dropped before the alias and any named column list.
+
+**Bad**
+```sql
+SELECT o.* FROM offers o CROSS JOIN UNNEST(o.vals) AS t(v)
+```
+
+**Good**
+```sql
+SELECT
+   o.*
+FROM offers o
+CROSS JOIN UNNEST(o.vals) t(v)
+;
+```
+
 ---
 
 ### Column alias alignment
@@ -408,7 +424,7 @@ FROM t
 
 ### `JOIN` formatting — inline `ON`, aligned aliases
 
-When a `FROM`/`JOIN` block contains only simple table references, aliases are right-aligned — the **end** of every alias lands at the same column (determined by the widest `keyword + table_name + alias` in the block).
+When a `FROM`/`JOIN` block contains only simple table references and/or `UNNEST` table-function calls, aliases are **start-aligned** — every alias begins at the same column (determined by the widest `keyword + table_ref` in the block).
 
 **Bad**
 ```sql
@@ -419,9 +435,19 @@ SELECT a FROM orders AS o LEFT JOIN users AS u ON u.id = o.user_id LEFT JOIN add
 ```sql
 SELECT
    a
-FROM orders            o
-LEFT JOIN users        u ON u.id = o.user_id
+FROM orders          o
+LEFT JOIN users      u ON u.id = o.user_id
 LEFT JOIN addresses addr ON addr.id = o.aid
+;
+```
+
+`UNNEST` table-function calls participate in the same alignment:
+
+```sql
+SELECT
+   o.*
+FROM offers                          o
+CROSS JOIN UNNEST(o.group_by_values) gbv(group_by_value)
 ;
 ```
 

@@ -185,7 +185,7 @@ class TestJoinFormatting:
         o_col = alias_col(from_line, "o")
         u_col = alias_col(join_lines[0], "u")
         addr_col = alias_col(join_lines[1], "addr")
-        # Right-alignment: the END of each alias lands at the same column
+        # End-alignment: the END of each alias lands at the same column.
         o_end = o_col + len("o")
         u_end = u_col + len("u")
         addr_end = addr_col + len("addr")
