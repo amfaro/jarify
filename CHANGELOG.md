@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.3.1] - 2026-04-27
+### Bug Fixes
+
+- preserve bare numeric/decimal without injecting default precision ([#195](https://github.com/amfaro/jarify/pull/195)) ([#195](https://github.com/amfaro/jarify/pull/195))
+
 ## [0.3.0] - 2026-04-27
 ### Features
 
