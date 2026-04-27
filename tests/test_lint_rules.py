@@ -211,6 +211,20 @@ class TestPreferGroupByAll:
         rules = _lint(sql, prefer_group_by_all="off")
         assert "prefer-group-by-all" not in rules
 
+    def test_warns_when_list_agg_present(self):
+        # list() in DuckDB is parsed as exp.List (not exp.AggFunc); it must be
+        # treated as an aggregate so the rule fires correctly.
+        sql = "SELECT program_key, list(val ORDER BY val) AS vals FROM t GROUP BY program_key"
+        rules = _lint(sql)
+        assert "prefer-group-by-all" in rules
+
+    def test_no_warn_when_list_agg_is_the_only_expr(self):
+        # If every SELECT item is a list() aggregate there is no non-agg column
+        # to group by, so the rule should not fire.
+        sql = "SELECT list(val ORDER BY val) AS vals FROM t GROUP BY ALL"
+        rules = _lint(sql)
+        assert "prefer-group-by-all" not in rules
+
 
 class TestPreferUsingOverOn:
     def test_warns_on_same_column_name_equijoin(self):
