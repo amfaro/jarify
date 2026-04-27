@@ -88,11 +88,20 @@ def format_sql(
         tree = _apply_rules(tree, rules)
         formatted_parts.append(generator.generate(tree))
 
-    formatted = "\n;\n\n".join(formatted_parts) + ("\n;\n" if formatted_parts else "")
+    # Join statements but hold off on the trailing ;\n -- it must come *after*
+    # no-anchor line placeholders are re-inserted, otherwise a trailing
+    # {placeholder} ends up after the semicolon instead of before it, which
+    # breaks SQL templates that use the placeholder as an optional WHERE clause.
+    # A trailing \n is appended to ensure the last line ends with a newline so
+    # that no-anchor placeholder re-insertion does not concatenate directly onto
+    # the last SQL token without a line break.
+    formatted = "\n;\n\n".join(formatted_parts) + ("\n" if formatted_parts else "")
     formatted = _unmask_rust_fmt_placeholders(formatted, inline_mask)
     formatted = _unmask_ifnull(formatted)
     formatted = _unmask_numeric(formatted)
     result = _reinsert_line_rust_fmt_placeholders(formatted, line_insertions)
+    if formatted_parts:
+        result = result.rstrip() + "\n;\n"
     return _restore_ctas_body_placeholders(result, ctas_body_map), warnings
 
 
