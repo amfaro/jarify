@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.1] - 2026-04-27
+### Bug Fixes
+
+- treat list() as aggregate in prefer-group-by-all ([#210](https://github.com/amfaro/jarify/pull/210)) ([#210](https://github.com/amfaro/jarify/pull/210))
+
 ## [0.5.0] - 2026-04-27
 ### Features
 
