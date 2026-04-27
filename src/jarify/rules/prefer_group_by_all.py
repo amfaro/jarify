@@ -7,6 +7,10 @@ import sqlglot.expressions as exp
 from jarify.rules.base import FormatterRule, _node_pos
 from jarify.types import LintViolation
 
+# DuckDB's list() aggregate is parsed by sqlglot as exp.List (Func, not AggFunc).
+# Treat it the same as AggFunc so it does not count as a free column reference.
+_AGG_TYPES = (exp.AggFunc, exp.List)
+
 
 def _free_col_refs(expr: exp.Expression) -> set[str]:
     """Return SQL strings of Column nodes in *expr* that are not inside any AggFunc.
@@ -16,7 +20,7 @@ def _free_col_refs(expr: exp.Expression) -> set[str]:
     need the full expression SQL for purely non-aggregate items should call
     ``expr.sql()`` directly instead.
     """
-    if isinstance(expr, exp.AggFunc):
+    if isinstance(expr, _AGG_TYPES):
         return set()
     if isinstance(expr, exp.Column):
         return {expr.sql(dialect="duckdb")}
@@ -47,7 +51,7 @@ def _non_agg_sqls(select: exp.Select) -> set[str]:
     result: set[str] = set()
     for item in select.expressions:
         inner = item.this if isinstance(item, exp.Alias) else item
-        if not inner.find(exp.AggFunc):
+        if not inner.find(*_AGG_TYPES):
             # Entirely non-aggregate — use the whole expression as-is.
             result.add(inner.sql(dialect="duckdb"))
         else:
