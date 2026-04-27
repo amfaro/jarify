@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.34] - 2026-04-27
+### Bug Fixes
+
+- strip AS from UNNEST function aliases ([#185](https://github.com/amfaro/jarify/pull/185)) ([#185](https://github.com/amfaro/jarify/pull/185))
+
 ## [0.1.33] - 2026-04-27
 ### Bug Fixes
 
