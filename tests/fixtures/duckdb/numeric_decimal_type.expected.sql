@@ -1,8 +1,8 @@
 SELECT
-   x::decimal
+   x::numeric
   ,x::decimal
   ,x::decimal(10, 2)
-  ,x::decimal(8, 4)
-  ,(ir.rate_data->>'value')::decimal
+  ,x::numeric(8, 4)
+  ,(ir.rate_data->>'value')::numeric
 FROM t
 ;

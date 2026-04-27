@@ -288,6 +288,29 @@ def _unmask_ifnull(sql: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# numeric preservation
+# ---------------------------------------------------------------------------
+# sqlglot's DuckDB dialect normalises NUMERIC to DType.DECIMAL at parse time,
+# losing the original keyword.  We mask it with a same-length sentinel so the
+# original spelling is preserved through the format round-trip.
+#
+# Sentinel is 7 chars (same as "numeric") so type-column alignment in CREATE
+# TABLE is not disturbed before the unmask.
+_NUMERIC_SENTINEL = "_numer_"
+_NUMERIC_RE = re.compile(r"\bnumeric\b", re.IGNORECASE)
+
+
+def _mask_numeric(sql: str) -> str:
+    """Replace numeric with a sentinel so sqlglot doesn't normalise it to decimal."""
+    return _NUMERIC_RE.sub(_NUMERIC_SENTINEL, sql)
+
+
+def _unmask_numeric(sql: str) -> str:
+    """Restore numeric from its sentinel."""
+    return sql.replace(_NUMERIC_SENTINEL, "numeric")
+
+
+# ---------------------------------------------------------------------------
 # Reserved-keyword type-cast pre-processor
 # ---------------------------------------------------------------------------
 # DuckDB allows user-defined types whose names are SQL reserved words, e.g.
