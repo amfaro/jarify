@@ -693,7 +693,9 @@ class JarifyGenerator(DuckDB.Generator):
 
         compact_stmts = _build(align=False)
         compact_inline = " ".join(compact_stmts)
-        if not (self.pretty and self.too_wide([compact_inline])):
+        # In pretty mode, always emit multi-line — every WHEN/ELSE branch on its
+        # own line. Inline only in non-pretty (e.g. compact sub-expression) mode.
+        if not self.pretty:
             return compact_inline
 
         # Multi-line: align THEN when all branches have single-line THEN values
