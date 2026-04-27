@@ -384,6 +384,22 @@ FROM my_table t
 ;
 ```
 
+This applies equally to **table-function aliases** such as `UNNEST`. The `AS` keyword is dropped before the alias and any named column list.
+
+**Bad**
+```sql
+SELECT o.* FROM offers o CROSS JOIN UNNEST(o.vals) AS t(v)
+```
+
+**Good**
+```sql
+SELECT
+   o.*
+FROM offers o
+CROSS JOIN UNNEST(o.vals) t(v)
+;
+```
+
 ---
 
 ### Column alias alignment

@@ -303,6 +303,33 @@ class JarifyGenerator(DuckDB.Generator):
         sep = " " if isinstance(expression.parent, exp.CTE) else ""
         return f"{alias}{sep}{columns_sql}" if alias and columns_sql else f"{alias}{columns_sql}"
 
+    def unnest_sql(self, expression: exp.Unnest) -> str:
+        """Override to omit AS before UNNEST function aliases.
+
+        sqlglot's base Generator.unnest_sql hardcodes " AS {alias}"; this
+        override drops the keyword to match jarify's table-alias convention.
+        """
+        args = self.expressions(expression, flat=True)
+        alias = expression.args.get("alias")
+        offset = expression.args.get("offset")
+
+        if self.UNNEST_WITH_ORDINALITY and alias and isinstance(offset, exp.Expr):
+            alias.append("columns", offset)
+
+        alias_str = f" {self.sql(alias)}" if alias else ""
+
+        if self.UNNEST_WITH_ORDINALITY:
+            suffix = f" WITH ORDINALITY{alias_str}" if offset else alias_str
+        else:
+            if isinstance(offset, exp.Expr):
+                suffix = f"{alias_str} WITH OFFSET AS {self.sql(offset)}"
+            elif offset:
+                suffix = f"{alias_str} WITH OFFSET"
+            else:
+                suffix = alias_str
+
+        return f"UNNEST({args}){suffix}"
+
     def cte_sql(self, expression: exp.CTE) -> str:
         # Pop comments to prevent double-rendering.  sqlglot attaches leading
         # comments to the TableAlias child, not the CTE node itself, so we
