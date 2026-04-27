@@ -61,10 +61,7 @@ SELECT
   ,p.program_redemption_price
   ,p.origin
   ,all_e.participant_key
-  ,CASE
-    WHEN e.participant_key IS NOT NULL THEN 'Y'
-    ELSE 'N'
-  END AS enrolled
+  ,if(e.participant_key IS NOT NULL, 'Y', 'N') AS enrolled
   ,sc.version
 FROM _relevant_skus rs
 INNER JOIN _sku_catalog sc ON sc.sku_key = rs.sku_key AND sc.manufacturer_key = rs.program_supplier_key

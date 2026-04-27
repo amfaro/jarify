@@ -651,6 +651,20 @@ class JarifyGenerator(DuckDB.Generator):
         return super().paren_sql(expression)
 
     # ------------------------------------------------------------------
+    # IF(): render exp.If as the DuckDB IF() function (not CASE WHEN)
+    # ------------------------------------------------------------------
+
+    def if_sql(self, expression: exp.If) -> str:
+        """Render exp.If as DuckDB's IF(cond, then[, else]) function call.
+
+        sqlglot's default converts exp.If back to a CASE WHEN expression;
+        this override preserves the compact IF() form that jarify prefers.
+        """
+        if expression.args.get("false") is not None:
+            return self.func("IF", expression.this, expression.args["true"], expression.args["false"])
+        return self.func("IF", expression.this, expression.args["true"])
+
+    # ------------------------------------------------------------------
     # CASE: keep WHEN/THEN on one line; align THEN across branches;
     # compact THEN/ELSE values so OR/AND chains don't expand.
     # ------------------------------------------------------------------
