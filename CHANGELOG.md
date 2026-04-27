@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.33] - 2026-04-27
+### Bug Fixes
+
+- normalise OUTER before computing join alias alignment width ([#182](https://github.com/amfaro/jarify/pull/182)) ([#182](https://github.com/amfaro/jarify/pull/182))
+
 ## [0.1.32] - 2026-04-25
 ### Bug Fixes
 
