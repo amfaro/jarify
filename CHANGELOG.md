@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.0] - 2026-04-27
+### Features
+
+- add prefer-if-over-case rule — rewrite single-WHEN CASE to IF() ([#208](https://github.com/amfaro/jarify/pull/208)) ([#208](https://github.com/amfaro/jarify/pull/208))
+
 ## [0.4.0] - 2026-04-27
 ### Features
 
