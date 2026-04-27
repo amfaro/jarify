@@ -1,4 +1,4 @@
--- simple searched case: short THEN values stay on one line
+-- simple searched case: short THEN values, multi-line
 SELECT
   CASE status
     WHEN 'active' THEN true
@@ -20,7 +20,7 @@ SELECT
 FROM t
 ;
 
--- general case expression: short THEN values stay on one line
+-- general case expression: short THEN values, multi-line
 SELECT
   CASE
     WHEN x > 0 THEN 'positive'

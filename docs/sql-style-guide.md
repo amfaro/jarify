@@ -601,6 +601,42 @@ FROM t
 
 ---
 
+### `CASE` — always multi-line
+
+`CASE` expressions are always formatted across multiple lines in pretty mode, regardless of branch count or line length. Each `WHEN … THEN` pair appears on its own line, and `THEN` values are column-aligned when all branches fit on a single line.
+
+**Bad** (flattened to one line)
+```sql
+SELECT CASE o.part WHEN 'AND' THEN '&&' WHEN 'OR' THEN '||' WHEN 'NOT' THEN '!' ELSE ifnull(qr.met::text, o.part) END AS expr
+FROM data
+```
+
+**Good**
+```sql
+SELECT
+   *
+  ,CASE o.part
+    WHEN 'AND' THEN '&&'
+    WHEN 'OR'  THEN '||'
+    WHEN 'NOT' THEN '!'
+    ELSE ifnull(qr.met::text, o.part)
+  END AS expr
+FROM data
+```
+
+**Also good** (even 2 branches go multi-line)
+```sql
+SELECT
+   CASE status
+    WHEN 'active'   THEN true
+    WHEN 'inactive' THEN false
+    ELSE NULL
+  END AS is_active
+FROM accounts
+```
+
+---
+
 ### `SELECT *` — rewritten as FROM-first
 
 `SELECT *` is rewritten to DuckDB's FROM-first syntax, omitting the `SELECT` clause entirely. Applies only when there are no JOINs.
