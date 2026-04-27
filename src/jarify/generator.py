@@ -416,9 +416,20 @@ class JarifyGenerator(DuckDB.Generator):
             table_ref = self.table_parts(this)
             alias_str = self._table_alias_str(this)
             if alias_str:
-                pad = " " * max(1, self._join_alias_col - len(op_sql) - 1 - len(table_ref) - len(alias_str))
+                # Pad so the alias STARTS at _join_alias_col (start-alignment).
+                pad = " " * max(1, self._join_alias_col - len(op_sql) - 1 - len(table_ref))
                 return self.seg(f"{op_sql} {table_ref}{pad}{alias_str}{on_sql}")
             return self.seg(f"{op_sql} {table_ref}{on_sql}")
+
+        if self._join_alias_col is not None and isinstance(this, exp.Unnest):
+            alias_node = this.args.get("alias")
+            if alias_node:
+                alias_str = self.sql(alias_node)
+                unnest_no_alias = this.copy()
+                unnest_no_alias.set("alias", None)
+                unnest_ref = self.sql(unnest_no_alias)
+                pad = " " * max(1, self._join_alias_col - len(op_sql) - 1 - len(unnest_ref))
+                return self.seg(f"{op_sql} {unnest_ref}{pad}{alias_str}{on_sql}")
 
         # No alignment path: render table ref, drop AS for simple tables
         if isinstance(this, exp.Table):
@@ -455,7 +466,8 @@ class JarifyGenerator(DuckDB.Generator):
 
         table_ref = self.table_parts(table)
         if self._join_alias_col is not None:
-            pad = " " * max(1, self._join_alias_col - len("FROM") - 1 - len(table_ref) - len(alias_str))
+            # Pad so the alias STARTS at _join_alias_col (start-alignment).
+            pad = " " * max(1, self._join_alias_col - len("FROM") - 1 - len(table_ref))
             return self.seg(f"FROM {table_ref}{pad}{alias_str}")
         return self.seg(f"FROM {table_ref} {alias_str}")
 
@@ -495,20 +507,39 @@ class JarifyGenerator(DuckDB.Generator):
             return f" USING ({cols})"
         return ""
 
+    def _entry_alias_str(self, table_expr: exp.Expression) -> str:
+        """Return the rendered alias string for a FROM/JOIN entry (Table or Unnest)."""
+        if isinstance(table_expr, exp.Table):
+            return self._table_alias_str(table_expr)
+        if isinstance(table_expr, exp.Unnest):
+            alias_node = table_expr.args.get("alias")
+            return self.sql(alias_node) if alias_node else ""
+        return ""
+
     def _table_ref_only_sql(self, table_expr: exp.Expression) -> str | None:
-        """Return the table reference string (no alias) for simple tables, else None."""
+        """Return the table reference string (no alias) for simple tables and
+        table-function calls (e.g. UNNEST), else None.
+
+        For UNNEST the alias is stripped before rendering so only the function
+        call itself is measured.
+        """
         if isinstance(table_expr, exp.Table):
             ref = self.table_parts(table_expr)
+            return None if "\n" in ref else ref
+        if isinstance(table_expr, exp.Unnest):
+            stripped = table_expr.copy()
+            stripped.set("alias", None)
+            ref = self.sql(stripped)
             return None if "\n" in ref else ref
         return None
 
     def _compute_join_align_width(self, expression: exp.Select) -> int | None:
-        """Compute the right-alignment column for the FROM/JOIN block.
+        """Compute the start-alignment column for aliases in the FROM/JOIN block.
 
-        Returns `max(kw_len + 1 + table_len + alias_len) + 1` across all aliased
-        entries, so that the END of every alias lands at the same column (one space
-        before the ON/USING keyword or end of line).  Returns None when alignment
-        should be skipped (any entry uses a subquery, or no entries have aliases).
+        Returns `max(kw_len + 1 + ref_len) + 1` across all aliased entries so
+        that every alias STARTS at the same column regardless of its own length.
+        Returns None when alignment should be skipped (any entry uses a
+        subquery, or no entries have aliases).
         """
         from_expr = expression.args.get("from_")
         joins = expression.args.get("joins") or []
@@ -541,16 +572,17 @@ class JarifyGenerator(DuckDB.Generator):
         max_total = 0
         has_alias = False
         for kw_len, ref, table_expr in entries:
-            if isinstance(table_expr, exp.Table):
-                alias = self._table_alias_str(table_expr)
-                if alias:
-                    has_alias = True
-                    max_total = max(max_total, kw_len + 1 + len(ref) + len(alias))
+            alias = self._entry_alias_str(table_expr)
+            if alias:
+                has_alias = True
+                # Start-alignment: measure only kw+ref (not alias length) so
+                # every alias starts at the same column regardless of its width.
+                max_total = max(max_total, kw_len + 1 + len(ref))
 
         if not has_alias:
             return None
 
-        return max_total + 1  # +1 for minimum one space before ON/EOL
+        return max_total + 1  # +1 for minimum one space before alias
 
     # ------------------------------------------------------------------
     # Connector: always break AND/OR onto separate lines in pretty mode
