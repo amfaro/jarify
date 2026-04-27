@@ -8,6 +8,54 @@ from jarify.rules.base import FormatterRule, _node_pos
 from jarify.types import LintViolation
 
 
+def _free_col_refs(expr: exp.Expression) -> set[str]:
+    """Return SQL strings of Column nodes in *expr* that are not inside any AggFunc.
+
+    For a purely non-aggregate expression like ``LOWER(name)`` this returns
+    ``{"name"}`` (the leaf column, not the whole expression).  Callers that
+    need the full expression SQL for purely non-aggregate items should call
+    ``expr.sql()`` directly instead.
+    """
+    if isinstance(expr, exp.AggFunc):
+        return set()
+    if isinstance(expr, exp.Column):
+        return {expr.sql(dialect="duckdb")}
+    result: set[str] = set()
+    for child in expr.args.values():
+        if isinstance(child, list):
+            for c in child:
+                if isinstance(c, exp.Expression):
+                    result |= _free_col_refs(c)
+        elif isinstance(child, exp.Expression):
+            result |= _free_col_refs(child)
+    return result
+
+
+def _non_agg_sqls(select: exp.Select) -> set[str]:
+    """Derive the set of "non-aggregate expressions" that GROUP BY ALL would use.
+
+    Rules:
+    - If a SELECT item contains **no** AggFunc anywhere, the whole item counts
+      as a GROUP BY candidate (e.g. ``LOWER(name)``, ``col1``).
+    - If a SELECT item is a **mixed** expression (contains an AggFunc *and*
+      free column references outside that AggFunc), those free column refs are
+      the GROUP BY candidates (e.g. ``'prefix' || col1 || STRING_AGG(x)``
+      contributes ``col1``).
+    - Pure aggregate items (e.g. ``SUM(col)`` with no outer column refs)
+      contribute nothing.
+    """
+    result: set[str] = set()
+    for item in select.expressions:
+        inner = item.this if isinstance(item, exp.Alias) else item
+        if not inner.find(exp.AggFunc):
+            # Entirely non-aggregate — use the whole expression as-is.
+            result.add(inner.sql(dialect="duckdb"))
+        else:
+            # Mixed or pure aggregate — collect free (non-agg) column refs.
+            result |= _free_col_refs(inner)
+    return result
+
+
 class PreferGroupByAllRule(FormatterRule):
     """Format and lint: rewrite explicit GROUP BY col list to GROUP BY ALL when equivalent."""
 
@@ -27,17 +75,12 @@ class PreferGroupByAllRule(FormatterRule):
             if group.args.get("all"):
                 continue
 
-            non_agg_sqls: list[str] = []
-            for item in select.expressions:
-                inner = item.this if isinstance(item, exp.Alias) else item
-                if not inner.find(exp.AggFunc):
-                    non_agg_sqls.append(inner.sql(dialect="duckdb"))
-
-            if not non_agg_sqls:
+            non_agg = _non_agg_sqls(select)
+            if not non_agg:
                 continue
 
             group_sqls = {e.sql(dialect="duckdb") for e in group.expressions}
-            if set(non_agg_sqls) == group_sqls:
+            if non_agg == group_sqls:
                 group.set("all", True)
                 group.set("expressions", [])
 
@@ -56,20 +99,12 @@ class PreferGroupByAllRule(FormatterRule):
                 # Already GROUP BY ALL — nothing to flag
                 continue
 
-            # Collect non-aggregate SELECT expressions (unwrap aliases)
-            non_agg_sqls: list[str] = []
-            for item in select.expressions:
-                inner = item.this if isinstance(item, exp.Alias) else item
-                if not inner.find(exp.AggFunc):
-                    non_agg_sqls.append(inner.sql(dialect="duckdb"))
-
-            if not non_agg_sqls:
+            non_agg = _non_agg_sqls(select)
+            if not non_agg:
                 continue
 
             group_sqls = {e.sql(dialect="duckdb") for e in group.expressions}
-            non_agg_set = set(non_agg_sqls)
-
-            if non_agg_set and non_agg_set == group_sqls:
+            if non_agg == group_sqls:
                 _line, _col = _node_pos(group)
                 violations.append(
                     LintViolation(
