@@ -496,7 +496,16 @@ class JarifyGenerator(DuckDB.Generator):
         entries.append((len("FROM"), from_ref, from_expr.this))
 
         for join in joins:
-            kw = self._join_keyword(join)
+            # Normalize OUTER before measuring keyword length so the alignment
+            # width matches what join_sql actually renders.  For example,
+            # LEFT OUTER JOIN (15 chars) is rendered as LEFT JOIN (9 chars),
+            # so we must use the post-normalization keyword here.
+            if join.side in ("LEFT", "RIGHT") and join.kind == "OUTER":
+                normalized = join.copy()
+                normalized.set("kind", None)
+                kw = self._join_keyword(normalized)
+            else:
+                kw = self._join_keyword(join)
             ref = self._table_ref_only_sql(join.this)
             if ref is None:
                 return None
