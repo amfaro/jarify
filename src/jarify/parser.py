@@ -4,12 +4,39 @@ from __future__ import annotations
 
 import functools
 import re
+import typing
 
 import sqlglot
+import sqlglot.expressions as _exp
+from sqlglot.dialects.duckdb import DuckDB as _DuckDB
 from sqlglot.errors import ParseError
 from sqlglot.expressions import Expression
 
 DUCKDB_DIALECT = "duckdb"
+
+# ---------------------------------------------------------------------------
+# Custom DuckDB dialect — preserve bare NUMERIC/DECIMAL without injecting
+# default precision/scale into the AST.
+# ---------------------------------------------------------------------------
+# sqlglot's DuckDB parser registers a TYPE_CONVERTERS handler for DECIMAL that
+# calls build_default_decimal_type(precision=18, scale=3).  This fires for any
+# bare NUMERIC or DECIMAL type (no user-supplied params) and injects (18, 3)
+# into the AST, causing jarify to regenerate `decimal(18, 3)` when the
+# original SQL only said `numeric` or `decimal`.  We remove that converter so
+# bare types stay bare and round-trip cleanly.
+
+
+class _JarifyDuckDBParser(_DuckDB.Parser):
+    TYPE_CONVERTERS: typing.ClassVar = {
+        k: v for k, v in _DuckDB.Parser.TYPE_CONVERTERS.items() if k != _exp.DType.DECIMAL
+    }
+
+
+class _JarifyDuckDB(_DuckDB):
+    Parser = _JarifyDuckDBParser
+
+
+_JARIFY_DIALECT: type[_DuckDB] = _JarifyDuckDB
 
 # ---------------------------------------------------------------------------
 # Rust format-string placeholder handling
@@ -316,6 +343,16 @@ def _quote_reserved_cast_types(sql: str) -> str:
     return _reserved_cast_re().sub(_replacer, sql)
 
 
+def _read_dialect(dialect: str) -> type[_DuckDB] | str:
+    """Return the parser dialect to use for *dialect*.
+
+    For the DuckDB dialect we substitute our custom subclass that preserves
+    bare NUMERIC/DECIMAL types without injecting default precision/scale.
+    All other dialects are passed through unchanged.
+    """
+    return _JARIFY_DIALECT if dialect == DUCKDB_DIALECT else dialect
+
+
 def parse_sql(sql: str, dialect: str = DUCKDB_DIALECT) -> list[Expression]:
     """Parse a SQL string into a list of sqlglot expression trees.
 
@@ -324,23 +361,24 @@ def parse_sql(sql: str, dialect: str = DUCKDB_DIALECT) -> list[Expression]:
     ``::filter[]``) so sqlglot can handle them.
     """
     preprocessed = _quote_reserved_cast_types(sql)
-    return sqlglot.parse(preprocessed, read=dialect, error_level=sqlglot.ErrorLevel.RAISE)
+    return sqlglot.parse(preprocessed, read=_read_dialect(dialect), error_level=sqlglot.ErrorLevel.RAISE)
 
 
 def parse_sql_lenient(sql: str, dialect: str = DUCKDB_DIALECT) -> tuple[list[Expression], list[ParseError]]:
     """Parse SQL leniently, collecting errors instead of raising."""
     preprocessed = _quote_reserved_cast_types(sql)
+    read = _read_dialect(dialect)
     errors: list[ParseError] = []
     try:
-        trees = sqlglot.parse(preprocessed, read=dialect, error_level=sqlglot.ErrorLevel.RAISE)
+        trees = sqlglot.parse(preprocessed, read=read, error_level=sqlglot.ErrorLevel.RAISE)
     except ParseError:
         # Fall back to lenient parsing so we still get partial trees.
         # Use IGNORE (not WARN) to suppress sqlglot's side-effect stderr prints;
         # errors are re-captured via the RAISE pass below.
-        trees = sqlglot.parse(preprocessed, read=dialect, error_level=sqlglot.ErrorLevel.IGNORE)
+        trees = sqlglot.parse(preprocessed, read=read, error_level=sqlglot.ErrorLevel.IGNORE)
         # Re-parse to capture the actual errors
         try:
-            sqlglot.parse(preprocessed, read=dialect, error_level=sqlglot.ErrorLevel.RAISE)
+            sqlglot.parse(preprocessed, read=read, error_level=sqlglot.ErrorLevel.RAISE)
         except ParseError as e:
             errors.append(e)
     return trees, errors
