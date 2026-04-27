@@ -986,3 +986,27 @@ SELECT
 FROM _base
 ;
 ```
+
+---
+
+### `prefer-neq-operator`
+
+Always use `!=` for inequality comparisons instead of the SQL-92 `<>` operator.
+Both are valid in DuckDB, but `!=` is the modern standard.
+The formatter rewrites `<>` to `!=` automatically.
+
+**Bad**
+```sql
+SELECT a
+FROM t
+WHERE x <> y
+```
+
+**Good**
+```sql
+SELECT
+   a
+FROM t
+WHERE x != y
+;
+```

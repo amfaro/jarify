@@ -862,6 +862,12 @@ class JarifyGenerator(DuckDB.Generator):
         return super().star_sql(expression)
 
     # ------------------------------------------------------------------
+    # Inequality operator: always emit != (never <>)
+    # ------------------------------------------------------------------
+
+    def neq_sql(self, expression: exp.NEQ) -> str:
+        return self.binary(expression, "!=")
+
     # IS NOT NULL: preserve original form instead of NOT x IS NULL
     # ------------------------------------------------------------------
 
