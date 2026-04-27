@@ -15,6 +15,7 @@ from jarify.rules.no_select_star import NoSelectStarRule
 from jarify.rules.no_select_star_in_cte import NoSelectStarInCteRule
 from jarify.rules.no_unused_cte import NoUnusedCteRule
 from jarify.rules.prefer_group_by_all import PreferGroupByAllRule
+from jarify.rules.prefer_neq_operator import PreferNeqOperatorRule
 from jarify.rules.prefer_using_over_on import PreferUsingOverOnRule
 from jarify.rules.trailing_commas import TrailingCommasRule
 
@@ -58,5 +59,7 @@ def get_default_rules(config: JarifyConfig) -> list[FormatterRule]:
         rules.append(ConsistentEmptyArrayRule(severity=config.consistent_empty_array))
     if config.no_select_star_in_cte != "off":
         rules.append(NoSelectStarInCteRule(severity=config.no_select_star_in_cte))
+    if config.prefer_neq_operator != "off":
+        rules.append(PreferNeqOperatorRule(severity=config.prefer_neq_operator))
 
     return rules

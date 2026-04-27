@@ -308,6 +308,23 @@ class TestViolationPositions:
         assert v.line is not None, "line should not be None"
 
 
+class TestPreferNeqOperator:
+    def test_warns_on_diamond_operator(self):
+        sql = "SELECT a FROM t WHERE x <> y"
+        rules = _lint(sql)
+        assert "prefer-neq-operator" in rules
+
+    def test_warns_on_multiple_neq_expressions(self):
+        sql = "SELECT a FROM t WHERE x <> y AND p <> q"
+        rules = _lint(sql)
+        assert rules.count("prefer-neq-operator") == 2
+
+    def test_off_disables_rule(self):
+        sql = "SELECT a FROM t WHERE x <> y"
+        rules = _lint(sql, prefer_neq_operator="off")
+        assert "prefer-neq-operator" not in rules
+
+
 class TestRustFormatSyntax:
     """SQL files used as Rust format-string templates must not emit parse errors."""
 
