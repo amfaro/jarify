@@ -903,7 +903,7 @@ QUALIFY
 
 ### `prefer-group-by-all`
 
-Flag explicit `GROUP BY col1, col2, ...` when all non-aggregated `SELECT` columns are listed. Use `GROUP BY ALL` instead.
+**Auto-fixed by `fmt`.** Rewrites explicit `GROUP BY col1, col2, ...` to `GROUP BY ALL` when all non-aggregated `SELECT` columns are listed.
 
 **Bad**
 ```sql

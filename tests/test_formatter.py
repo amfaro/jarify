@@ -205,10 +205,15 @@ class TestJoinFormatting:
 
 class TestGroupByPerLine:
     def test_group_by_multi_column_one_per_line(self):
+        # When all non-agg columns are in GROUP BY, the formatter rewrites to GROUP BY ALL.
         out, _ = format_sql("SELECT a, b, count(*) FROM t GROUP BY a, b")
+        assert "GROUP BY ALL" in out
+
+    def test_group_by_explicit_when_partial(self):
+        # When only a subset of non-agg columns is listed, keep explicit GROUP BY.
+        out, _ = format_sql("SELECT a, b, c, count(*) FROM t GROUP BY a, b")
         lines = out.splitlines()
         group_by_idx = next(i for i, line in enumerate(lines) if "GROUP BY" in line)
-        # The line with GROUP BY should not contain column names on the same line
         group_by_line = lines[group_by_idx]
         assert group_by_line.strip() == "GROUP BY", f"Expected 'GROUP BY' on its own line, got: {group_by_line!r}"
 
