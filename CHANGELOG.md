@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.0] - 2026-04-27
+### Features
+
+- always emit CASE expressions as multi-line in pretty mode ([#189](https://github.com/amfaro/jarify/pull/189)) ([#189](https://github.com/amfaro/jarify/pull/189))
+
 ## [0.1.34] - 2026-04-27
 ### Bug Fixes
 
