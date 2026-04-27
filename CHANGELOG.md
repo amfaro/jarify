@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.3.3] - 2026-04-27
+### Bug Fixes
+
+- place trailing rust fmt placeholder before statement terminator ([#201](https://github.com/amfaro/jarify/pull/201)) ([#201](https://github.com/amfaro/jarify/pull/201))
+
 ## [0.3.2] - 2026-04-27
 ### Bug Fixes
 
