@@ -215,7 +215,7 @@ class JarifyGenerator(DuckDB.Generator):
         dynamic: bool = False,
         new_line: bool = False,
     ) -> str:
-        if not (self.pretty and self.leading_comma) or isinstance(expression, (exp.Properties, exp.DataType)):
+        if not (self.pretty and self.leading_comma) or isinstance(expression, exp.Properties):
             return super().expressions(
                 expression=expression,
                 key=key,
@@ -275,6 +275,17 @@ class JarifyGenerator(DuckDB.Generator):
                     result_sqls.append(f"{leader}{prefix}{sql}{inline}")
         finally:
             self._as_align_width = saved_align
+
+        # When dynamic=True (caller wants lazy wrapping), stay inline unless the total
+        # width exceeds the limit.  new_line=True means the caller expects an empty
+        # sentinel line before and after the content so its closing delimiter lands on
+        # its own line (used by datatype_sql for STRUCT field lists).
+        if dynamic and not self.too_wide(result_sqls):
+            return sep.join(s.lstrip(",").lstrip() for s in result_sqls)
+
+        if new_line:
+            result_sqls.insert(0, "")
+            result_sqls.append("")
 
         result_sql = "\n".join(s.rstrip() for s in result_sqls)
         return self.indent(result_sql, skip_first=skip_first, skip_last=skip_last) if indent else result_sql
