@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.7] - 2026-04-28
+### Bug Fixes
+
+- remove CASE fallback from if_sql — always emit IF() ([#230](https://github.com/amfaro/jarify/pull/230)) ([#230](https://github.com/amfaro/jarify/pull/230))
+
 ## [0.5.6] - 2026-04-28
 ### Bug Fixes
 
