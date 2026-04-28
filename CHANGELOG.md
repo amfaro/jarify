@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.6] - 2026-04-28
+### Bug Fixes
+
+- use compact args in if_sql to prevent mid-condition wrap ([#227](https://github.com/amfaro/jarify/pull/227)) ([#227](https://github.com/amfaro/jarify/pull/227))
+
 ## [0.5.5] - 2026-04-28
 ### Bug Fixes
 
