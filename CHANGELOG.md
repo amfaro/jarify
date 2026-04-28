@@ -1,6 +1,15 @@
 # Changelog
 
-## [0.5.1] - 2026-04-27
+## [0.5.2] - 2026-04-28
+### Bug Fixes
+
+- keep IN (SELECT ...) inline when it fits within max line length ([#214](https://github.com/amfaro/jarify/pull/214)) ([#214](https://github.com/amfaro/jarify/pull/214))
+
+### Documentation
+
+- add test-integrity skill to guard against suppressing failures ([#212](https://github.com/amfaro/jarify/pull/212)) ([#212](https://github.com/amfaro/jarify/pull/212))
+
+## [0.5.1] - 2026-04-28
 ### Bug Fixes
 
 - treat list() as aggregate in prefer-group-by-all ([#210](https://github.com/amfaro/jarify/pull/210)) ([#210](https://github.com/amfaro/jarify/pull/210))
