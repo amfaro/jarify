@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.4] - 2026-04-28
+### Bug Fixes
+
+- bypass leading-comma path for DataType in expressions() ([#220](https://github.com/amfaro/jarify/pull/220)) ([#220](https://github.com/amfaro/jarify/pull/220))
+
 ## [0.5.3] - 2026-04-28
 ### Bug Fixes
 
