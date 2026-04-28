@@ -721,11 +721,12 @@ class JarifyGenerator(DuckDB.Generator):
 
         In non-pretty mode, delegates to the generic func() helper.
 
-        In pretty mode, builds a compact one-line form using _compact_sql so
-        that boolean conditions (AND / OR chains) are not allowed to wrap
-        mid-argument-list.  When the compact form still exceeds
-        max_line_length, falls back to CASE WHEN … THEN … [ELSE …] END via
-        case_sql(), which always produces clean multi-line output.
+        In pretty mode, renders all arguments through _compact_sql so that
+        boolean conditions (AND / OR chains) cannot emit newlines
+        mid-argument-list.  The result is always a single-line IF() call;
+        no fallback to CASE WHEN is attempted because exp.If is produced
+        both from user-written IF() calls and from CASE WHEN rewrites, and
+        there is no way to distinguish them after parsing.
         """
         has_else = expression.args.get("false") is not None
 
@@ -734,23 +735,14 @@ class JarifyGenerator(DuckDB.Generator):
                 return self.func("IF", expression.this, expression.args["true"], expression.args["false"])
             return self.func("IF", expression.this, expression.args["true"])
 
-        # Pretty mode: build compact args and check total width.
+        # Pretty mode: compact args prevent AND/OR from wrapping mid-call.
         compact_cond = self._compact_sql(expression.this)
         compact_then = self._compact_sql(expression.args["true"])
         compact_args = [compact_cond, compact_then]
         if has_else:
             compact_args.append(self._compact_sql(expression.args["false"]))
 
-        inline = f"if({', '.join(compact_args)})"
-        if not self.too_wide([inline]):
-            return inline
-
-        # Too wide — fall back to CASE WHEN for clean multi-line output.
-        case = exp.Case(
-            ifs=[exp.If(this=expression.this.copy(), true=expression.args["true"].copy())],
-            **(({"default": expression.args["false"].copy()}) if has_else else {}),
-        )
-        return self.case_sql(case)
+        return f"if({', '.join(compact_args)})"
 
     # ------------------------------------------------------------------
     # CASE: keep WHEN/THEN on one line; align THEN across branches;
