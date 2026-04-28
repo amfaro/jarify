@@ -1,6 +1,6 @@
 [project]
 name = "jarify"
-version = "0.5.2"
+version = "0.5.3"
 description = "Bespoke SQL linter and formatter for DuckDB, powered by sqlglot"
 readme = "README.md"
 requires-python = ">=3.12"

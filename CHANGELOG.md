@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.3] - 2026-04-28
+### Bug Fixes
+
+- use prev_anchor to disambiguate duplicate anchor text ([#217](https://github.com/amfaro/jarify/pull/217)) ([#217](https://github.com/amfaro/jarify/pull/217))
+
 ## [0.5.2] - 2026-04-28
 ### Bug Fixes
 
