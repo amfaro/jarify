@@ -719,12 +719,38 @@ class JarifyGenerator(DuckDB.Generator):
     def if_sql(self, expression: exp.If) -> str:
         """Render exp.If as DuckDB's IF(cond, then[, else]) function call.
 
-        sqlglot's default converts exp.If back to a CASE WHEN expression;
-        this override preserves the compact IF() form that jarify prefers.
+        In non-pretty mode, delegates to the generic func() helper.
+
+        In pretty mode, builds a compact one-line form using _compact_sql so
+        that boolean conditions (AND / OR chains) are not allowed to wrap
+        mid-argument-list.  When the compact form still exceeds
+        max_line_length, falls back to CASE WHEN … THEN … [ELSE …] END via
+        case_sql(), which always produces clean multi-line output.
         """
-        if expression.args.get("false") is not None:
-            return self.func("IF", expression.this, expression.args["true"], expression.args["false"])
-        return self.func("IF", expression.this, expression.args["true"])
+        has_else = expression.args.get("false") is not None
+
+        if not self.pretty:
+            if has_else:
+                return self.func("IF", expression.this, expression.args["true"], expression.args["false"])
+            return self.func("IF", expression.this, expression.args["true"])
+
+        # Pretty mode: build compact args and check total width.
+        compact_cond = self._compact_sql(expression.this)
+        compact_then = self._compact_sql(expression.args["true"])
+        compact_args = [compact_cond, compact_then]
+        if has_else:
+            compact_args.append(self._compact_sql(expression.args["false"]))
+
+        inline = f"if({', '.join(compact_args)})"
+        if not self.too_wide([inline]):
+            return inline
+
+        # Too wide — fall back to CASE WHEN for clean multi-line output.
+        case = exp.Case(
+            ifs=[exp.If(this=expression.this.copy(), true=expression.args["true"].copy())],
+            **(({"default": expression.args["false"].copy()}) if has_else else {}),
+        )
+        return self.case_sql(case)
 
     # ------------------------------------------------------------------
     # CASE: keep WHEN/THEN on one line; align THEN across branches;
