@@ -721,12 +721,18 @@ class JarifyGenerator(DuckDB.Generator):
 
         In non-pretty mode, delegates to the generic func() helper.
 
-        In pretty mode, renders all arguments through _compact_sql so that
-        boolean conditions (AND / OR chains) cannot emit newlines
-        mid-argument-list.  The result is always a single-line IF() call;
-        no fallback to CASE WHEN is attempted because exp.If is produced
-        both from user-written IF() calls and from CASE WHEN rewrites, and
-        there is no way to distinguish them after parsing.
+        In pretty mode, all arguments are rendered through _compact_sql so
+        that boolean conditions (AND / OR chains) cannot wrap mid-argument.
+
+        When the compact single-line form fits within max_line_length it is
+        used as-is.  When it is too wide the call expands to a 5-line form
+        (4 lines for a no-else IF) with leading-comma style:
+
+            if(
+                <condition>
+               ,<value_if_true>
+               ,<value_if_false>
+            )
         """
         has_else = expression.args.get("false") is not None
 
@@ -742,7 +748,18 @@ class JarifyGenerator(DuckDB.Generator):
         if has_else:
             compact_args.append(self._compact_sql(expression.args["false"]))
 
-        return f"if({', '.join(compact_args)})"
+        inline = f"if({', '.join(compact_args)})"
+        if not self.too_wide([inline]):
+            return inline
+
+        # Too wide: expand to leading-comma multi-line form.
+        indent = " " * self.pad  # first arg: flush after opening paren
+        lc = " " * (self.pad - 1)  # subsequent args: pad-1 spaces then ","
+        lines = ["if(", f"{indent}{compact_cond}"]
+        for arg in compact_args[1:]:
+            lines.append(f"{lc},{arg}")
+        lines.append(")")
+        return "\n".join(lines)
 
     # ------------------------------------------------------------------
     # CASE: keep WHEN/THEN on one line; align THEN across branches;
