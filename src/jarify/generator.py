@@ -215,7 +215,7 @@ class JarifyGenerator(DuckDB.Generator):
         dynamic: bool = False,
         new_line: bool = False,
     ) -> str:
-        if not (self.pretty and self.leading_comma) or isinstance(expression, exp.Properties):
+        if not (self.pretty and self.leading_comma) or isinstance(expression, (exp.Properties, exp.DataType)):
             return super().expressions(
                 expression=expression,
                 key=key,
@@ -276,18 +276,10 @@ class JarifyGenerator(DuckDB.Generator):
         finally:
             self._as_align_width = saved_align
 
-        # When dynamic=True (caller wants lazy wrapping), stay inline unless the total
-        # width exceeds the limit.  new_line=True means the caller expects an empty
-        # sentinel line before and after the content so its closing delimiter lands on
-        # its own line (used by datatype_sql for STRUCT field lists).
+        result_sql = "\n".join(s.rstrip() for s in result_sqls)
+        # dynamic=True means "wrap only if necessary" — stay inline when content fits.
         if dynamic and not self.too_wide(result_sqls):
             return sep.join(s.lstrip(",").lstrip() for s in result_sqls)
-
-        if new_line:
-            result_sqls.insert(0, "")
-            result_sqls.append("")
-
-        result_sql = "\n".join(s.rstrip() for s in result_sqls)
         return self.indent(result_sql, skip_first=skip_first, skip_last=skip_last) if indent else result_sql
 
     def _inline_comments(self, expression: exp.Expr) -> str:
@@ -1232,14 +1224,32 @@ class JarifyGenerator(DuckDB.Generator):
     # ------------------------------------------------------------------
 
     def datatype_sql(self, expression: exp.DataType) -> str:
+        # For STRUCT types in pretty+leading-comma mode, build the field list directly
+        # with jarify's ",field" style instead of delegating to super().datatype_sql()
+        # which calls expressions() with new_line/dynamic/skip_first/skip_last — a
+        # combination that interacts with the DataType bypass in expressions() and
+        # produces the base generator's ", field" (comma-space) style instead of
+        # jarify's ",field" (comma-only) style.
+        if self.pretty and self.leading_comma and expression.this == exp.DType.STRUCT:
+            fields = expression.expressions
+            if not fields:
+                return "struct()"
+            field_sqls = [self.sql(f) for f in fields]
+            # Stay inline when all fields comfortably fit on one line
+            if not self.too_wide(field_sqls):
+                return f"struct({', '.join(field_sqls)})"
+            # Multi-line: leading-comma jarify style
+            # First field gets " " leader, rest get "," leader; indent the whole block.
+            parts = [f" {field_sqls[0]}"]
+            parts.extend(f",{s}" for s in field_sqls[1:])
+            inner = self.indent("\n".join(parts))
+            # The closing ")" carries a 1-space prefix so it aligns with the opening
+            # expression in leading-comma contexts (compensates for the 1-char leader).
+            return f"struct(\n{inner}\n )"
         sql = super().datatype_sql(expression).lower()
-        # In leading-comma format, each list item (arg or SELECT expression) starts
-        # with a 1-char leader (" " for first, "," for rest).  Interior lines of a
-        # multi-line item don't inherit that extra column, so a STRUCT type's closing
-        # ")" ends up one space too shallow relative to the opening expression.
-        # Adding 1 space before the closing ")" compensates for this asymmetry so
-        # the closing paren aligns with the first character of the opening expression.
-        if self.pretty and self.leading_comma and expression.this == exp.DType.STRUCT and "\n" in sql:
+        # Apply the same closing-paren alignment fix to any other multi-line STRUCT
+        # type that was formatted by the base generator (e.g. trailing-comma mode).
+        if self.pretty and expression.this == exp.DType.STRUCT and "\n" in sql:
             last_newline_close = sql.rfind("\n)")
             if last_newline_close != -1:
                 sql = sql[:last_newline_close] + "\n )" + sql[last_newline_close + 2 :]
