@@ -229,7 +229,7 @@ WHERE type       = _property_type
 
 ### WHERE — `IN (subquery)` layout
 
-An `IN` condition whose right-hand side is a subquery follows the same opening-paren style as CTEs: the `(` goes on its own line, the inner query is indented by one level, and `)` closes at the same column as `IN`.
+When the full `col IN (SELECT ...)` expression fits on one line within the configured max line length, it stays inline. When it would exceed the threshold, the `(` goes on its own line, the inner query is indented by one level, and `)` closes at the same column as `IN`.
 
 **Bad**
 ```sql
@@ -240,13 +240,19 @@ WHERE program_key IN (
   )
 ```
 
-**Good**
+**Good — short subquery stays inline**
+```sql
+WHERE program_key IN (SELECT program_key FROM _programs)
+```
+
+**Good — long subquery expands to block form**
 ```sql
 WHERE program_key IN
 (
   SELECT
      program_key
   FROM _programs
+  WHERE some_very_long_column = 'some_very_long_value_that_exceeds_the_line_length'
 )
 ```
 
