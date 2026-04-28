@@ -37,6 +37,60 @@ if TYPE_CHECKING:
     from jarify.config import JarifyConfig
 
 
+def _jarify_struct_sql(self: JarifyGenerator, expression: exp.Struct) -> str:
+    """Render struct literals as {key: val, ...}, wrapping to multiple lines when too wide.
+
+    Replaces DuckDB's ``_struct_sql`` which always emits an inline string.  When
+    the flat representation exceeds ``max_text_width`` jarify produces a
+    leading-comma multi-line form instead, e.g.::
+
+        {
+           'key':   x.key
+          ,'other': x.other
+        }
+    """
+    ancestor_cast = expression.find_ancestor(exp.Cast, exp.Select)
+    ancestor_cast = None if isinstance(ancestor_cast, exp.Select) else ancestor_cast
+
+    if not expression.expressions and isinstance(ancestor_cast, exp.Cast) and ancestor_cast.to.is_type(exp.DType.MAP):
+        return "MAP()"
+
+    is_bq_inline_struct = (
+        expression.find(exp.PropertyEQ) is None
+        and ancestor_cast
+        and any(casted_type.is_type(exp.DType.STRUCT) for casted_type in ancestor_cast.find_all(exp.DataType))
+    )
+
+    args: list[str] = []
+    for i, expr in enumerate(expression.expressions):
+        is_property_eq = isinstance(expr, exp.PropertyEQ)
+        this = expr.this
+        value = expr.expression if is_property_eq else expr
+
+        if is_bq_inline_struct:
+            args.append(self.sql(value))
+        else:
+            if isinstance(this, exp.Identifier):
+                key = self.sql(exp.Literal.string(expr.name))
+            elif is_property_eq:
+                key = self.sql(this)
+            else:
+                key = self.sql(exp.Literal.string(f"_{i}"))
+            args.append(f"{key}: {self.sql(value)}")
+
+    if is_bq_inline_struct:
+        return f"ROW({', '.join(args)})"
+
+    if not self.pretty or not self.too_wide(args):
+        return f"{{{', '.join(args)}}}"
+
+    # Multi-line leading-comma form
+    parts = [f" {args[0]}"]
+    parts.extend(f",{a}" for a in args[1:])
+    inner = self.indent("\n" + "\n".join(parts) + "\n", skip_first=True, skip_last=True)
+    return f"{{{inner}}}"
+
+
 class JarifyGenerator(DuckDB.Generator):
     """Opinionated DuckDB SQL generator for jarify."""
 
@@ -53,9 +107,14 @@ class JarifyGenerator(DuckDB.Generator):
     # We also remove exp.GroupConcat so dispatch falls through to groupconcat_sql, which
     # emits `string_agg` (PostgreSQL-compatible) instead of the Oracle-style `listagg` alias.
     TRANSFORMS: ClassVar[dict] = {
-        k: v
-        for k, v in DuckDB.Generator.TRANSFORMS.items()
-        if k not in (exp.Pivot, exp.ArrayContains, exp.JSONExtract, exp.GroupConcat)
+        **{
+            k: v
+            for k, v in DuckDB.Generator.TRANSFORMS.items()
+            if k not in (exp.Pivot, exp.ArrayContains, exp.JSONExtract, exp.GroupConcat)
+        },
+        # Override DuckDB's _struct_sql so struct literals wrap when they exceed
+        # max_line_length.  DuckDB's built-in version always emits a flat string.
+        exp.Struct: _jarify_struct_sql,
     }
 
     # Aggregate and window function names that should be uppercased in output.
@@ -1104,6 +1163,30 @@ class JarifyGenerator(DuckDB.Generator):
         return f"{self.sql(expression, 'this')}::{type_sql}"
 
     # ------------------------------------------------------------------
+    # Lambda: wrap body when the flat form exceeds max_line_length
+    # ------------------------------------------------------------------
+
+    def lambda_sql(self, expression: exp.Lambda, arrow_sep: str = "->", wrap: bool = True) -> str:
+        flat = super().lambda_sql(expression, arrow_sep=arrow_sep, wrap=wrap)
+        if not self.pretty:
+            return flat
+        # Only wrap when the entire lambda string is a single line that exceeds
+        # max_line_length.  If the body is already multi-line (e.g. a struct cast
+        # that wrapped independently), leave the result as-is — the caller context
+        # (format_args) will handle indentation.
+        if "\n" in flat or not self.too_wide([flat]):
+            return flat
+        # Flat single-line lambda is too wide — move the body to its own line,
+        # indented one level below the arrow.
+        params = self.expressions(expression, flat=True)
+        if wrap and len(params.split(",")) > 1:
+            params = f"({params})"
+        body_sql = self.sql(expression, "this")
+        # Indent each body line so it sits beneath the arrow
+        indented_body = self.indent(body_sql)
+        return f"{params} {arrow_sep}\n{indented_body}"
+
+    # ------------------------------------------------------------------
     # ArrayAgg with DISTINCT: put DISTINCT on its own line when wrapping
     # ------------------------------------------------------------------
 
@@ -1138,7 +1221,18 @@ class JarifyGenerator(DuckDB.Generator):
     # ------------------------------------------------------------------
 
     def datatype_sql(self, expression: exp.DataType) -> str:
-        return super().datatype_sql(expression).lower()
+        sql = super().datatype_sql(expression).lower()
+        # In leading-comma format, each list item (arg or SELECT expression) starts
+        # with a 1-char leader (" " for first, "," for rest).  Interior lines of a
+        # multi-line item don't inherit that extra column, so a STRUCT type's closing
+        # ")" ends up one space too shallow relative to the opening expression.
+        # Adding 1 space before the closing ")" compensates for this asymmetry so
+        # the closing paren aligns with the first character of the opening expression.
+        if self.pretty and self.leading_comma and expression.this == exp.DType.STRUCT and "\n" in sql:
+            last_newline_close = sql.rfind("\n)")
+            if last_newline_close != -1:
+                sql = sql[:last_newline_close] + "\n )" + sql[last_newline_close + 2 :]
+        return sql
 
     def boolean_sql(self, expression: exp.Boolean) -> str:
         return "true" if expression.this else "false"
