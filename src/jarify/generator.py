@@ -841,17 +841,26 @@ class JarifyGenerator(DuckDB.Generator):
     # ------------------------------------------------------------------
 
     def in_sql(self, expression: exp.In) -> str:
-        """Render IN with a subquery as col IN\\n(\\n  SELECT ...\\n).
+        """Render IN with a subquery inline when it fits, multiline otherwise.
 
-        The opening paren is placed on its own line at the same indentation
-        level as the enclosing keyword (WHERE/HAVING), so the subquery block
-        mirrors the CTE body style used elsewhere.
+        When the compact form ``col IN (SELECT ...)`` fits within
+        ``max_line_length``, it is kept on a single line.  Only when the
+        inline form would exceed the threshold does it fall back to the
+        block style::
+
+            col IN
+            (
+              SELECT ...
+            )
 
         Falls back to the base generator for IN with a value list.
         """
         query = expression.args.get("query")
         if self.pretty and query is not None:
             this = self.sql(expression, "this")
+            compact = self._compact_sql(query.this)
+            if not self.too_wide([f"{this} IN ({compact})"]):
+                return f"{this} IN ({compact})"
             select_sql = self.sql(query.this)
             indented = self.indent(select_sql)
             return f"{this} IN\n(\n{indented}\n)"
