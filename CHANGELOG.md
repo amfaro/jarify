@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.5] - 2026-04-28
+### Bug Fixes
+
+- align struct closing paren and wrap wide lambdas ([#224](https://github.com/amfaro/jarify/pull/224)) ([#224](https://github.com/amfaro/jarify/pull/224))
+
 ## [0.5.4] - 2026-04-28
 ### Bug Fixes
 
