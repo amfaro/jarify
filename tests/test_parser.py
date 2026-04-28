@@ -227,6 +227,7 @@ class TestExtractReinsertLinePlaceholders:
             ["{program_filter}", "{example_filter}"],
             ["\n"],
             "CREATE TABLE t AS SELECT 1",
+            None,  # no prev_anchor — nothing before the group
         )
 
     def test_blank_lines_after_placeholder_block_are_preserved(self) -> None:
@@ -249,6 +250,39 @@ class TestExtractReinsertLinePlaceholders:
         ex_idx = lines.index("{example_filter}")
         create_idx = next(i for i, ln in enumerate(lines) if ln.startswith("CREATE TABLE"))
         assert prog_idx < ex_idx < create_idx
+
+    def test_prev_anchor_disambiguates_duplicate_anchor_text(self) -> None:
+        """Regression: placeholder with anchor ')' must land in the correct CTE.
+
+        When two CTEs both close with a bare ')' line, the reinsert algorithm
+        must use prev_anchor to place the placeholder after the right preceding
+        line instead of always taking the first occurrence.
+        """
+        sql = (
+            "WITH a AS (\n"
+            "  SELECT *\n"
+            "  FROM sku_catalog\n"
+            ")\n"
+            ",b AS (\n"
+            "  SELECT count(*) AS n\n"
+            "  FROM _final f\n"
+            "  {manufacturer_filter}\n"
+            ")\n"
+            "SELECT n FROM b\n;"
+        )
+        from jarify.formatter import format_sql
+
+        result, warnings = format_sql(sql)
+        lines = result.splitlines()
+        # The placeholder must appear inside CTE b (after "FROM _final f"),
+        # not inside CTE a (after "FROM sku_catalog").
+        mf_idx = lines.index("  {manufacturer_filter}")
+        # Find the line index for "FROM _final f" and "FROM sku_catalog"
+        final_f_idx = next(i for i, ln in enumerate(lines) if ln.strip() == "FROM _final f")
+        sku_catalog_idx = next(i for i, ln in enumerate(lines) if ln.strip() == "FROM sku_catalog")
+        assert mf_idx > final_f_idx, "placeholder must come after 'FROM _final f'"
+        assert mf_idx > sku_catalog_idx, "placeholder must not be in the sku_catalog CTE"
+        assert warnings == []
 
 
 class TestCtasBodyPlaceholders:

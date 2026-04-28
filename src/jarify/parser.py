@@ -15,7 +15,7 @@ from sqlglot.expressions import Expression
 DUCKDB_DIALECT = "duckdb"
 
 # ---------------------------------------------------------------------------
-# Custom DuckDB dialect — preserve bare NUMERIC/DECIMAL without injecting
+# Custom DuckDB dialect - preserve bare NUMERIC/DECIMAL without injecting
 # default precision/scale into the AST.
 # ---------------------------------------------------------------------------
 # sqlglot's DuckDB parser registers a TYPE_CONVERTERS handler for DECIMAL that
@@ -168,30 +168,42 @@ def _restore_ctas_body_placeholders(sql: str, ctas_body_map: dict[str, str]) -> 
 
 def _extract_line_rust_fmt_placeholders(
     sql: str,
-) -> tuple[str, list[tuple[list[str], list[str], str | None]]]:
+) -> tuple[str, list[tuple[list[str], list[str], str | None, str | None]]]:
     """Strip whole-line Rust format placeholder lines from ``sql``.
 
     Used by the formatter so the stripped SQL can be formatted normally, then
     the placeholders can be re-inserted at the correct positions afterward.
 
-    Returns ``(stripped_sql, [(group, trailing_blanks, anchor), ...])``.
+    Returns ``(stripped_sql, [(group, trailing_blanks, anchor, prev_anchor), ...])``.
     *group* is a list of one or more consecutive placeholder lines (their full
     text, leading whitespace preserved).  *trailing_blanks* is a list of blank
     lines that immediately follow the group — they are consumed here so the
     formatter does not strip them as leading whitespace, and re-emitted by
     ``_reinsert_line_rust_fmt_placeholders``.  *anchor* is the stripped text
     of the first non-blank, non-placeholder line after the group; it is
-    ``None`` when no such line exists.  Grouping consecutive placeholders
-    together ensures they are re-inserted in their original order before the
-    same anchor occurrence.
+    ``None`` when no such line exists.  *prev_anchor* is the stripped text of
+    the last non-blank, non-placeholder line before the group; it is ``None``
+    when no such line exists.  When *anchor* text is not unique in the
+    formatted SQL (e.g. a bare ``)``) *prev_anchor* disambiguates which
+    occurrence to use.  Grouping consecutive placeholders together ensures they
+    are re-inserted in their original order before the same anchor occurrence.
     """
     lines = sql.splitlines(keepends=True)
     result_lines: list[str] = []
-    insertions: list[tuple[list[str], list[str], str | None]] = []
+    insertions: list[tuple[list[str], list[str], str | None, str | None]] = []
 
     i = 0
     while i < len(lines):
         if _RUST_FMT_LINE_RE.match(lines[i]):
+            # Capture the last non-blank, non-placeholder line before the group
+            # so re-insertion can disambiguate when the same anchor text appears
+            # multiple times in the formatted SQL (e.g. bare ")" after every CTE).
+            prev_anchor: str | None = None
+            for j in range(len(result_lines) - 1, -1, -1):
+                candidate = result_lines[j].strip()
+                if candidate and not _RUST_FMT_LINE_RE.match(result_lines[j]):
+                    prev_anchor = candidate
+                    break
             # Collect all adjacent placeholder lines into one group so they
             # are re-inserted together (preserving relative order) before a
             # single anchor occurrence.
@@ -216,7 +228,7 @@ def _extract_line_rust_fmt_placeholders(
                 if candidate and not _RUST_FMT_LINE_RE.match(lines[j]):
                     anchor = candidate
                     break
-            insertions.append((group, trailing_blanks, anchor))
+            insertions.append((group, trailing_blanks, anchor, prev_anchor))
         else:
             result_lines.append(lines[i])
             i += 1
@@ -224,7 +236,10 @@ def _extract_line_rust_fmt_placeholders(
     return "".join(result_lines), insertions
 
 
-def _reinsert_line_rust_fmt_placeholders(sql: str, insertions: list[tuple[list[str], list[str], str | None]]) -> str:
+def _reinsert_line_rust_fmt_placeholders(
+    sql: str,
+    insertions: list[tuple[list[str], list[str], str | None, str | None]],
+) -> str:
     """Re-insert whole-line placeholder groups into formatted SQL.
 
     Each group is inserted immediately before the first occurrence of its
@@ -232,6 +247,12 @@ def _reinsert_line_rust_fmt_placeholders(sql: str, insertions: list[tuple[list[s
     the group in their original order.  Trailing blank lines recorded during
     extraction are emitted after the group and before the anchor.  Groups with
     no anchor are appended at the end.
+
+    When a group has a *prev_anchor* (the last non-blank line before the
+    placeholder in the original SQL), an anchor-line match is only accepted
+    when the most recently seen non-blank line in the output also matches
+    *prev_anchor*.  This disambiguates generic anchor text such as a bare
+    ``)``) that appears after every CTE block.
     """
     if not insertions:
         return sql
@@ -242,20 +263,29 @@ def _reinsert_line_rust_fmt_placeholders(sql: str, insertions: list[tuple[list[s
     # occurrences of that anchor in the formatted SQL.
     pending = list(insertions)
     result: list[str] = []
+    last_non_blank: str | None = None
 
     for line in lines:
         stripped = line.strip()
-        for idx, (group, trailing_blanks, anchor) in enumerate(pending):
+        for idx, (group, trailing_blanks, anchor, prev_anchor) in enumerate(pending):
             if anchor is not None and stripped == anchor:
+                # When prev_anchor is set, only accept this occurrence of
+                # anchor if the preceding non-blank output line matches it.
+                # This prevents a placeholder from landing in an earlier CTE
+                # that happens to close with the same token (e.g. ")").
+                if prev_anchor is not None and last_non_blank != prev_anchor:
+                    continue
                 for placeholder in group:
                     result.append(placeholder + "\n")
                 result.extend(trailing_blanks)
                 pending.pop(idx)
                 break
+        if stripped:
+            last_non_blank = stripped
         result.append(line)
 
     # Append any remaining (no-anchor) groups before the trailing newline
-    for group, trailing_blanks, _ in pending:
+    for group, trailing_blanks, _, __ in pending:
         for placeholder in group:
             result.append(placeholder + "\n")
         result.extend(trailing_blanks)
@@ -316,7 +346,7 @@ def _unmask_numeric(sql: str) -> str:
 # DuckDB allows user-defined types whose names are SQL reserved words, e.g.
 #   COALESCE(x, []::filter[])
 # sqlglot fails to parse these because it sees ``filter`` as a keyword token,
-# not a type name.  Quoting them — ``::"filter"[]`` — makes sqlglot parse
+# not a type name.  Quoting them - ``::"filter"[]`` - makes sqlglot parse
 # correctly; the generator then emits the unquoted ``::filter[]`` form again.
 
 
