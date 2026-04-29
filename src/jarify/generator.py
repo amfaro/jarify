@@ -774,7 +774,7 @@ class JarifyGenerator(DuckDB.Generator):
         lines = ["if(", f"{' ' * (p + 2)}{compact_args[0]}"]
         for arg in compact_args[1:]:
             lines.append(f"{' ' * (p + 1)},{arg}")
-        lines.append(" )")
+        lines.append(")")
         return "\n".join(lines)
 
     # ------------------------------------------------------------------

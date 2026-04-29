@@ -10,7 +10,7 @@ SELECT
       some_really_long_column_name IS NOT NULL AND another_really_long_column_name.some_field = 'some_long_string_value_here'
      ,very_long_expression_name / another_quite_long_column_name
      ,fallback_to_this_column_name
-   ) AS result
+  ) AS result
 FROM t
 ;
 
@@ -20,6 +20,6 @@ SELECT
       some_really_long_column_name IS NOT NULL AND another_really_long_column_name.some_field = 'some_long_string_value_here'
      ,very_long_expression_name / another_quite_long_column_name
      ,fallback_to_this_column_name
-   ) AS result
+  ) AS result
 FROM t
 ;
