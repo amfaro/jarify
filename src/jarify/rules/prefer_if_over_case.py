@@ -30,7 +30,7 @@ def _is_rewritable(node: exp.Case) -> bool:
 class PreferIfOverCaseRule(FormatterRule):
     """Format and lint: rewrite single-branch CASE WHEN … THEN … [ELSE …] END to IF().
 
-    DuckDB supports ``IF(condition, true_val[, false_val])`` as a first-class
+    DuckDB supports ``IF(condition, true_val, false_val)`` as a first-class
     function.  For searched CASE expressions with exactly one WHEN branch the
     IF form is shorter and more idiomatic.
 
@@ -40,9 +40,15 @@ class PreferIfOverCaseRule(FormatterRule):
     - Simple CASE (``CASE expr WHEN lit …``) is left unchanged.
     - CASE with 2+ WHEN branches is left unchanged.
 
+    **ELSE handling**: When the CASE has no ELSE clause the implicit return
+    value is ``NULL``.  The rewrite always emits the third argument explicitly
+    (``IF(cond, val, NULL)``) because DuckDB's ``IF()`` function requires
+    exactly three arguments — a two-argument call raises
+    ``Parser Error: Wrong number of arguments to IF``.
+
     **Format**: The ``apply()`` method rewrites matching ``exp.Case`` nodes to
     ``exp.If`` in-place.  The ``JarifyGenerator.if_sql()`` override then renders
-    ``exp.If`` as ``IF(cond, then[, else])`` instead of the default CASE WHEN form.
+    ``exp.If`` as ``IF(cond, then, else)`` instead of the default CASE WHEN form.
 
     **Lint**: The ``check()`` method flags any ``exp.Case`` node that matches the
     rewrite criteria but has not yet been formatted.
@@ -63,12 +69,15 @@ class PreferIfOverCaseRule(FormatterRule):
             if_branch = case.args["ifs"][0]
             condition = if_branch.args["this"]
             then_val = if_branch.args["true"]
-            else_val = case.args.get("default")  # None when there is no ELSE
+            # Use the explicit ELSE value, or NULL to satisfy DuckDB's
+            # requirement that IF() always takes exactly three arguments.
+            else_val = case.args.get("default")
+            false_arg = else_val.copy() if else_val is not None else exp.Null()
 
             replacement = exp.If(
                 this=condition.copy(),
                 true=then_val.copy(),
-                **({"false": else_val.copy()} if else_val is not None else {}),
+                false=false_arg,
             )
             case.replace(replacement)
 
@@ -86,7 +95,7 @@ class PreferIfOverCaseRule(FormatterRule):
                 LintViolation(
                     rule=self.name,
                     severity=self.severity,
-                    message=("Single-branch CASE WHEN … THEN … END can be rewritten as IF(cond, then[, else])"),
+                    message=("Single-branch CASE WHEN … THEN … END can be rewritten as IF(cond, then, else)"),
                     line=_line,
                     column=_col,
                 )
