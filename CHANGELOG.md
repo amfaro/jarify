@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.11] - 2026-04-29
+### Bug Fixes
+
+- align single-line aliases when SELECT has multi-line alias ([#240](https://github.com/amfaro/jarify/pull/240)) ([#240](https://github.com/amfaro/jarify/pull/240))
+
 ## [0.5.10] - 2026-04-29
 ### Bug Fixes
 
