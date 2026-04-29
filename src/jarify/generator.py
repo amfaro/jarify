@@ -764,9 +764,16 @@ class JarifyGenerator(DuckDB.Generator):
         #   first arg / closing paren → emit 1 space  (+pad → pad+1, aligns with "if(")
         #   comma args                → emit ","       (+pad → "  ," at pad col)
         #
-        lines = ["if(", f" {compact_args[0]}"]
+        # Emit one indentation level inside if(.
+        # sqlglot appends self.pad spaces to every inner line, so to reach
+        # the target absolute columns we emit (target - pad):
+        #   first arg  → 2*(pad+1) cols total → emit pad+2 spaces
+        #   comma args → 2*(pad+1)-1 cols     → emit pad+1 spaces then ","
+        #   closing )  → pad+1 cols (= if col) → emit 1 space
+        p = self.pad
+        lines = ["if(", f"{' ' * (p + 2)}{compact_args[0]}"]
         for arg in compact_args[1:]:
-            lines.append(f",{arg}")
+            lines.append(f"{' ' * (p + 1)},{arg}")
         lines.append(" )")
         return "\n".join(lines)
 
