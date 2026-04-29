@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.8] - 2026-04-29
+### Bug Fixes
+
+- expand wide if() to leading-comma 5-line form
+- align wide if() expansion with leading-comma style
+- indent if() args one level inside the opening paren
+- align if() closing paren with CASE END at pad columns
+
 ## [0.5.7] - 2026-04-28
 ### Bug Fixes
 
