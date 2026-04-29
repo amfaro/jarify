@@ -306,20 +306,21 @@ class JarifyGenerator(DuckDB.Generator):
     def _compute_as_align_width(self, expressions_list: list) -> int | None:
         """Compute the column width for AS alignment in a SELECT expression list.
 
-        Returns None if alignment should not be applied (< 2 aliases, or any
-        aliased column expression spans multiple lines).
-        """
-        aliased = [e for e in expressions_list if isinstance(e, exp.Alias)]
-        if len(aliased) < 2:
-            return None
+        Returns None if alignment should not be applied (< 2 single-line aliases).
 
+        Multi-line aliased expressions (e.g. CASE … END AS foo) are excluded from
+        measurement and from alignment, but their presence no longer disables
+        alignment for the remaining single-line aliases in the same SELECT.
+        """
         col_widths: list[int] = []
+        single_line_alias_count = 0
         for e in expressions_list:
             if isinstance(e, exp.Alias):
                 col_sql = self.sql(e.this)
                 if "\n" in col_sql:
-                    # Multi-line aliased expression — skip alignment for the whole SELECT
-                    return None
+                    # Multi-line aliased expression — skip it, but don't abort
+                    continue
+                single_line_alias_count += 1
                 col_widths.append(len(col_sql))
             else:
                 # Non-aliased columns count toward the alignment width so AS
@@ -327,6 +328,9 @@ class JarifyGenerator(DuckDB.Generator):
                 col_sql = self.sql(e)
                 if "\n" not in col_sql:
                     col_widths.append(len(col_sql))
+
+        if single_line_alias_count < 2:
+            return None
 
         return max(col_widths)
 
@@ -340,7 +344,7 @@ class JarifyGenerator(DuckDB.Generator):
         if not alias_name:
             return this_sql
         align_width = self._as_align_width
-        if align_width is not None and isinstance(expression.parent, exp.Select):
+        if align_width is not None and isinstance(expression.parent, exp.Select) and "\n" not in this_sql:
             padding = " " * max(0, align_width - len(this_sql))
             return f"{this_sql}{padding} AS {alias_name}"
         return f"{this_sql} AS {alias_name}"
