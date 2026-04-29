@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.12] - 2026-04-29
+### Bug Fixes
+
+- emit if(cond, val, NULL) for no-ELSE CASE rewrites ([#245](https://github.com/amfaro/jarify/pull/245)) ([#245](https://github.com/amfaro/jarify/pull/245))
+
 ## [0.5.11] - 2026-04-29
 ### Bug Fixes
 
