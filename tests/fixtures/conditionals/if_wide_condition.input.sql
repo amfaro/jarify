@@ -20,3 +20,8 @@ SELECT
   if(some_really_long_column_name IS NOT NULL AND another_really_long_column_name.some_field = 'some_long_string_value_here', very_long_expression_name / another_quite_long_column_name, fallback_to_this_column_name) AS result
 FROM t
 ;
+
+-- Wide IF() with an overlong true-expression → wrap nested branch expression too
+SELECT
+  CASE WHEN (ir.incentive_data->'transform'->>'type') IS NOT NULL THEN ((ir.incentive_data->'transform'->>'type'), (ir.incentive_data->'transform'->>'from'), (ir.incentive_data->'transform'->>'based_on'))::transform ELSE NULL END AS transform
+;

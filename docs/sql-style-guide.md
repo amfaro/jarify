@@ -1044,3 +1044,22 @@ SELECT
 FROM t
 ;
 ```
+
+When a compact `if(cond, then[, else])` call exceeds `max_line_length`, expand the outer
+`if()` call across multiple lines. Keep the condition compact on one line, but let an
+overlong `true` or `false` branch use its normal nested wrapping.
+
+**Wide**
+```sql
+SELECT
+   if(
+      condition_that_makes_the_call_too_wide
+     ,(
+         very_long_value_a
+        ,very_long_value_b
+        ,very_long_value_c
+      )::some_type
+     ,fallback_value
+  ) AS result
+;
+```

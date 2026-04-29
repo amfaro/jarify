@@ -87,6 +87,19 @@ def test_pivot_order_by_formats_without_warning():
     assert result == result2
 
 
+def test_wide_if_keeps_condition_compact_but_wraps_overlong_true_branch():
+    sql = (
+        "SELECT if((ir.incentive_data->'transform'->>'type') IS NOT NULL, "
+        "((ir.incentive_data->'transform'->>'type'), "
+        "(ir.incentive_data->'transform'->>'from'), "
+        "(ir.incentive_data->'transform'->>'based_on'))::transform, NULL) AS transform"
+    )
+    result, _ = format_sql(sql)
+    assert "(ir.incentive_data->'transform'->>'type') IS NOT NULL\n     ,(" in result
+    assert "\n        ,(ir.incentive_data->'transform'->>'from')" in result
+    assert "\n     ,NULL" in result
+
+
 class TestFromFirst:
     def test_select_star_becomes_from_first(self):
         from jarify.formatter import format_sql

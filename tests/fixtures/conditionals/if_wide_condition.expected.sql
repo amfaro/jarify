@@ -23,3 +23,16 @@ SELECT
   ) AS result
 FROM t
 ;
+
+-- Wide IF() with an overlong true-expression → wrap nested branch expression too
+SELECT
+   if(
+      (ir.incentive_data->'transform'->>'type') IS NOT NULL
+     ,(
+         (ir.incentive_data->'transform'->>'type')
+        ,(ir.incentive_data->'transform'->>'from')
+        ,(ir.incentive_data->'transform'->>'based_on')
+      )::transform
+     ,NULL
+  ) AS transform
+;
