@@ -164,6 +164,7 @@ class JarifyGenerator(DuckDB.Generator):
         self._join_alias_col: int | None = None  # set during FROM/JOIN block rendering
         self._leading_comment_texts: frozenset[str] = frozenset()  # set by formatter before generate()
         self._trailing_sep_comment_texts: frozenset[str] = frozenset()  # set by formatter before generate()
+        self._connector_force_expand: bool = False  # set True inside WHERE/HAVING to always break AND/OR
 
     # ------------------------------------------------------------------
     # Function name casing: aggregates/window functions → UPPER, rest → lower
@@ -658,7 +659,11 @@ class JarifyGenerator(DuckDB.Generator):
         return max_total + 1  # +1 for minimum one space before ON/EOL
 
     # ------------------------------------------------------------------
-    # Connector: always break AND/OR onto separate lines in pretty mode
+    # Connector: break AND/OR onto separate lines in pretty mode only when
+    # the compact (single-line) form exceeds max_line_length.  When
+    # _connector_force_expand is True (set by WHERE/HAVING rendering) the
+    # multi-line form is always used so that _inline_clause_sql can
+    # right-justify the operators.
     # ------------------------------------------------------------------
 
     def connector_sql(
@@ -678,6 +683,13 @@ class JarifyGenerator(DuckDB.Generator):
             return super().connector_sql(expression, op)
 
         if self.pretty:
+            if not self._connector_force_expand:
+                compact_parts = [terms[0]]
+                for connector_op, term in zip(ops, terms[1:], strict=False):
+                    compact_parts.append(f"{connector_op} {term}")
+                compact = " ".join(compact_parts)
+                if not self.too_wide([compact]):
+                    return compact
             lines = [terms[0]]
             for connector_op, term in zip(ops, terms[1:], strict=False):
                 lines.append(f"{connector_op} {term}")
@@ -920,7 +932,14 @@ class JarifyGenerator(DuckDB.Generator):
                 if not self.too_wide([f"{keyword} {compact}"]):
                     return self.seg(f"{keyword} {compact}")
 
-        condition_sql = self.sql(expression, "this")
+        # Force connector_sql to produce multi-line output (for post-processing
+        # below) even if the compact form would fit within max_line_length.
+        prev_force = self._connector_force_expand
+        self._connector_force_expand = True
+        try:
+            condition_sql = self.sql(expression, "this")
+        finally:
+            self._connector_force_expand = prev_force
         lines = condition_sql.split("\n")
 
         keyword_width = len(keyword) + 1  # e.g. 6 for "WHERE "
