@@ -725,15 +725,11 @@ class JarifyGenerator(DuckDB.Generator):
         that boolean conditions (AND / OR chains) cannot wrap mid-argument.
 
         When the compact single-line form fits within max_line_length it is
-        used as-is.  When it is too wide the call expands using the same
-        leading-comma style as SELECT column lists (content at pad+1,
-        comma at pad):
-
-            if(
-               <condition>
-              ,<value_if_true>
-              ,<value_if_false>
-            )
+        used as-is. When it is too wide the call expands using a leading-
+        comma outer form like SELECT column lists (content at pad+1, comma
+        at pad). The condition stays compact on one line, but true/false
+        branches may use their normal multi-line formatting when still too
+        wide.
         """
         has_else = expression.args.get("false") is not None
 
@@ -742,38 +738,41 @@ class JarifyGenerator(DuckDB.Generator):
                 return self.func("IF", expression.this, expression.args["true"], expression.args["false"])
             return self.func("IF", expression.this, expression.args["true"])
 
-        # Pretty mode: compact args prevent AND/OR from wrapping mid-call.
+        # Pretty mode: keep the condition compact so AND/OR chains do not
+        # wrap mid-call. Branches start compact too, but can fall back to
+        # their normal SQL rendering when still too wide on their own.
         compact_cond = self._compact_sql(expression.this)
-        compact_then = self._compact_sql(expression.args["true"])
+        true_expr = expression.args["true"]
+        compact_then = self._compact_sql(true_expr)
         compact_args = [compact_cond, compact_then]
-        if has_else:
-            compact_args.append(self._compact_sql(expression.args["false"]))
+
+        false_expr = expression.args.get("false")
+        if false_expr is not None:
+            compact_args.append(self._compact_sql(false_expr))
 
         inline = f"if({', '.join(compact_args)})"
         if not self.too_wide([inline]):
             return inline
 
-        # Too wide: expand to a multi-line leading-comma form that matches
-        # jarify's SELECT column style (content at pad+1, comma at pad).
-        #
-        # sqlglot appends self.pad spaces to every line after the first when
-        # it embeds a multi-line expression into the statement.  To reach the
-        # desired absolute columns we therefore emit one less space and let
-        # sqlglot supply the rest:
-        #
-        #   first arg / closing paren → emit 1 space  (+pad → pad+1, aligns with "if(")
-        #   comma args                → emit ","       (+pad → "  ," at pad col)
-        #
-        # Emit one indentation level inside if(.
-        # sqlglot appends self.pad spaces to every inner line, so to reach
-        # the target absolute columns we emit (target - pad):
-        #   first arg  → 2*(pad+1) cols total → emit pad+2 spaces
-        #   comma args → 2*(pad+1)-1 cols     → emit pad+1 spaces then ","
-        #   closing )  → pad+1 cols (= if col) → emit 1 space
+        branch_sqls = [compact_cond]
+        branch_sqls.append(compact_then if not self.too_wide([compact_then]) else self.sql(true_expr))
+        if false_expr is not None:
+            compact_false = self._compact_sql(false_expr)
+            branch_sqls.append(compact_false if not self.too_wide([compact_false]) else self.sql(false_expr))
+
+        # Too wide: expand the outer IF() with leading commas. Keep the
+        # condition on one compact line, but allow branch expressions to bring
+        # along their own nested wrapping.
         p = self.pad
-        lines = ["if(", f"{' ' * (p + 2)}{compact_args[0]}"]
-        for arg in compact_args[1:]:
-            lines.append(f"{' ' * (p + 1)},{arg}")
+
+        def _prefixed(arg_sql: str, *, first: str, rest: str) -> list[str]:
+            lines = arg_sql.splitlines() or [arg_sql]
+            return [f"{first}{lines[0]}", *(f"{rest}{line}" for line in lines[1:])]
+
+        lines = ["if("]
+        lines.extend(_prefixed(branch_sqls[0], first=" " * (p + 2), rest=" " * (p + 2)))
+        for arg_sql in branch_sqls[1:]:
+            lines.extend(_prefixed(arg_sql, first=" " * (p + 1) + ",", rest=" " * (p + 2)))
         lines.append(")")
         return "\n".join(lines)
 
