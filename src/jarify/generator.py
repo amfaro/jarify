@@ -725,13 +725,14 @@ class JarifyGenerator(DuckDB.Generator):
         that boolean conditions (AND / OR chains) cannot wrap mid-argument.
 
         When the compact single-line form fits within max_line_length it is
-        used as-is.  When it is too wide the call expands to a 5-line form
-        (4 lines for a no-else IF) with leading-comma style:
+        used as-is.  When it is too wide the call expands using the same
+        leading-comma style as SELECT column lists (content at pad+1,
+        comma at pad):
 
             if(
-                <condition>
-               ,<value_if_true>
-               ,<value_if_false>
+               <condition>
+              ,<value_if_true>
+              ,<value_if_false>
             )
         """
         has_else = expression.args.get("false") is not None
@@ -752,13 +753,21 @@ class JarifyGenerator(DuckDB.Generator):
         if not self.too_wide([inline]):
             return inline
 
-        # Too wide: expand to leading-comma multi-line form.
-        indent = " " * self.pad  # first arg: flush after opening paren
-        lc = " " * (self.pad - 1)  # subsequent args: pad-1 spaces then ","
-        lines = ["if(", f"{indent}{compact_cond}"]
+        # Too wide: expand to a multi-line leading-comma form that matches
+        # jarify's SELECT column style (content at pad+1, comma at pad).
+        #
+        # sqlglot appends self.pad spaces to every line after the first when
+        # it embeds a multi-line expression into the statement.  To reach the
+        # desired absolute columns we therefore emit one less space and let
+        # sqlglot supply the rest:
+        #
+        #   first arg / closing paren → emit 1 space  (+pad → pad+1, aligns with "if(")
+        #   comma args                → emit ","       (+pad → "  ," at pad col)
+        #
+        lines = ["if(", f" {compact_args[0]}"]
         for arg in compact_args[1:]:
-            lines.append(f"{lc},{arg}")
-        lines.append(")")
+            lines.append(f",{arg}")
+        lines.append(" )")
         return "\n".join(lines)
 
     # ------------------------------------------------------------------
