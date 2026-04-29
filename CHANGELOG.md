@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.9] - 2026-04-29
+### Bug Fixes
+
+- wrap overlong branches in wide if() ([#234](https://github.com/amfaro/jarify/pull/234)) ([#234](https://github.com/amfaro/jarify/pull/234))
+
 ## [0.5.8] - 2026-04-29
 ### Bug Fixes
 
