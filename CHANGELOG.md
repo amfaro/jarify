@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.10] - 2026-04-29
+### Bug Fixes
+
+- keep AND/OR connector inline when it fits within max_line_length ([#237](https://github.com/amfaro/jarify/pull/237)) ([#237](https://github.com/amfaro/jarify/pull/237))
+
 ## [0.5.9] - 2026-04-29
 ### Bug Fixes
 
