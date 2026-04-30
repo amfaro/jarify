@@ -387,6 +387,28 @@ WITH _programs AS -- this is where we filter by parameters
 
 ---
 
+### Predicate comments — keep `OR` / `AND` outside the comment
+
+A comment that documents one branch of a boolean expression stays on its own line before that branch. Jarify must not collapse the comment and the following `OR` / `AND` onto one line.
+
+**Bad**
+```sql
+WHERE 1 = 1
+  AND ((a = 1) -- note OR b = 2)
+```
+
+**Good**
+```sql
+WHERE 1 = 1
+  AND (
+    -- note
+    (a = 1)
+    OR b = 2
+  )
+```
+
+---
+
 ### Table aliases — `AS` omitted in `FROM`/`JOIN`, required in `SELECT`
 
 The `AS` keyword is kept for column aliases in `SELECT` lists but **omitted** between a table reference and its alias in `FROM` and `JOIN` lines.
