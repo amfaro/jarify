@@ -99,6 +99,14 @@ class TestReservedKeywordTypeCasts:
         assert len(trees) == 1
         assert trees[0] is not None
 
+    def test_transform_macro_parses_as_anonymous_function(self) -> None:
+        sql = "SELECT transform(t, _transform)"
+        trees = parse_sql(sql)
+        assert len(trees) == 1
+        tree = trees[0]
+        assert tree is not None
+        assert tree.sql(dialect="duckdb") == "SELECT TRANSFORM(t, _transform)"
+
     def test_already_quoted_left_unchanged(self) -> None:
         """Already-quoted type names must not be double-quoted."""
         sql = 'SELECT []::"filter"[]'

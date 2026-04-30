@@ -30,6 +30,12 @@ class _JarifyDuckDBParser(_DuckDB.Parser):
     TYPE_CONVERTERS: typing.ClassVar = {
         k: v for k, v in _DuckDB.Parser.TYPE_CONVERTERS.items() if k != _exp.DType.DECIMAL
     }
+    # sqlglot treats bare TRANSFORM(...) as DuckDB's list-transform function and
+    # rewrites it to LIST_TRANSFORM(...). DuckDB documents LIST_TRANSFORM and its
+    # explicit aliases, but not a bare TRANSFORM alias; projects may define their
+    # own `transform` macro. Remove the special-case parser entry so bare
+    # TRANSFORM(...) round-trips as an anonymous function call.
+    FUNCTIONS: typing.ClassVar = {k: v for k, v in _DuckDB.Parser.FUNCTIONS.items() if k != "TRANSFORM"}
 
 
 class _JarifyDuckDB(_DuckDB):
