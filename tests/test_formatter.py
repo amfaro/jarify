@@ -248,6 +248,16 @@ class TestGroupByPerLine:
         out, _ = format_sql("SELECT a, b, count(*) FROM t GROUP BY ALL")
         assert "GROUP BY ALL" in out
 
+    def test_group_by_mixed_agg_expr_stays_explicit(self):
+        sql = (
+            "SELECT 'prefix: ' || group_field || string_agg(transaction_id, ', ') || "
+            "group_key FROM t GROUP BY group_field, group_key"
+        )
+        out, _ = format_sql(sql)
+        assert "GROUP BY ALL" not in out
+        assert "group_field" in out
+        assert "group_key" in out
+
     def test_group_by_single_column(self):
         out, _ = format_sql("SELECT a, count(*) FROM t GROUP BY a")
         assert "GROUP BY" in out
