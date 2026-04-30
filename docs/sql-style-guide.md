@@ -559,6 +559,26 @@ FROM t
 
 ---
 
+### JSON extraction casts — preserve grouping
+
+When converting `CAST(json_expr->'path' AS type)` or `CAST(json_expr->>'path' AS type)` to DuckDB shorthand, keep parentheses around the extraction so the cast applies to the extracted value rather than the JSON path literal.
+
+**Bad**
+```sql
+SELECT j->'x'::STRUCT(a INTEGER), j->>'label'::TEXT FROM t
+```
+
+**Good**
+```sql
+SELECT
+   (j->'x')::STRUCT(a INTEGER)
+  ,(j->>'label')::TEXT
+FROM t
+;
+```
+
+---
+
 ### Struct literal — leading-comma style when multi-line
 
 When a positional struct literal `(val1, val2, ...)::my_struct` wraps across lines, the opening `(` appears on its own line and the fields use the same leading-comma style as `SELECT` lists.

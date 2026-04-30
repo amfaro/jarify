@@ -13,6 +13,7 @@ Subclasses sqlglot's DuckDBGenerator to enforce jarify's opinionated rules:
 - IS NOT NULL preserved (not rewritten to NOT x IS NULL)
 - NULLS LAST/FIRST suppressed when it matches DuckDB's default
 - SELECT * FROM t → FROM t (DuckDB FROM-first syntax)
+- JSON extraction casts keep grouping: (json_expr->'path')::type
 - Struct tuple casts (val, ...)::type use leading-comma style when multi-line
 - DISTINCT inside aggregates appears on its own line when the call wraps
 - CREATE TABLE: opening paren on its own line, column name/type alignment,
@@ -1236,7 +1237,12 @@ class JarifyGenerator(DuckDB.Generator):
         if self.pretty and self.leading_comma and isinstance(expression.this, exp.Tuple):
             exprs_sql = self.expressions(expression.this, flat=False)
             return f"(\n{exprs_sql}\n)::{type_sql}"
-        return f"{self.sql(expression, 'this')}::{type_sql}"
+
+        value_sql = self.sql(expression, "this")
+        if isinstance(expression.this, (exp.JSONExtract, exp.JSONExtractScalar)):
+            value_sql = f"({value_sql})"
+
+        return f"{value_sql}::{type_sql}"
 
     # ------------------------------------------------------------------
     # Lambda: wrap body when the flat form exceeds max_line_length
