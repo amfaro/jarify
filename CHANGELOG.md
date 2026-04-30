@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.13] - 2026-04-30
+### Bug Fixes
+
+- preserve json extract grouping before casts ([#253](https://github.com/amfaro/jarify/pull/253)) ([#253](https://github.com/amfaro/jarify/pull/253))
+- preserve custom transform macros ([#255](https://github.com/amfaro/jarify/pull/255)) ([#255](https://github.com/amfaro/jarify/pull/255))
+- keep mixed agg group by explicit ([#256](https://github.com/amfaro/jarify/pull/256)) ([#256](https://github.com/amfaro/jarify/pull/256))
+- preserve ORs near line comments ([#257](https://github.com/amfaro/jarify/pull/257)) ([#257](https://github.com/amfaro/jarify/pull/257))
+- preserve dynamic json_extract paths ([#258](https://github.com/amfaro/jarify/pull/258)) ([#258](https://github.com/amfaro/jarify/pull/258))
+
 ## [0.5.12] - 2026-04-29
 ### Bug Fixes
 
