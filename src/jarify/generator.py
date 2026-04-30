@@ -688,7 +688,7 @@ class JarifyGenerator(DuckDB.Generator):
             return super().connector_sql(expression, op)
 
         if self.pretty:
-            if not self._connector_force_expand:
+            if not self._connector_force_expand and not self._has_comments(expression):
                 compact_parts = [terms[0]]
                 for connector_op, term in zip(ops, terms[1:], strict=False):
                     compact_parts.append(f"{connector_op} {term}")
@@ -704,7 +704,7 @@ class JarifyGenerator(DuckDB.Generator):
 
     def _flatten_connector(
         self,
-        node: exp.Expression,
+        node: exp.Expr,
         terms: list[str],
         ops: list[str],
     ) -> None:
@@ -724,10 +724,22 @@ class JarifyGenerator(DuckDB.Generator):
     def paren_sql(self, expression: exp.Paren) -> str:
         if not self.pretty:
             return super().paren_sql(expression)
+
+        comments = expression.pop_comments() or []
+        lead = [c for c in comments if c.strip() in self._leading_comment_texts]
+        trail = [c for c in comments if c.strip() not in self._leading_comment_texts]
+
         compact = self._compact_sql(expression.this)
-        if not self.too_wide([f"({compact})"]):
-            return f"({compact})"
-        return super().paren_sql(expression)
+        if not self._has_comments(expression.this) and not self.too_wide([f"({compact})"]):
+            sql = f"({compact})"
+        else:
+            sql = super().paren_sql(expression)
+
+        inline = self._render_comments(trail) if trail else ""
+        if lead:
+            rendered_lead = "\n".join(f"-- {c.strip()}" for c in lead if c.strip())
+            return f"{rendered_lead}\n{sql}{inline}" if rendered_lead else f"{sql}{inline}"
+        return f"{sql}{inline}"
 
     # ------------------------------------------------------------------
     # IF(): render exp.If as the DuckDB IF() function (not CASE WHEN)
@@ -881,22 +893,38 @@ class JarifyGenerator(DuckDB.Generator):
                 rhs = self.sql(cond.expression)
                 cond_str = f"{lhs.ljust(target)}= {rhs}" if "\n" not in lhs else self.sql(cond)
             else:
-                cond_str = self._compact_sql(cond) if isinstance(cond, exp.Paren) else self.sql(cond)
+                cond_str = (
+                    self.sql(cond)
+                    if isinstance(cond, exp.Paren) and self._has_comments(cond)
+                    else self._compact_sql(cond)
+                    if isinstance(cond, exp.Paren)
+                    else self.sql(cond)
+                )
 
             if i == 0:
                 result.append(f"WHERE {cond_str}")
+            elif "\n" in cond_str:
+                lines = cond_str.splitlines()
+                result.append(f"  AND {lines[0]}")
+                result.extend(f"  {line}" for line in lines[1:])
             else:
                 result.append(f"  AND {cond_str}")
 
         return self.seg("\n".join(result))
 
-    def _flatten_and(self, condition: exp.Expression) -> list[exp.Expression]:
+    def _flatten_and(self, condition: exp.Expr) -> list[exp.Expr]:
         """Return the flat list of operands from a nested AND chain."""
         if isinstance(condition, exp.And):
             return self._flatten_and(condition.this) + self._flatten_and(condition.expression)
         return [condition]
 
-    def _compact_sql(self, expression: exp.Expression) -> str:
+    def _has_comments(self, expression: exp.Expr | None) -> bool:
+        """Return True when expression or any descendant carries SQL comments."""
+        if expression is None:
+            return False
+        return any(getattr(node, "comments", None) for node in expression.walk())
+
+    def _compact_sql(self, expression: exp.Expr) -> str:
         """Render expression compactly without line breaks."""
         saved = self.pretty
         self.pretty = False
@@ -909,7 +937,7 @@ class JarifyGenerator(DuckDB.Generator):
     def having_sql(self, expression: exp.Having) -> str:
         return self._inline_clause_sql("HAVING", expression)
 
-    def _inline_clause_sql(self, keyword: str, expression: exp.Expression) -> str:
+    def _inline_clause_sql(self, keyword: str, expression: exp.Expr) -> str:
         """Format a clause (WHERE/HAVING) with the first condition inline.
 
         Places the first condition on the same line as the keyword, then
@@ -932,7 +960,7 @@ class JarifyGenerator(DuckDB.Generator):
             terms_temp: list[str] = []
             ops_list: list[str] = []
             self._flatten_connector(this, terms_temp, ops_list)
-            if len(set(ops_list)) <= 1:
+            if len(set(ops_list)) <= 1 and not self._has_comments(this):
                 compact = self._compact_sql(this)
                 if not self.too_wide([f"{keyword} {compact}"]):
                     return self.seg(f"{keyword} {compact}")
@@ -1173,7 +1201,7 @@ class JarifyGenerator(DuckDB.Generator):
     def jsonextractscalar_sql(self, expression: exp.JSONExtractScalar) -> str:
         return f"{self.sql(expression, 'this')}->>{self._json_path_sql(expression.expression)}"
 
-    def _json_path_sql(self, path_expr: exp.Expression) -> str:
+    def _json_path_sql(self, path_expr: exp.Expr) -> str:
         """Render a JSON path, using bare 'key' for simple root+key paths."""
         if (
             isinstance(path_expr, exp.JSONPath)

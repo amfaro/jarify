@@ -114,6 +114,29 @@ def test_transform_macro_is_not_rewritten_to_list_transform():
     assert "list_transform" not in result
 
 
+def test_leading_comment_inside_or_group_stays_on_its_own_line():
+    sql = """SELECT *
+FROM t
+WHERE 1 = 1
+  AND (
+    -- No prior-year baseline: infinite YoY improvement → highest tier
+    (t.qualification_met AND t.qualification_target = 0)
+    OR t.threshold_value >= r.threshold
+  )
+"""
+    result, _ = format_sql(sql)
+    preserved_branch = (
+        "-- No prior-year baseline: infinite YoY improvement → highest tier\n"
+        "    (t.qualification_met AND t.qualification_target = 0)"
+    )
+    assert preserved_branch in result
+    swallowed_or = (
+        "-- No prior-year baseline: infinite YoY improvement → highest tier OR t.threshold_value >= r.threshold"
+    )
+    assert swallowed_or not in result
+    assert "OR t.threshold_value >= r.threshold" in result
+
+
 class TestFromFirst:
     def test_select_star_becomes_from_first(self):
         from jarify.formatter import format_sql
