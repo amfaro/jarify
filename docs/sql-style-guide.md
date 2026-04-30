@@ -616,6 +616,26 @@ FROM t
 
 ---
 
+### Dynamic JSON paths — keep function syntax
+
+Use `->` and `->>` only for static JSON paths. When the path is built from an expression such as `concat(...)`, preserve `json_extract(...)` / `json_extract_string(...)` so formatting does not change runtime behavior.
+
+**Bad**
+```sql
+SELECT to_json({'purchaser': ft.purchaser})->>concat('$.', o.group_by_field, '.', o.group_by_key) FROM offers o JOIN fact_transactions ft ON o.id = ft.offer_id
+```
+
+**Good**
+```sql
+SELECT
+   json_extract_string(to_json({'purchaser': ft.purchaser}), concat('$.', o.group_by_field, '.', o.group_by_key))
+FROM offers             o
+INNER JOIN fact_transactions ft ON o.id = ft.offer_id
+;
+```
+
+---
+
 ### Struct literal — leading-comma style when multi-line
 
 When a positional struct literal `(val1, val2, ...)::my_struct` wraps across lines, the opening `(` appears on its own line and the fields use the same leading-comma style as `SELECT` lists.

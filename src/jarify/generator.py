@@ -14,6 +14,7 @@ Subclasses sqlglot's DuckDBGenerator to enforce jarify's opinionated rules:
 - NULLS LAST/FIRST suppressed when it matches DuckDB's default
 - SELECT * FROM t → FROM t (DuckDB FROM-first syntax)
 - JSON extraction casts keep grouping: (json_expr->'path')::type
+- Dynamic JSON extraction paths stay as function calls; only static paths use -> / ->>
 - Struct tuple casts (val, ...)::type use leading-comma style when multi-line
 - DISTINCT inside aggregates appears on its own line when the call wraps
 - CREATE TABLE: opening paren on its own line, column name/type alignment,
@@ -1190,19 +1191,27 @@ class JarifyGenerator(DuckDB.Generator):
     # ------------------------------------------------------------------
     # -> / ->>: render without surrounding spaces (value->>'key' not value ->> 'key').
     # sqlglot's default binary() always adds " op " padding; we bypass it here.
-    # For simple single-key paths, also strip the $.  prefix that sqlglot adds
-    # during AST normalisation ($.offer_key → offer_key), matching DuckDB's
-    # short-form syntax.  Complex multi-segment paths keep their $. prefix.
+    # For static JSONPath expressions, also strip the $. prefix for simple
+    # root+key paths ($.offer_key → 'offer_key'), matching DuckDB's short form.
+    # Dynamic path expressions keep function-call syntax so formatter does not
+    # change runtime semantics by forcing them through the JSON operators.
     # ------------------------------------------------------------------
 
     def jsonextract_sql(self, expression: exp.JSONExtract) -> str:
+        if not self._is_static_json_path(expression.expression):
+            return self.func("json_extract", expression.this, expression.expression)
         return f"{self.sql(expression, 'this')}->{self._json_path_sql(expression.expression)}"
 
     def jsonextractscalar_sql(self, expression: exp.JSONExtractScalar) -> str:
+        if not self._is_static_json_path(expression.expression):
+            return self.func("json_extract_string", expression.this, expression.expression)
         return f"{self.sql(expression, 'this')}->>{self._json_path_sql(expression.expression)}"
 
+    def _is_static_json_path(self, path_expr: exp.Expr) -> bool:
+        return isinstance(path_expr, exp.JSONPath)
+
     def _json_path_sql(self, path_expr: exp.Expr) -> str:
-        """Render a JSON path, using bare 'key' for simple root+key paths."""
+        """Render a static JSON path, using bare 'key' for simple root+key paths."""
         if (
             isinstance(path_expr, exp.JSONPath)
             and len(path_expr.expressions) == 2

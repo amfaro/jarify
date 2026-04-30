@@ -107,6 +107,18 @@ def test_cast_wraps_json_extract_before_shorthand_cast():
     assert "(j->>'label')::text" in result
 
 
+def test_dynamic_json_extract_path_keeps_function_call_syntax():
+    sql = (
+        "SELECT json_extract_string("
+        "to_json(struct_pack(purchaser := ft.purchaser)), "
+        "concat('$.', o.group_by_field, '.', o.group_by_key)) "
+        "FROM offers o JOIN fact_transactions ft ON o.id = ft.offer_id"
+    )
+    result, _ = format_sql(sql)
+    assert "json_extract_string(" in result
+    assert "->>concat(" not in result
+
+
 def test_transform_macro_is_not_rewritten_to_list_transform():
     sql = "SELECT transform(t, _transform) AS incentivized_amount FROM txns"
     result, _ = format_sql(sql)
