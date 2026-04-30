@@ -107,6 +107,13 @@ def test_cast_wraps_json_extract_before_shorthand_cast():
     assert "(j->>'label')::text" in result
 
 
+def test_transform_macro_is_not_rewritten_to_list_transform():
+    sql = "SELECT transform(t, _transform) AS incentivized_amount FROM txns"
+    result, _ = format_sql(sql)
+    assert "transform(t, _transform) AS incentivized_amount" in result
+    assert "list_transform" not in result
+
+
 class TestFromFirst:
     def test_select_star_becomes_from_first(self):
         from jarify.formatter import format_sql

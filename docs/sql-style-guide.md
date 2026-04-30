@@ -74,7 +74,7 @@ WHERE a.active = true
 
 ### Functions — aggregate and window uppercase, scalar lowercase
 
-Aggregate and window functions (`COUNT`, `SUM`, `AVG`, `ROW_NUMBER`, `RANK`, `LEAD`, etc.) are always uppercase. All other DuckDB built-in functions (`regexp_extract`, `strftime`, `date_trunc`, etc.) remain lowercase.
+Aggregate and window functions (`COUNT`, `SUM`, `AVG`, `ROW_NUMBER`, `RANK`, `LEAD`, etc.) are always uppercase. All other DuckDB built-in functions (`regexp_extract`, `strftime`, `date_trunc`, etc.) remain lowercase. User-defined macro and function names are preserved and must not be rewritten to a different built-in name.
 
 **Bad**
 ```sql
@@ -90,6 +90,21 @@ SELECT
   ,regexp_extract(x, '[0-9]+')
   ,strftime(ts, '%Y')
 FROM t
+;
+```
+
+Custom macros keep their original name instead of being normalized to a built-in alias:
+
+**Bad**
+```sql
+SELECT list_transform(t, _transform) FROM txns
+```
+
+**Good**
+```sql
+SELECT
+   transform(t, _transform)
+FROM txns
 ;
 ```
 
