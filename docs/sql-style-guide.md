@@ -944,7 +944,7 @@ QUALIFY
 
 ### `prefer-group-by-all`
 
-**Auto-fixed by `fmt`.** Rewrites explicit `GROUP BY col1, col2, ...` to `GROUP BY ALL` when all non-aggregated `SELECT` columns are listed.
+**Auto-fixed by `fmt`.** Rewrites explicit `GROUP BY col1, col2, ...` to `GROUP BY ALL` when every standalone non-aggregate `SELECT` expression is listed. Mixed aggregate/non-aggregate expressions stay explicit because DuckDB can reject `GROUP BY ALL` for that shape.
 
 **Bad**
 ```sql

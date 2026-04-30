@@ -218,6 +218,14 @@ class TestPreferGroupByAll:
         rules = _lint(sql)
         assert "prefer-group-by-all" in rules
 
+    def test_no_warn_for_mixed_agg_expr(self):
+        sql = (
+            "SELECT 'prefix: ' || group_field || string_agg(transaction_id, ', ') || "
+            "group_key FROM t GROUP BY group_field, group_key"
+        )
+        rules = _lint(sql)
+        assert "prefer-group-by-all" not in rules
+
     def test_no_warn_when_list_agg_is_the_only_expr(self):
         # If every SELECT item is a list() aggregate there is no non-agg column
         # to group by, so the rule should not fire.
