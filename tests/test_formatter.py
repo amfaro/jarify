@@ -100,6 +100,13 @@ def test_wide_if_keeps_condition_compact_but_wraps_overlong_true_branch():
     assert "\n     ,NULL" in result
 
 
+def test_cast_wraps_json_extract_before_shorthand_cast():
+    sql = "SELECT CAST(j->'x' AS STRUCT(a INTEGER)), CAST(j->>'label' AS TEXT) FROM t"
+    result, _ = format_sql(sql)
+    assert "(j->'x')::struct(a int)" in result
+    assert "(j->>'label')::text" in result
+
+
 class TestFromFirst:
     def test_select_star_becomes_from_first(self):
         from jarify.formatter import format_sql
