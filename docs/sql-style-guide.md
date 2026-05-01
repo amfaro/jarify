@@ -93,11 +93,56 @@ FROM t
 ;
 ```
 
-Custom macros keep their original name instead of being normalized to a built-in alias:
+---
+
+### Built-in function aliases — canonical DuckDB names
+
+Built-in aliases are normalized to jarify's canonical DuckDB names. In practice that means `listagg(...)` becomes `STRING_AGG(...)`, and `array_contains(...)` becomes `list_contains(...)`.
 
 **Bad**
 ```sql
-SELECT list_transform(t, _transform) FROM txns
+SELECT listagg(code, ' | ') AS codes, array_contains(tags, 'x') AS has_tag FROM t
+```
+
+**Good**
+```sql
+SELECT
+   STRING_AGG(code, ' | ')  AS codes
+  ,list_contains(tags, 'x') AS has_tag
+FROM t
+;
+```
+
+---
+
+### Two-argument null fallback — prefer `ifnull()`
+
+Use `ifnull(x, y)` for the two-argument null-fallback case. `coalesce(...)` stays in place when there are three or more arguments.
+
+**Bad**
+```sql
+SELECT COALESCE(a, b) AS two_arg, COALESCE(c, d) AS two_arg_upper, COALESCE(a, b, c) AS three_arg FROM t
+```
+
+**Good**
+```sql
+SELECT
+   ifnull(a, b)      AS two_arg
+  ,ifnull(c, d)      AS two_arg_upper
+  ,coalesce(a, b, c) AS three_arg
+FROM t
+;
+```
+
+---
+
+### Custom macros — preserve original names
+
+User-defined macro and function names keep their original identifier instead of being rewritten to a DuckDB built-in alias. Jarify still normalizes casing for scalar-style calls.
+
+**Bad**
+```sql
+SELECT TRANSFORM(t, _transform) FROM txns
 ```
 
 **Good**
@@ -587,9 +632,9 @@ SELECT CAST(a AS INT), CAST(b AS TEXT), CAST(c AS BOOLEAN) FROM t
 **Good**
 ```sql
 SELECT
-   a::INT
-  ,b::TEXT
-  ,c::BOOLEAN
+   a::int
+  ,b::text
+  ,c::boolean
 FROM t
 ;
 ```
@@ -608,8 +653,8 @@ SELECT j->'x'::STRUCT(a INTEGER), j->>'label'::TEXT FROM t
 **Good**
 ```sql
 SELECT
-   (j->'x')::STRUCT(a INTEGER)
-  ,(j->>'label')::TEXT
+   (j->'x')::struct(a int)
+  ,(j->>'label')::text
 FROM t
 ;
 ```
@@ -792,9 +837,9 @@ CREATE OR REPLACE TABLE examples (
 ```sql
 CREATE OR REPLACE TABLE examples
 (
-   transaction_id       TEXT NOT NULL
-  ,program_supplier_key TEXT NOT NULL
-  ,seller_key           TEXT
+   transaction_id       text NOT NULL
+  ,program_supplier_key text NOT NULL
+  ,seller_key           text
 
   ,PRIMARY KEY (program_supplier_key, transaction_id)
 )
@@ -857,13 +902,13 @@ FROM _lookup
 
 ## Lint Rules
 
-Lint rules report violations but do not modify the SQL. All rules default to `warn`. Severity can be set to `off`, `warn`, or `error` in `jarify.toml`.
+Rules in this section may lint only, auto-fix during `fmt`, or do both. All rules default to `warn`. Severity can be set to `off`, `warn`, or `error` in `jarify.toml`.
 
 ---
 
 ### `no-select-star`
 
-Flag `SELECT *`. `COUNT(*)` is exempt.
+Flag top-level `SELECT *` and `table.*` in `SELECT` lists. `COUNT(*)` is exempt.
 
 When `prefer_from_first = true` (the default), single-table `SELECT *` queries are not flagged because the formatter already rewrites them to FROM-first syntax (`FROM t`). The rule still fires for `SELECT *` with JOINs, since those are not rewritten.
 
@@ -892,7 +937,7 @@ FROM products
 
 ### `no-implicit-cross-join`
 
-Flag comma-separated tables in `FROM` (implicit cross join). Require an explicit `CROSS JOIN` or an `ON`/`USING` clause.
+**Auto-fixed by `fmt`.** Rewrite comma-separated tables in `FROM` to explicit `CROSS JOIN`, and flag the pattern when linting.
 
 **Bad**
 ```sql
@@ -905,7 +950,8 @@ SELECT
    a.x
   ,b.y
 FROM a
-INNER JOIN b ON a.id = b.id
+CROSS JOIN b
+WHERE a.id = b.id
 ;
 ```
 
@@ -943,16 +989,16 @@ Flag non-canonical DuckDB type names. Use the canonical form instead.
 | Non-canonical | Canonical |
 |---------------|-----------|
 | `float`, `float4` | `real` |
-| `nvarchar` | `text` |
+| `varchar`, `nvarchar` | `text` |
 
 **Bad**
 ```sql
-CREATE TABLE t (score FLOAT, label NVARCHAR)
+CREATE TABLE t (score FLOAT, short_label VARCHAR, long_label NVARCHAR)
 ```
 
 **Good**
 ```sql
-CREATE TABLE t (score real, label text)
+CREATE TABLE t (score real, short_label text, long_label text)
 ```
 
 ---
@@ -1038,7 +1084,7 @@ SELECT COALESCE(tags, '[]')::text[] AS tags FROM t
 **Good**
 ```sql
 SELECT
-   COALESCE(tags, [])::TEXT[] AS tags
+   ifnull(tags, [])::text[] AS tags
 FROM t
 ;
 ```
@@ -1074,9 +1120,7 @@ FROM _base
 
 ### `prefer-neq-operator`
 
-Always use `!=` for inequality comparisons instead of the SQL-92 `<>` operator.
-Both are valid in DuckDB, but `!=` is the modern standard.
-The formatter rewrites `<>` to `!=` automatically.
+**Auto-fixed by `fmt`.** Always use `!=` for inequality comparisons instead of the SQL-92 `<>` operator. Both are valid in DuckDB, but `!=` is the modern standard.
 
 **Bad**
 ```sql
@@ -1098,12 +1142,9 @@ WHERE x != y
 
 ### `prefer-if-over-case`
 
-Rewrite single-branch `CASE WHEN … THEN … [ELSE …] END` expressions to DuckDB's
-`IF(condition, true_val[, false_val])` function. The IF form is shorter and more
-idiomatic for simple conditionals.
+**Auto-fixed by `fmt`.** Rewrite single-branch `CASE WHEN … THEN … [ELSE …] END` expressions to DuckDB's `IF(condition, true_val, false_val)` function. The IF form is shorter and more idiomatic for simple conditionals.
 
-Applies only to *searched* CASE with exactly one WHEN branch. Multi-branch CASE and
-simple CASE (`CASE expr WHEN lit …`) are left unchanged.
+Applies only to *searched* CASE with exactly one WHEN branch. Multi-branch CASE and simple CASE (`CASE expr WHEN lit …`) are left unchanged. When the original `CASE` has no `ELSE`, jarify emits an explicit `NULL` third argument because DuckDB's `IF()` requires three arguments.
 
 **Bad**
 ```sql
@@ -1117,12 +1158,12 @@ FROM t
 ```sql
 SELECT
    if(a > 1, 'big', 'small') AS size
-  ,if(b IS NULL, 0) AS b_or_zero
+  ,if(b IS NULL, 0, NULL)    AS b_or_zero
 FROM t
 ;
 ```
 
-When a compact `if(cond, then[, else])` call exceeds `max_line_length`, expand the outer
+When a compact `if(cond, then, else)` call exceeds `max_line_length`, expand the outer
 `if()` call across multiple lines. Keep the condition compact on one line, but let an
 overlong `true` or `false` branch use its normal nested wrapping.
 
