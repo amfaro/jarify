@@ -525,7 +525,7 @@ CROSS JOIN UNNEST(o.vals) t(v)
 
 ### Column alias alignment
 
-When a query contains two or more column aliases anywhere in its `SELECT` lists, the `AS` keyword is aligned to the widest column expression across the full query. That includes outer queries, CTE bodies, and nested subqueries. Multi-line expressions still participate — the closing line (for example `END`) is padded so its trailing `AS` lines up with neighboring single-line aliases.
+When a query contains two or more column aliases anywhere in its query-wide `SELECT` lists, the `AS` keyword is aligned to one visible column across the full query. That includes the outer query plus CTE bodies, including nested CTEs, even when those `SELECT` lists are indented at different depths. Multi-line expressions still participate — the closing line (for example `END`) is padded so its trailing `AS` lines up with neighboring single-line aliases.
 
 **Bad**
 ```sql
@@ -575,6 +575,37 @@ SELECT
   ,rr  AS sixth
 FROM _a
 INNER JOIN _b ON 1 = 1
+;
+```
+
+**Also good**
+```sql
+WITH _outer_group AS
+(
+  WITH seed_group AS
+  (
+    SELECT
+       alpha_value       AS seed_one
+      ,beta_metric       AS seed_two
+    FROM source_a
+  )
+  SELECT
+     seed_one           AS outer_one
+    ,seed_two           AS outer_two
+  FROM seed_group
+)
+,_sibling_group AS
+(
+  SELECT
+     gamma_code         AS sibling_one
+    ,delta_indicator    AS sibling_two
+  FROM source_b
+)
+SELECT
+   outer_one           AS final_one
+  ,sibling_two         AS final_two
+FROM _outer_group
+INNER JOIN _sibling_group ON outer_one = sibling_one
 ;
 ```
 

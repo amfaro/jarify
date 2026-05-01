@@ -10,6 +10,6 @@ WITH _sku_catalog AS
   {manufacturer_filter}
 )
 SELECT
-   skus::json                  AS skus
+   skus::json                    AS skus
 FROM _aggregated_and_sorted
 ;

@@ -66,8 +66,44 @@ def test_as_alignment_spans_ctes_and_outer_select():
         for line in result.splitlines()
         if any(f" AS {alias}" in line for alias in ("first", "second", "third", "fourth", "fifth", "sixth"))
     ]
-    lhs_widths = [len(line.split(" AS ")[0].lstrip(" ,")) for line in alias_lines]
-    assert len(set(lhs_widths)) == 1, f"AS keywords not aligned across query: {lhs_widths}"
+    as_positions = [line.index(" AS ") for line in alias_lines]
+    assert len(set(as_positions)) == 1, f"AS keywords not aligned across query: {as_positions}"
+
+
+def test_as_alignment_stays_visually_consistent_across_nested_ctes():
+    sql = (
+        "WITH outer_group AS ("
+        "  WITH seed_group AS ("
+        "    SELECT alpha_value AS seed_one, beta_metric AS seed_two FROM source_a"
+        "  )"
+        "  SELECT seed_one AS outer_one, seed_two AS outer_two FROM seed_group"
+        "), "
+        "sibling_group AS ("
+        "  SELECT gamma_code AS sibling_one, delta_indicator AS sibling_two FROM source_b"
+        ") "
+        "SELECT outer_one AS final_one, sibling_two AS final_two "
+        "FROM outer_group JOIN sibling_group ON outer_one = sibling_one"
+    )
+    result, _ = format_sql(sql)
+    alias_lines = [
+        line
+        for line in result.splitlines()
+        if any(
+            f" AS {alias}" in line
+            for alias in (
+                "seed_one",
+                "seed_two",
+                "outer_one",
+                "outer_two",
+                "sibling_one",
+                "sibling_two",
+                "final_one",
+                "final_two",
+            )
+        )
+    ]
+    as_positions = [line.index(" AS ") for line in alias_lines]
+    assert len(set(as_positions)) == 1, f"Nested CTE alias alignment drifted: {as_positions}"
 
 
 def test_searched_case_issue_260_layout_is_preserved():

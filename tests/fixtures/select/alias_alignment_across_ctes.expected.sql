@@ -13,8 +13,8 @@ WITH _a AS
   FROM u
 )
 SELECT
-   q   AS fifth
-  ,rr  AS sixth
+   q     AS fifth
+  ,rr    AS sixth
 FROM _a
 INNER JOIN _b ON 1 = 1
 ;

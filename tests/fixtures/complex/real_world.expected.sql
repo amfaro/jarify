@@ -7,7 +7,7 @@ SET VARIABLE time_frame = getenv('TIME_FRAME')
 WITH _latest_version AS
 (
   SELECT
-     regexp_extract(file, 'version=(.{21})', 1)  AS version
+     regexp_extract(file, 'version=(.{21})', 1) AS version
   FROM glob('s3://' || getvariable('tigris_bucket') || '/global-catalog/*/*')
   ORDER BY
      file DESC
@@ -61,7 +61,7 @@ SELECT
   ,p.program_redemption_price
   ,p.origin
   ,all_e.participant_key
-  ,if(e.participant_key IS NOT NULL, 'Y', 'N') AS enrolled
+  ,if(e.participant_key IS NOT NULL, 'Y', 'N')  AS enrolled
   ,sc.version
 FROM _relevant_skus rs
 INNER JOIN _sku_catalog sc ON sc.sku_key = rs.sku_key AND sc.manufacturer_key = rs.program_supplier_key

@@ -161,7 +161,7 @@ class JarifyGenerator(DuckDB.Generator):
         )
         self._config = config
         self._as_align_width: int | None = None  # set during SELECT expression rendering
-        self._tree_as_align_width: int | None = None  # set per statement tree during generate()
+        self._tree_as_align_column: int | None = None  # visible AS column target per statement tree during generate()
         self._col_name_align: int | None = None  # set during CREATE TABLE column rendering
         self._col_type_align: int | None = None  # set during CREATE TABLE column rendering
         self._join_alias_col: int | None = None  # set during FROM/JOIN block rendering
@@ -170,13 +170,13 @@ class JarifyGenerator(DuckDB.Generator):
         self._connector_force_expand: bool = False  # set True inside WHERE/HAVING to always break AND/OR
 
     def generate(self, expression: exp.Expr, copy: bool = True) -> str:
-        saved_align = self._tree_as_align_width
+        saved_align = self._tree_as_align_column
         if self.pretty:
-            self._tree_as_align_width = self._compute_tree_as_align_width(expression)
+            self._tree_as_align_column = self._compute_tree_as_align_column(expression)
         try:
             return super().generate(expression, copy=copy)
         finally:
-            self._tree_as_align_width = saved_align
+            self._tree_as_align_column = saved_align
 
     # ------------------------------------------------------------------
     # Function name casing: aggregates/window functions → UPPER, rest → lower
@@ -255,7 +255,13 @@ class JarifyGenerator(DuckDB.Generator):
         is_select = isinstance(expression, exp.Select) and key is None
         saved_align = self._as_align_width
         if is_select:
-            self._as_align_width = self._tree_as_align_width or self._compute_as_align_width(list(expressions_list))
+            select_expression = t.cast(exp.Select, expression)
+            prefix_width = self._select_expression_prefix_width(select_expression)
+            self._as_align_width = (
+                self._tree_as_align_column - prefix_width
+                if self._tree_as_align_column is not None
+                else self._compute_as_align_width(list(expressions_list))
+            )
 
         try:
             result_sqls = []
@@ -330,19 +336,51 @@ class JarifyGenerator(DuckDB.Generator):
             return None
         return max(col_widths)
 
-    def _compute_tree_as_align_width(self, expression: exp.Expr) -> int | None:
-        """Compute one AS-alignment width across all SELECT lists in a statement tree."""
-        col_widths: list[int] = []
+    def _compute_tree_as_align_column(self, expression: exp.Expr) -> int | None:
+        """Compute one visible AS column across the query-wide CTE/select tree."""
+        as_columns: list[int] = []
         alias_count = 0
-        for select in expression.find_all(exp.Select):
+        for select in self._iter_query_aligned_selects(expression):
             widths, aliases = self._collect_as_alignment_metrics(list(select.expressions))
-            col_widths.extend(widths)
+            prefix_width = self._select_expression_prefix_width(select)
+            as_columns.extend(prefix_width + width for width in widths)
             alias_count += aliases
 
-        if alias_count < 2 or not col_widths:
+        if alias_count < 2 or not as_columns:
             return None
 
-        return max(col_widths)
+        return max(as_columns)
+
+    def _iter_query_aligned_selects(self, expression: exp.Expr) -> t.Iterator[exp.Select]:
+        """Yield SELECTs that share query-wide alias alignment.
+
+        Query-wide alignment spans the main SELECT plus any CTE-body SELECTs,
+        including nested CTEs. It intentionally excludes unrelated subqueries in
+        expressions or JOINs, which keep their local alignment behavior.
+        """
+        if isinstance(expression, exp.Select):
+            yield expression
+            with_ = expression.args.get("with_")
+            if isinstance(with_, exp.With):
+                for cte in with_.expressions:
+                    if isinstance(cte, exp.CTE) and isinstance(cte.this, exp.Select):
+                        yield from self._iter_query_aligned_selects(cte.this)
+
+    def _select_expression_prefix_width(self, select: exp.Select) -> int:
+        """Return visible prefix width before a SELECT-list expression.
+
+        In pretty mode, each expression line gets the generator pad plus the
+        leading-comma marker (` ` for the first row, `,` for subsequent rows).
+        Every ancestor SELECT adds one more indent level around the nested
+        statement, so nested CTEs/subqueries shift the visible `AS` column.
+        """
+        ancestor_selects = 0
+        parent = select.parent
+        while parent is not None:
+            if isinstance(parent, exp.Select):
+                ancestor_selects += 1
+            parent = parent.parent
+        return self.pad + 1 + (ancestor_selects * self._indent)
 
     def _collect_as_alignment_metrics(self, expressions_list: list) -> tuple[list[int], int]:
         """Return ``(column_widths, alias_count)`` for a SELECT expression list."""
