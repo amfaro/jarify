@@ -194,6 +194,46 @@ def lint(
         sys.exit(1)
 
 
+@main.command("rules")
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["text", "json"], case_sensitive=False),
+    default="text",
+    help="Output format: text (default) or json.",
+)
+def rules_cmd(output_format: str) -> None:
+    """List all registered rules with their default severity and auto-fix status."""
+    from jarify.rules import RULE_CATALOG
+
+    if output_format == "json":
+        click.echo(
+            json.dumps(
+                [
+                    {
+                        "name": r.name,
+                        "config_key": r.config_key,
+                        "default": r.default,
+                        "auto_fix": r.auto_fix,
+                        "description": r.description,
+                    }
+                    for r in RULE_CATALOG
+                ],
+                indent=2,
+            )
+        )
+        return
+
+    name_w = max(len(r.name) for r in RULE_CATALOG) + 2
+    sev_w = 10
+    fix_w = 9
+    header = f"{'RULE':<{name_w}} {'SEVERITY':<{sev_w}} {'AUTO-FIX':<{fix_w}} DESCRIPTION"
+    console.print(f"[bold]{header}[/bold]")
+    for r in RULE_CATALOG:
+        fix = "yes" if r.auto_fix else "no"
+        console.print(f"{r.name:<{name_w}} {r.default:<{sev_w}} {fix:<{fix_w}} {r.description}")
+
+
 @main.command("init")
 @click.option("--force", is_flag=True, help="Overwrite existing jarify.toml.")
 def init(force: bool) -> None:

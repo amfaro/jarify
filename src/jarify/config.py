@@ -62,7 +62,7 @@ class JarifyConfig:
         rules = data.pop("rules", {})
         # Flatten any per-rule severity shortcuts from [rules.no_select_star] etc.
         known_fields = {f.name for f in cls.__dataclass_fields__.values()}  # type: ignore[attr-defined]
-        filtered = {k: v for k, v in data.items() if k in known_fields}
+        filtered = {k.replace("-", "_"): v for k, v in data.items() if k.replace("-", "_") in known_fields}
         return cls(**filtered, rules=rules)
 
 
