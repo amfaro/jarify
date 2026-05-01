@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.6.0] - 2026-05-01
+### Features
+
+- align column aliases across query ([#272](https://github.com/amfaro/jarify/pull/272)) ([#272](https://github.com/amfaro/jarify/pull/272))
+
 ## [0.5.15] - 2026-05-01
 ### Bug Fixes
 
