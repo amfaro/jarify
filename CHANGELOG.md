@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.8.1] - 2026-05-01
+### Bug Fixes
+
+- remove no-select-star-in-cte; fold into no-select-star ([#285](https://github.com/amfaro/jarify/pull/285)) ([#285](https://github.com/amfaro/jarify/pull/285))
+
 ## [0.8.0] - 2026-05-01
 ### Features
 
