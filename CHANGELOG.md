@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.14] - 2026-05-01
+### Bug Fixes
+
+- improve case formatting ([#266](https://github.com/amfaro/jarify/pull/266)) ([#266](https://github.com/amfaro/jarify/pull/266))
+
+### Documentation
+
+- align style guide with current rules ([#262](https://github.com/amfaro/jarify/pull/262)) ([#262](https://github.com/amfaro/jarify/pull/262))
+
 ## [0.5.13] - 2026-04-30
 ### Bug Fixes
 
