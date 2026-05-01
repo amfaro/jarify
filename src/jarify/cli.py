@@ -88,6 +88,13 @@ def fmt(
             console.print(f"[yellow]WARN[/] {label}: {w}")
             any_changed = any_changed  # parse warnings → don't count as reformatted
 
+        if target_path is None and not check and not diff:
+            # stdin — always write SQL to stdout for pipeline-friendly behavior
+            click.echo(formatted if original != formatted else original, nl=False)
+            if original != formatted:
+                any_changed = True
+            continue
+
         if original == formatted:
             if not diff:
                 console.print(f"[dim]unchanged[/] {label}")
@@ -99,10 +106,8 @@ def fmt(
             _print_diff(label, original, formatted)
         elif check:
             console.print(f"[yellow]would reformat[/] {label}")
-        elif target_path is None:
-            # stdin — write formatted SQL to stdout
-            click.echo(formatted, nl=False)
         else:
+            assert target_path is not None
             target_path.write_text(formatted)
             console.print(f"[green]reformatted[/] {label}")
 
