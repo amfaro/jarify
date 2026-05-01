@@ -59,6 +59,20 @@ def test_load_config_explicit_path_takes_precedence(tmp_path: Path) -> None:
     assert config.indent == 3
 
 
+def test_config_from_dict_kebab_keys():
+    """Kebab-case keys in jarify.toml are accepted and normalized."""
+    config = JarifyConfig.from_dict({"no-select-star": "error", "prefer-if-over-case": "off"})
+    assert config.no_select_star == "error"
+    assert config.prefer_if_over_case == "off"
+
+
+def test_config_from_dict_mixed_case_keys():
+    """Snake_case and kebab-case keys coexist without conflict."""
+    config = JarifyConfig.from_dict({"indent": 4, "no-unused-cte": "error"})
+    assert config.indent == 4
+    assert config.no_unused_cte == "error"
+
+
 @pytest.mark.parametrize("command", ["fmt", "lint"])
 def test_stdin_filename_anchors_config(tmp_path: Path, command: str) -> None:
     """--stdin-filename parent dir is used to discover jarify.toml."""

@@ -23,3 +23,17 @@ run = "uv run pytest"
 [tasks.check]
 description = "Run all checks (lint + test)"
 depends = ["lint", "test"]
+
+[tasks.gen-rules-doc]
+description = "Regenerate docs/rules.md from RULE_CATALOG"
+run = "uv run python scripts/gen_rules_doc.py"
+
+[tasks.check-rules-doc]
+description = "Fail if docs/rules.md is out of sync with RULE_CATALOG"
+run = """
+  uv run python scripts/gen_rules_doc.py
+  git diff --exit-code docs/rules.md || {
+    echo 'docs/rules.md is out of sync — run: mise run gen-rules-doc'
+    exit 1
+  }
+"""

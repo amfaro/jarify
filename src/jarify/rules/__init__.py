@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from jarify.rules.base import FormatterRule
@@ -23,6 +24,125 @@ from jarify.rules.trailing_commas import TrailingCommasRule
 if TYPE_CHECKING:
     from jarify.comment_overrides import CommentOverrides
     from jarify.config import JarifyConfig
+
+
+@dataclass(frozen=True)
+class RuleInfo:
+    """Static metadata for a single jarify rule."""
+
+    name: str
+    """Kebab-case rule identifier used in violation output and disable directives."""
+    config_key: str
+    """Snake_case key in ``jarify.toml`` that controls this rule."""
+    default: str
+    """Default value: ``"on"`` for always-on formatting rules, or a severity string."""
+    auto_fix: bool
+    """True when ``jarify fmt`` automatically rewrites violations."""
+    description: str
+    """One-line description of what the rule does."""
+
+
+#: Complete catalog of all built-in jarify rules in display order.
+RULE_CATALOG: list[RuleInfo] = [
+    RuleInfo(
+        name="keyword-case",
+        config_key="uppercase_keywords",
+        default="on",
+        auto_fix=True,
+        description="uppercase SQL keywords; lowercase type and scalar function names",
+    ),
+    RuleInfo(
+        name="trailing-commas",
+        config_key="trailing_commas",
+        default="off",
+        auto_fix=True,
+        description="trailing comma placement (default: leading commas)",
+    ),
+    RuleInfo(
+        name="no-implicit-cross-join",
+        config_key="no_implicit_cross_join",
+        default="warn",
+        auto_fix=True,
+        description="rewrite implicit cross joins to explicit CROSS JOIN",
+    ),
+    RuleInfo(
+        name="no-select-star",
+        config_key="no_select_star",
+        default="warn",
+        auto_fix=False,
+        description="flag SELECT * usage",
+    ),
+    RuleInfo(
+        name="no-unused-cte",
+        config_key="no_unused_cte",
+        default="warn",
+        auto_fix=False,
+        description="flag CTEs that are defined but never referenced",
+    ),
+    RuleInfo(
+        name="duckdb-type-style",
+        config_key="duckdb_type_style",
+        default="warn",
+        auto_fix=False,
+        description="prefer canonical DuckDB type names (e.g. int not integer)",
+    ),
+    RuleInfo(
+        name="duckdb-prefer-qualify",
+        config_key="duckdb_prefer_qualify",
+        default="warn",
+        auto_fix=False,
+        description="prefer QUALIFY clause over subquery window filter",
+    ),
+    RuleInfo(
+        name="cte-naming",
+        config_key="cte_naming",
+        default="warn",
+        auto_fix=True,
+        description="CTE names must start with an underscore; fmt adds the prefix",
+    ),
+    RuleInfo(
+        name="prefer-group-by-all",
+        config_key="prefer_group_by_all",
+        default="warn",
+        auto_fix=True,
+        description="rewrite explicit GROUP BY column list to GROUP BY ALL",
+    ),
+    RuleInfo(
+        name="prefer-using-over-on",
+        config_key="prefer_using_over_on",
+        default="warn",
+        auto_fix=False,
+        description="suggest USING (col) over ON a.col = b.col for equality joins",
+    ),
+    RuleInfo(
+        name="consistent-empty-array",
+        config_key="consistent_empty_array",
+        default="warn",
+        auto_fix=True,
+        description="rewrite '[]'::type[] cast form to bare [] empty array literal",
+    ),
+    RuleInfo(
+        name="no-select-star-in-cte",
+        config_key="no_select_star_in_cte",
+        default="warn",
+        auto_fix=False,
+        description="flag SELECT * inside CTE bodies",
+    ),
+    RuleInfo(
+        name="prefer-neq-operator",
+        config_key="prefer_neq_operator",
+        default="warn",
+        auto_fix=True,
+        description="rewrite <> inequality operator to !=",
+    ),
+    RuleInfo(
+        name="prefer-if-over-case",
+        config_key="prefer_if_over_case",
+        default="warn",
+        auto_fix=True,
+        description="rewrite single-WHEN CASE expressions to IF()",
+    ),
+]
 
 
 def get_default_rules(config: JarifyConfig, overrides: CommentOverrides | None = None) -> list[FormatterRule]:
