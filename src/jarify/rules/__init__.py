@@ -13,7 +13,6 @@ from jarify.rules.duckdb_type_style import DuckdbTypeStyleRule
 from jarify.rules.keyword_case import KeywordCaseRule
 from jarify.rules.no_implicit_cross_join import NoImplicitCrossJoinRule
 from jarify.rules.no_select_star import NoSelectStarRule
-from jarify.rules.no_select_star_in_cte import NoSelectStarInCteRule
 from jarify.rules.no_unused_cte import NoUnusedCteRule
 from jarify.rules.prefer_group_by_all import PreferGroupByAllRule
 from jarify.rules.prefer_if_over_case import PreferIfOverCaseRule
@@ -70,7 +69,7 @@ RULE_CATALOG: list[RuleInfo] = [
         config_key="no_select_star",
         default="warn",
         auto_fix=False,
-        description="flag SELECT * usage",
+        description="flag SELECT * usage, including inside CTE bodies",
     ),
     RuleInfo(
         name="no-unused-cte",
@@ -120,13 +119,6 @@ RULE_CATALOG: list[RuleInfo] = [
         default="warn",
         auto_fix=True,
         description="rewrite '[]'::type[] cast form to bare [] empty array literal",
-    ),
-    RuleInfo(
-        name="no-select-star-in-cte",
-        config_key="no_select_star_in_cte",
-        default="warn",
-        auto_fix=False,
-        description="flag SELECT * inside CTE bodies",
     ),
     RuleInfo(
         name="prefer-neq-operator",
@@ -185,8 +177,6 @@ def get_default_rules(config: JarifyConfig, overrides: CommentOverrides | None =
         rules.append(PreferUsingOverOnRule(severity=config.prefer_using_over_on, overrides=overrides))
     if config.consistent_empty_array != "off":
         rules.append(ConsistentEmptyArrayRule(severity=config.consistent_empty_array, overrides=overrides))
-    if config.no_select_star_in_cte != "off":
-        rules.append(NoSelectStarInCteRule(severity=config.no_select_star_in_cte, overrides=overrides))
     if config.prefer_neq_operator != "off":
         rules.append(PreferNeqOperatorRule(severity=config.prefer_neq_operator, overrides=overrides))
     if config.prefer_if_over_case != "off":
