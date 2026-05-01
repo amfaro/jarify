@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.10.0] - 2026-05-01
+### Features
+
+- handle SQLMesh SQL files ([#291](https://github.com/amfaro/jarify/pull/291)) ([#291](https://github.com/amfaro/jarify/pull/291))
+
 ## [0.9.0] - 2026-05-01
 ### Features
 
