@@ -26,6 +26,12 @@ from jarify.parser import (
 )
 from jarify.rules import get_default_rules
 from jarify.rules.base import FormatterRule, _node_pos
+from jarify.sqlmesh import (
+    looks_like_sqlmesh,
+    mask_sqlmesh_runtime_tokens,
+    split_sqlmesh_segments,
+    unmask_sqlmesh_runtime_tokens,
+)
 
 
 class FormatWarning:
@@ -49,6 +55,24 @@ def format_sql(
     original SQL is returned unchanged with a warning.
     """
     config = config or JarifyConfig()
+    if not looks_like_sqlmesh(sql):
+        return _format_sql_core(sql, config)
+
+    warnings: list[FormatWarning] = []
+    formatted_segments: list[str] = []
+    for segment in split_sqlmesh_segments(sql):
+        if segment.kind == "opaque" or not segment.text.strip():
+            formatted_segments.append(segment.text)
+            continue
+        formatted, segment_warnings = _format_sql_core(segment.text, config)
+        formatted_segments.append(formatted)
+        warnings.extend(segment_warnings)
+
+    return "".join(formatted_segments), warnings
+
+
+def _format_sql_core(sql: str, config: JarifyConfig) -> tuple[str, list[FormatWarning]]:
+    """Format a parseable SQL segment, preserving existing non-SQLMesh behavior."""
     warnings: list[FormatWarning] = []
     overrides = parse_comment_overrides(sql)
 
@@ -62,6 +86,7 @@ def format_sql(
     # Inline placeholders are masked with dummy identifiers that survive the AST.
     stripped_sql, line_insertions = _extract_line_rust_fmt_placeholders(processed_sql)
     masked_sql, inline_mask = _mask_rust_fmt_placeholders(stripped_sql)
+    masked_sql, sqlmesh_mask = mask_sqlmesh_runtime_tokens(masked_sql)
     masked_sql = _mask_ifnull(masked_sql)
     masked_sql = _mask_numeric(masked_sql)
 
@@ -70,9 +95,10 @@ def format_sql(
     except ParseError as exc:
         result = _try_pivot_order_by_workaround(masked_sql, config)
         if result is not None:
-            result = _unmask_rust_fmt_placeholders(result, inline_mask)
-            result = _unmask_ifnull(result)
             result = _unmask_numeric(result)
+            result = _unmask_ifnull(result)
+            result = unmask_sqlmesh_runtime_tokens(result, sqlmesh_mask)
+            result = _unmask_rust_fmt_placeholders(result, inline_mask)
             result = _reinsert_line_rust_fmt_placeholders(result, line_insertions)
             return _restore_ctas_body_placeholders(result, ctas_body_map), warnings
         warnings.append(FormatWarning(f"could not parse SQL (formatting skipped): {exc}"))
@@ -102,9 +128,10 @@ def format_sql(
     # that no-anchor placeholder re-insertion does not concatenate directly onto
     # the last SQL token without a line break.
     formatted = "\n;\n\n".join(formatted_parts) + ("\n" if formatted_parts else "")
-    formatted = _unmask_rust_fmt_placeholders(formatted, inline_mask)
-    formatted = _unmask_ifnull(formatted)
     formatted = _unmask_numeric(formatted)
+    formatted = _unmask_ifnull(formatted)
+    formatted = unmask_sqlmesh_runtime_tokens(formatted, sqlmesh_mask)
+    formatted = _unmask_rust_fmt_placeholders(formatted, inline_mask)
     result = _reinsert_line_rust_fmt_placeholders(formatted, line_insertions)
     if formatted_parts:
         result = result.rstrip() + "\n;\n"
