@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.9.0] - 2026-05-01
+### Features
+
+- add prefer-ifnull-over-coalesce rule ([#289](https://github.com/amfaro/jarify/pull/289)) ([#289](https://github.com/amfaro/jarify/pull/289))
+
 ## [0.8.1] - 2026-05-01
 ### Bug Fixes
 
