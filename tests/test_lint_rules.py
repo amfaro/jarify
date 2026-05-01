@@ -101,6 +101,26 @@ class TestNoSelectStar:
         rules = _lint("FROM t", prefer_from_first=False)
         assert "no-select-star" in rules
 
+    def test_warns_on_select_star_inside_cte(self):
+        sql = "WITH _base AS (SELECT * FROM t) SELECT a FROM _base"
+        rules = _lint(sql, prefer_from_first=False)
+        assert "no-select-star" in rules
+
+    def test_cte_star_violation_includes_cte_name(self):
+        from jarify.config import JarifyConfig
+        from jarify.linter import lint_sql
+
+        sql = "WITH _base AS (SELECT * FROM t) SELECT a FROM _base"
+        config = JarifyConfig(prefer_from_first=False)
+        violations = lint_sql(sql, config)
+        v = next(v for v in violations if v.rule == "no-select-star")
+        assert "_base" in v.message
+
+    def test_no_warn_count_star_in_cte(self):
+        sql = "WITH _base AS (SELECT COUNT(*) AS n FROM t) SELECT n FROM _base"
+        rules = _lint(sql)
+        assert "no-select-star" not in rules
+
 
 class TestNoUnusedCte:
     def test_warns_on_unused_cte(self):
@@ -271,34 +291,6 @@ class TestConsistentEmptyArray:
         sql = "SELECT COALESCE(tags, '[]')::text[] AS tags FROM t"
         rules = _lint(sql, consistent_empty_array="off")
         assert "consistent-empty-array" not in rules
-
-
-class TestNoSelectStarInCte:
-    def test_warns_on_select_star_in_cte(self):
-        sql = "WITH _base AS (SELECT * FROM t) SELECT a FROM _base"
-        rules = _lint(sql)
-        assert "no-select-star-in-cte" in rules
-
-    def test_no_warn_when_cte_lists_columns(self):
-        sql = "WITH _base AS (SELECT a, b FROM t) SELECT a FROM _base"
-        rules = _lint(sql)
-        assert "no-select-star-in-cte" not in rules
-
-    def test_no_warn_on_star_outside_cte(self):
-        # SELECT * in the outer query is caught by no-select-star, not this rule
-        sql = "WITH _base AS (SELECT a FROM t) SELECT * FROM _base"
-        rules = _lint(sql, no_select_star="off")
-        assert "no-select-star-in-cte" not in rules
-
-    def test_off_disables_rule(self):
-        sql = "WITH _base AS (SELECT * FROM t) SELECT a FROM _base"
-        rules = _lint(sql, no_select_star_in_cte="off")
-        assert "no-select-star-in-cte" not in rules
-
-    def test_no_warn_count_star_in_cte(self):
-        sql = "WITH _base AS (SELECT COUNT(*) AS n FROM t) SELECT n FROM _base"
-        rules = _lint(sql)
-        assert "no-select-star-in-cte" not in rules
 
 
 class TestViolationPositions:

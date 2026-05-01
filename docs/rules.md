@@ -20,7 +20,7 @@ examples see [`sql-style-guide.md`](sql-style-guide.md).
 | `keyword-case` | `uppercase_keywords` | on | yes | uppercase SQL keywords; lowercase type and scalar function names |
 | `trailing-commas` | `trailing_commas` | off | yes | trailing comma placement (default: leading commas) |
 | `no-implicit-cross-join` | `no_implicit_cross_join` | warn | yes | rewrite implicit cross joins to explicit CROSS JOIN |
-| `no-select-star` | `no_select_star` | warn | no | flag SELECT * usage |
+| `no-select-star` | `no_select_star` | warn | no | flag SELECT * usage, including inside CTE bodies |
 | `no-unused-cte` | `no_unused_cte` | warn | no | flag CTEs that are defined but never referenced |
 | `duckdb-type-style` | `duckdb_type_style` | warn | no | prefer canonical DuckDB type names (e.g. int not integer) |
 | `duckdb-prefer-qualify` | `duckdb_prefer_qualify` | warn | no | prefer QUALIFY clause over subquery window filter |
@@ -28,7 +28,6 @@ examples see [`sql-style-guide.md`](sql-style-guide.md).
 | `prefer-group-by-all` | `prefer_group_by_all` | warn | yes | rewrite explicit GROUP BY column list to GROUP BY ALL |
 | `prefer-using-over-on` | `prefer_using_over_on` | warn | no | suggest USING (col) over ON a.col = b.col for equality joins |
 | `consistent-empty-array` | `consistent_empty_array` | warn | yes | rewrite '[]'::type[] cast form to bare [] empty array literal |
-| `no-select-star-in-cte` | `no_select_star_in_cte` | warn | no | flag SELECT * inside CTE bodies |
 | `prefer-neq-operator` | `prefer_neq_operator` | warn | yes | rewrite <> inequality operator to != |
 | `prefer-if-over-case` | `prefer_if_over_case` | warn | yes | rewrite single-WHEN CASE expressions to IF() |
 

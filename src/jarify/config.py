@@ -44,7 +44,6 @@ class JarifyConfig:
     prefer_group_by_all: str = "warn"  # suggest GROUP BY ALL when listing all non-agg cols
     prefer_using_over_on: str = "warn"  # suggest USING (col) over ON a.col = b.col
     consistent_empty_array: str = "warn"  # prefer [] over '[]'::type[] empty array
-    no_select_star_in_cte: str = "warn"  # flag SELECT * inside CTE bodies
     prefer_neq_operator: str = "warn"  # rewrite <> to != inequality operator
     prefer_if_over_case: str = "warn"  # rewrite single-WHEN CASE to IF()
 

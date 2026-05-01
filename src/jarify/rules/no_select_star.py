@@ -46,10 +46,16 @@ class NoSelectStarRule(LintOnlyRule):
                 if not self.enabled_for_node(star):
                     continue
                 _line, _col = _node_pos(star)
+                cte = select.find_ancestor(exp.CTE)
+                if cte is not None:
+                    cte_name = cte.alias or "<unnamed>"
+                    message = f"Avoid SELECT * inside CTE '{cte_name}'; list columns explicitly"
+                else:
+                    message = "Avoid SELECT *; list columns explicitly"
                 violations.append(
                     LintViolation(
                         rule=self.name,
-                        message="Avoid SELECT *; list columns explicitly",
+                        message=message,
                         severity=self.severity,
                         line=_line,
                         column=_col,
