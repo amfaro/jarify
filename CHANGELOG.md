@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.8.0] - 2026-05-01
+### Features
+
+- add rule catalog, `jarify rules` command, and kebab-case config keys ([#282](https://github.com/amfaro/jarify/pull/282)) ([#282](https://github.com/amfaro/jarify/pull/282))
+
 ## [0.7.0] - 2026-05-01
 ### Features
 
