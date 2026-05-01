@@ -12,7 +12,8 @@ from jarify.types import LintViolation
 class ConsistentEmptyArrayRule(FormatterRule):
     """Lint: flag '[]'::type[] (string-cast) in favour of native [] empty array literal."""
 
-    def __init__(self, severity: str = "warn") -> None:
+    def __init__(self, severity: str = "warn", overrides=None) -> None:
+        super().__init__(overrides=overrides)
         self.severity = severity
 
     @property
@@ -28,6 +29,8 @@ class ConsistentEmptyArrayRule(FormatterRule):
         violations: list[LintViolation] = []
 
         for cast in tree.find_all(exp.Cast):
+            if not self.enabled_for_node(cast):
+                continue
             if not (isinstance(cast.to, exp.DataType) and cast.to.this == DataType.Type.ARRAY):
                 continue
 

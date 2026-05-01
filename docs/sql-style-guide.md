@@ -1013,6 +1013,39 @@ FROM _lookup
 
 Rules in this section may lint only, auto-fix during `fmt`, or do both. All rules default to `warn`. Severity can be set to `off`, `warn`, or `error` in `jarify.toml`.
 
+### Comment overrides
+
+Use `jarify` comment directives when one line or region needs an exception without changing repo-wide config.
+
+Supported directives:
+
+- `-- jarify: disable-line <rule>` — disable a rule on the current line
+- `-- jarify: disable-next-line <rule>` — disable a rule on the following line
+- `-- jarify: disable <rule>` / `-- jarify: enable <rule>` — disable a rule for a region
+- `-- jarify: disable-file <rule>` — disable a rule for the whole file
+- `-- jarify: set max_line_length = 140` / `-- jarify: reset max_line_length` — override line length for following statements until reset
+
+Rules use their lint names such as `no-select-star`, `cte-naming`, or `prefer-if-over-case`.
+
+**Example**
+```sql
+-- jarify: disable-next-line prefer-if-over-case
+SELECT CASE WHEN is_large THEN 'big' ELSE 'small' END FROM sizes
+```
+
+**Good output**
+```sql
+-- jarify: disable-next-line prefer-if-over-case
+SELECT
+   CASE
+     WHEN is_large
+     THEN 'big'
+     ELSE 'small'
+   END
+FROM sizes
+;
+```
+
 ---
 
 ### `no-select-star`

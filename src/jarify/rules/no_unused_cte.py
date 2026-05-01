@@ -11,7 +11,8 @@ from jarify.types import LintViolation
 class NoUnusedCteRule(LintOnlyRule):
     """Flag CTEs (WITH clause entries) that are never referenced in the query body."""
 
-    def __init__(self, severity: str = "warn") -> None:
+    def __init__(self, severity: str = "warn", overrides=None) -> None:
+        super().__init__(overrides=overrides)
         self.severity = severity
 
     @property
@@ -43,7 +44,7 @@ class NoUnusedCteRule(LintOnlyRule):
                 referenced.add(table.name.lower())
 
         for name in cte_names:
-            if name not in referenced:
+            if name not in referenced and self.enabled_for_node(cte_nodes[name]):
                 _line, _col = _node_pos(cte_nodes[name])
                 violations.append(
                     LintViolation(

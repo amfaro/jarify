@@ -24,7 +24,8 @@ class PreferNeqOperatorRule(FormatterRule):
     ``jarify fmt`` confirms the canonical form and silences the flag.
     """
 
-    def __init__(self, severity: str = "warn") -> None:
+    def __init__(self, severity: str = "warn", overrides=None) -> None:
+        super().__init__(overrides=overrides)
         self.severity = severity
 
     @property
@@ -40,6 +41,8 @@ class PreferNeqOperatorRule(FormatterRule):
             return []
         violations: list[LintViolation] = []
         for node in tree.find_all(exp.NEQ):
+            if not self.enabled_for_node(node):
+                continue
             _line, _col = _node_pos(node)
             violations.append(
                 LintViolation(

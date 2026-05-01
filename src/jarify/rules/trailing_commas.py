@@ -20,6 +20,9 @@ class TrailingCommasRule(FormatterRule):
     lint checks in future iterations.
     """
 
+    def __init__(self, overrides=None) -> None:
+        super().__init__(overrides=overrides)
+
     @property
     def name(self) -> str:
         return "trailing-commas"
