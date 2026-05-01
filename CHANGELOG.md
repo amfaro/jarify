@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.7.0] - 2026-05-01
+### Features
+
+- add comment-based rule overrides ([#279](https://github.com/amfaro/jarify/pull/279)) ([#279](https://github.com/amfaro/jarify/pull/279))
+
 ## [0.6.2] - 2026-05-01
 ### Bug Fixes
 
