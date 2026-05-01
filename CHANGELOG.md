@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.15] - 2026-05-01
+### Bug Fixes
+
+- keep ORDER BY ALL inline ([#269](https://github.com/amfaro/jarify/pull/269)) ([#269](https://github.com/amfaro/jarify/pull/269))
+
 ## [0.5.14] - 2026-05-01
 ### Bug Fixes
 
