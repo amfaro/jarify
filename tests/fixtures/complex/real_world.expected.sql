@@ -7,7 +7,7 @@ SET VARIABLE time_frame = getenv('TIME_FRAME')
 WITH _latest_version AS
 (
   SELECT
-     regexp_extract(file, 'version=(.{21})', 1) AS version
+     regexp_extract(file, 'version=(.{21})', 1)  AS version
   FROM glob('s3://' || getvariable('tigris_bucket') || '/global-catalog/*/*')
   ORDER BY
      file DESC

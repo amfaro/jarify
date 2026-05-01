@@ -161,12 +161,22 @@ class JarifyGenerator(DuckDB.Generator):
         )
         self._config = config
         self._as_align_width: int | None = None  # set during SELECT expression rendering
+        self._tree_as_align_width: int | None = None  # set per statement tree during generate()
         self._col_name_align: int | None = None  # set during CREATE TABLE column rendering
         self._col_type_align: int | None = None  # set during CREATE TABLE column rendering
         self._join_alias_col: int | None = None  # set during FROM/JOIN block rendering
         self._leading_comment_texts: frozenset[str] = frozenset()  # set by formatter before generate()
         self._trailing_sep_comment_texts: frozenset[str] = frozenset()  # set by formatter before generate()
         self._connector_force_expand: bool = False  # set True inside WHERE/HAVING to always break AND/OR
+
+    def generate(self, expression: exp.Expr, copy: bool = True) -> str:
+        saved_align = self._tree_as_align_width
+        if self.pretty:
+            self._tree_as_align_width = self._compute_tree_as_align_width(expression)
+        try:
+            return super().generate(expression, copy=copy)
+        finally:
+            self._tree_as_align_width = saved_align
 
     # ------------------------------------------------------------------
     # Function name casing: aggregates/window functions → UPPER, rest → lower
@@ -245,7 +255,7 @@ class JarifyGenerator(DuckDB.Generator):
         is_select = isinstance(expression, exp.Select) and key is None
         saved_align = self._as_align_width
         if is_select:
-            self._as_align_width = self._compute_as_align_width(list(expressions_list))
+            self._as_align_width = self._tree_as_align_width or self._compute_as_align_width(list(expressions_list))
 
         try:
             result_sqls = []
@@ -315,6 +325,27 @@ class JarifyGenerator(DuckDB.Generator):
         the trailing ``AS`` can align with single-line aliases in the same
         SELECT list.
         """
+        col_widths, alias_count = self._collect_as_alignment_metrics(expressions_list)
+        if alias_count < 2:
+            return None
+        return max(col_widths)
+
+    def _compute_tree_as_align_width(self, expression: exp.Expr) -> int | None:
+        """Compute one AS-alignment width across all SELECT lists in a statement tree."""
+        col_widths: list[int] = []
+        alias_count = 0
+        for select in expression.find_all(exp.Select):
+            widths, aliases = self._collect_as_alignment_metrics(list(select.expressions))
+            col_widths.extend(widths)
+            alias_count += aliases
+
+        if alias_count < 2 or not col_widths:
+            return None
+
+        return max(col_widths)
+
+    def _collect_as_alignment_metrics(self, expressions_list: list) -> tuple[list[int], int]:
+        """Return ``(column_widths, alias_count)`` for a SELECT expression list."""
         col_widths: list[int] = []
         alias_count = 0
         for e in expressions_list:
@@ -330,10 +361,7 @@ class JarifyGenerator(DuckDB.Generator):
                 if "\n" not in col_sql:
                     col_widths.append(len(col_sql))
 
-        if alias_count < 2:
-            return None
-
-        return max(col_widths)
+        return col_widths, alias_count
 
     # ------------------------------------------------------------------
     # Alias: align AS keyword when _as_align_width is set
@@ -583,7 +611,7 @@ class JarifyGenerator(DuckDB.Generator):
             return f" USING ({cols})"
         return ""
 
-    def _entry_alias_str(self, table_expr: exp.Expression) -> str:
+    def _entry_alias_str(self, table_expr: exp.Expr) -> str:
         """Return the rendered alias string for a FROM/JOIN entry (Table or Unnest)."""
         if isinstance(table_expr, exp.Table):
             return self._table_alias_str(table_expr)
@@ -592,7 +620,7 @@ class JarifyGenerator(DuckDB.Generator):
             return self.sql(alias_node) if alias_node else ""
         return ""
 
-    def _table_ref_only_sql(self, table_expr: exp.Expression) -> str | None:
+    def _table_ref_only_sql(self, table_expr: exp.Expr) -> str | None:
         """Return the table reference string (no alias) for simple tables and
         table-function calls (e.g. UNNEST), else None.
 
@@ -622,7 +650,7 @@ class JarifyGenerator(DuckDB.Generator):
         if not from_expr:
             return None
 
-        entries: list[tuple[int, str, exp.Expression]] = []
+        entries: list[tuple[int, str, exp.Expr]] = []
 
         from_ref = self._table_ref_only_sql(from_expr.this)
         if from_ref is None:
