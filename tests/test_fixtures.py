@@ -30,6 +30,10 @@ def _collect_fixture_pairs() -> list[tuple[str, Path, Path]]:
     return pairs
 
 
+def _is_sqlmesh_fixture(path: Path) -> bool:
+    return path.relative_to(FIXTURES_DIR).parts[0] == "sqlmesh"
+
+
 @pytest.mark.parametrize(
     "test_id,input_path,expected_path",
     [pytest.param(tid, inp, exp, id=tid) for tid, inp, exp in _collect_fixture_pairs()],
@@ -43,7 +47,9 @@ def test_format_fixture(
     """Format input SQL and compare to the expected snapshot."""
     config = JarifyConfig()
     sql = input_path.read_text()
-    result, _ = format_sql(sql, config)
+    result, warnings = format_sql(sql, config)
+    if _is_sqlmesh_fixture(input_path):
+        assert not warnings, f"SQLMesh fixture emitted format warnings: {[str(w) for w in warnings]}"
 
     if update_snapshots:
         expected_path.write_text(result)
@@ -67,7 +73,9 @@ def test_format_idempotent(request: pytest.FixtureRequest) -> None:
         if not expected_path.exists():
             continue
         already_formatted = expected_path.read_text().rstrip("\n") + "\n"
-        result, _ = format_sql(already_formatted, config)
+        result, warnings = format_sql(already_formatted, config)
+        if _is_sqlmesh_fixture(expected_path):
+            assert not warnings, f"SQLMesh fixture emitted format warnings: {[str(w) for w in warnings]}"
         assert result == already_formatted, (
             f"Idempotency failure for {expected_path.name}:\n"
             f"--- first pass output ---\n{already_formatted}"

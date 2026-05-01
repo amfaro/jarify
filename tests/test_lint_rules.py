@@ -417,3 +417,31 @@ class TestPreferIfnullOverCoalesce:
         sql = "SELECT coalesce(a, b) FROM t"
         rules = _lint(sql, prefer_ifnull_over_coalesce="off")
         assert "prefer-ifnull-over-coalesce" not in rules
+
+
+class TestSQLMeshSyntax:
+    def test_model_header_no_parse_error_but_rules_still_fire(self):
+        sql = "MODEL (name foo.bar);\nSELECT * FROM t\n"
+        rules = _lint(sql, prefer_from_first=False)
+        assert "parse-error" not in rules
+        assert "no-select-star" in rules
+
+    def test_jinja_statement_block_no_parse_error(self):
+        sql = "JINJA_STATEMENT_BEGIN;\nselect {{ x }}\nJINJA_END;\nSELECT 1\n"
+        rules = _lint(sql)
+        assert "parse-error" not in rules
+
+    def test_macro_vars_no_parse_error(self):
+        sql = "MODEL (name foo.bar);\nSELECT a FROM t WHERE ds BETWEEN @start_dt AND @end_dt\n"
+        rules = _lint(sql)
+        assert "parse-error" not in rules
+
+    def test_arbitrary_at_identifiers_no_parse_error(self):
+        sql = "SELECT a FROM @input_model WHERE ds = @run_dt AND account_id IN (@EACH(account_id))\n"
+        rules = _lint(sql)
+        assert "parse-error" not in rules
+
+    def test_invalid_real_sql_segment_still_reports_parse_error(self):
+        sql = "MODEL (name foo.bar);\nTHIS IS NOT VALID SQL @@@!!!\n"
+        rules = _lint(sql)
+        assert "parse-error" in rules

@@ -413,3 +413,68 @@ class TestTrailingRustFmtPlaceholder:
         out, _ = format_sql(sql)
         out2, _ = format_sql(out)
         assert out == out2, f"Formatting is not idempotent:\nFirst pass:\n{out}\nSecond pass:\n{out2}"
+
+
+class TestSQLMeshFormatting:
+    def test_model_header_preserved_and_body_formatted(self):
+        header = "MODEL (\n  name foo.bar,\n  kind FULL\n);\n\n"
+        sql = header + "select a,b from t where x=1\n"
+        out, warnings = format_sql(sql)
+        assert not warnings
+        assert out.startswith(header)
+        assert "SELECT\n   a\n  ,b\nFROM t\nWHERE x = 1\n;\n" in out
+
+    def test_audit_header_preserved_and_body_formatted(self):
+        header = "AUDIT (\n  name assert_positive,\n);\n"
+        sql = header + "select * from tbl where amount<0\n"
+        out, warnings = format_sql(sql)
+        assert not warnings
+        assert out.startswith(header)
+        assert "FROM tbl\nWHERE amount < 0\n;\n" in out
+
+    def test_sqlmesh_macro_vars_survive_formatting(self):
+        sql = "MODEL (name foo.bar);\nselect a from t where ds between @start_dt and @end_dt\n"
+        out, warnings = format_sql(sql)
+        assert not warnings
+        assert "WHERE ds BETWEEN @start_dt AND @end_dt" in out
+
+    def test_arbitrary_sqlmesh_at_identifiers_survive_formatting(self):
+        sql = (
+            "select @EACH(account_id) as account_id from @input_model "
+            "where ds = @run_dt and note <> '@run_dt' -- @input_model\n"
+        )
+        out, warnings = format_sql(sql)
+        assert not warnings
+        assert "@EACH(account_id) AS account_id" in out
+        assert "FROM @input_model" in out
+        assert "WHERE ds = @run_dt" in out
+        assert "note != '@run_dt' -- @input_model" in out
+
+    def test_inline_jinja_expressions_survive_formatting(self):
+        sql = "select {{ dim_col }} as dim from {{ ref('orders') }} where ds = {{ var('ds') }}\n"
+        out, warnings = format_sql(sql)
+        assert not warnings
+        assert "{{ dim_col }} AS dim" in out
+        assert "FROM {{ ref('orders') }}" in out
+        assert "WHERE ds = {{ var('ds') }}" in out
+
+    def test_whole_jinja_control_block_stays_opaque(self):
+        block = "{% if is_incremental() %}\nselect bad,unformatted from raw\n{% endif %}\n"
+        sql = "select 1 as a\n" + block + "select 2 as b\n"
+        out, warnings = format_sql(sql)
+        assert not warnings
+        assert block in out
+        assert "SELECT\n   1 AS a\n;\n" in out
+        assert "SELECT\n   2 AS b\n;\n" in out
+
+    def test_sqlmesh_formatting_is_idempotent(self):
+        sql = (
+            "MODEL (\n  name foo.bar,\n  kind FULL\n);\n\n"
+            "select {{ dim_col }} as dim from {{ ref('orders') }} "
+            "where ds between @start_dt and @end_dt\n"
+        )
+        out, warnings = format_sql(sql)
+        out2, warnings2 = format_sql(out)
+        assert not warnings
+        assert not warnings2
+        assert out == out2
