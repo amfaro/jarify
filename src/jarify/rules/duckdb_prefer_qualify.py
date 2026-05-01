@@ -18,7 +18,8 @@ from jarify.types import LintViolation
 class DuckdbPreferQualifyRule(LintOnlyRule):
     """Lint: suggest QUALIFY instead of filtering on a window function in a subquery."""
 
-    def __init__(self, severity: str = "warn") -> None:
+    def __init__(self, severity: str = "warn", overrides=None) -> None:
+        super().__init__(overrides=overrides)
         self.severity = severity
 
     @property
@@ -32,6 +33,8 @@ class DuckdbPreferQualifyRule(LintOnlyRule):
 
         # Look for: SELECT ... FROM (subquery with window functions) WHERE <alias> = <literal>
         for select in tree.find_all(exp.Select):
+            if not self.enabled_for_node(select):
+                continue
             where = select.args.get("where")
             if not where:
                 continue

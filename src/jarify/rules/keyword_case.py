@@ -20,7 +20,8 @@ class KeywordCaseRule(FormatterRule):
     AST transforms (e.g., normalizing user-defined function names).
     """
 
-    def __init__(self, uppercase: bool = True) -> None:
+    def __init__(self, uppercase: bool = True, overrides=None) -> None:
+        super().__init__(overrides=overrides)
         self.uppercase = uppercase
 
     @property

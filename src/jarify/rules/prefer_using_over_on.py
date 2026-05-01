@@ -11,7 +11,8 @@ from jarify.types import LintViolation
 class PreferUsingOverOnRule(LintOnlyRule):
     """Lint: flag ON a.col = b.col equi-joins where both sides share the same column name."""
 
-    def __init__(self, severity: str = "warn") -> None:
+    def __init__(self, severity: str = "warn", overrides=None) -> None:
+        super().__init__(overrides=overrides)
         self.severity = severity
 
     @property
@@ -24,6 +25,8 @@ class PreferUsingOverOnRule(LintOnlyRule):
         violations: list[LintViolation] = []
 
         for join in tree.find_all(exp.Join):
+            if not self.enabled_for_node(join):
+                continue
             if join.args.get("using"):
                 continue
             on = join.args.get("on")

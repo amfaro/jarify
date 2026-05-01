@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from sqlglot.expressions import Expression
 
+    from jarify.comment_overrides import CommentOverrides
     from jarify.types import LintViolation
 
 
@@ -34,6 +35,9 @@ def _node_pos(node: Expression) -> tuple[int | None, int | None]:
 class FormatterRule(ABC):
     """A rule that can both check (lint) and transform (format) a SQL AST."""
 
+    def __init__(self, overrides: CommentOverrides | None = None) -> None:
+        self._overrides = overrides
+
     @property
     @abstractmethod
     def name(self) -> str:
@@ -46,6 +50,13 @@ class FormatterRule(ABC):
     def check(self, tree: Expression) -> list[LintViolation]:
         """Return violations found in the tree. Default: no violations."""
         return []
+
+    def enabled_for_line(self, line: int | None) -> bool:
+        return not (self._overrides and self._overrides.is_rule_disabled(self.name, line))
+
+    def enabled_for_node(self, node: Expression) -> bool:
+        line, _ = _node_pos(node)
+        return self.enabled_for_line(line)
 
 
 class LintOnlyRule(FormatterRule):

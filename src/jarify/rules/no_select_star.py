@@ -11,7 +11,8 @@ from jarify.types import LintViolation
 class NoSelectStarRule(LintOnlyRule):
     """Flag SELECT * (or table.*) as a lint violation."""
 
-    def __init__(self, severity: str = "warn", prefer_from_first: bool = False) -> None:
+    def __init__(self, severity: str = "warn", prefer_from_first: bool = False, overrides=None) -> None:
+        super().__init__(overrides=overrides)
         self.severity = severity
         self.prefer_from_first = prefer_from_first
 
@@ -41,6 +42,8 @@ class NoSelectStarRule(LintOnlyRule):
                     and not select.args.get("distinct")
                     and not select.args.get("joins")
                 ):
+                    continue
+                if not self.enabled_for_node(star):
                     continue
                 _line, _col = _node_pos(star)
                 violations.append(

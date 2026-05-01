@@ -21,7 +21,8 @@ def _is_comma_join(join: exp.Join) -> bool:
 class NoImplicitCrossJoinRule(FormatterRule):
     """Rewrite comma-joined tables to explicit CROSS JOIN; flag in lint output."""
 
-    def __init__(self, severity: str = "warn") -> None:
+    def __init__(self, severity: str = "warn", overrides=None) -> None:
+        super().__init__(overrides=overrides)
         self.severity = severity
 
     @property
@@ -30,7 +31,7 @@ class NoImplicitCrossJoinRule(FormatterRule):
 
     def apply(self, tree: exp.Expression) -> exp.Expression:
         for join in tree.find_all(exp.Join):
-            if _is_comma_join(join):
+            if _is_comma_join(join) and self.enabled_for_node(join):
                 join.set("kind", "CROSS")
         return tree
 
@@ -39,7 +40,7 @@ class NoImplicitCrossJoinRule(FormatterRule):
             return []
         violations: list[LintViolation] = []
         for join in tree.find_all(exp.Join):
-            if _is_comma_join(join):
+            if _is_comma_join(join) and self.enabled_for_node(join):
                 _line, _col = _node_pos(join)
                 violations.append(
                     LintViolation(

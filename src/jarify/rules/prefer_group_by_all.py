@@ -31,7 +31,8 @@ def _non_agg_sqls(select: exp.Select) -> set[str]:
 class PreferGroupByAllRule(FormatterRule):
     """Format and lint: rewrite explicit GROUP BY col list to GROUP BY ALL when equivalent."""
 
-    def __init__(self, severity: str = "warn") -> None:
+    def __init__(self, severity: str = "warn", overrides=None) -> None:
+        super().__init__(overrides=overrides)
         self.severity = severity
 
     @property
@@ -41,6 +42,8 @@ class PreferGroupByAllRule(FormatterRule):
     def apply(self, tree: exp.Expression) -> exp.Expression:
         """Rewrite GROUP BY <cols> → GROUP BY ALL when all non-agg SELECT cols are covered."""
         for select in tree.find_all(exp.Select):
+            if not self.enabled_for_node(select):
+                continue
             group = select.args.get("group")
             if not group or not group.expressions:
                 continue
@@ -64,6 +67,8 @@ class PreferGroupByAllRule(FormatterRule):
         violations: list[LintViolation] = []
 
         for select in tree.find_all(exp.Select):
+            if not self.enabled_for_node(select):
+                continue
             group = select.args.get("group")
             if not group or not group.expressions:
                 continue

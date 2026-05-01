@@ -8,6 +8,7 @@ from sqlglot.errors import ParseError
 from sqlglot.expressions import Expression
 from sqlglot.tokens import Tokenizer as SqlglotTokenizer
 
+from jarify.comment_overrides import parse_comment_overrides
 from jarify.config import JarifyConfig
 from jarify.generator import JarifyGenerator
 from jarify.parser import (
@@ -24,7 +25,7 @@ from jarify.parser import (
     parse_sql,
 )
 from jarify.rules import get_default_rules
-from jarify.rules.base import FormatterRule
+from jarify.rules.base import FormatterRule, _node_pos
 
 
 class FormatWarning:
@@ -49,6 +50,7 @@ def format_sql(
     """
     config = config or JarifyConfig()
     warnings: list[FormatWarning] = []
+    overrides = parse_comment_overrides(sql)
 
     # Pre-process: replace whole-line placeholders used as CTAS bodies (those
     # following a line that ends with AS) with a dummy SELECT so sqlglot
@@ -76,16 +78,20 @@ def format_sql(
         warnings.append(FormatWarning(f"could not parse SQL (formatting skipped): {exc}"))
         return sql, warnings
 
-    rules = get_default_rules(config)
-    generator = JarifyGenerator(config)
-    generator._leading_comment_texts = _find_leading_comment_texts(masked_sql)
-    generator._trailing_sep_comment_texts = _find_trailing_sep_comment_texts(masked_sql)
+    rules = get_default_rules(config, overrides=overrides)
+    leading_comment_texts = _find_leading_comment_texts(masked_sql)
+    trailing_sep_comment_texts = _find_trailing_sep_comment_texts(masked_sql)
     formatted_parts: list[str] = []
 
     for tree in trees:
         if tree is None:
             continue
         tree = _apply_rules(tree, rules)
+        tree_line, _ = _node_pos(tree)
+        tree_config = overrides.config_for_line(config, tree_line)
+        generator = JarifyGenerator(tree_config)
+        generator._leading_comment_texts = leading_comment_texts
+        generator._trailing_sep_comment_texts = trailing_sep_comment_texts
         formatted_parts.append(generator.generate(tree))
 
     # Join statements but hold off on the trailing ;\n -- it must come *after*

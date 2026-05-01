@@ -54,7 +54,8 @@ class PreferIfOverCaseRule(FormatterRule):
     rewrite criteria but has not yet been formatted.
     """
 
-    def __init__(self, severity: str = "warn") -> None:
+    def __init__(self, severity: str = "warn", overrides=None) -> None:
+        super().__init__(overrides=overrides)
         self.severity = severity
 
     @property
@@ -64,7 +65,7 @@ class PreferIfOverCaseRule(FormatterRule):
     def apply(self, tree: exp.Expression) -> exp.Expression:
         """Rewrite matching CASE nodes to exp.If in-place."""
         for case in tree.find_all(exp.Case):
-            if not _is_rewritable(case):
+            if not _is_rewritable(case) or not self.enabled_for_node(case):
                 continue
             if_branch = case.args["ifs"][0]
             condition = if_branch.args["this"]
@@ -88,7 +89,7 @@ class PreferIfOverCaseRule(FormatterRule):
             return []
         violations: list[LintViolation] = []
         for case in tree.find_all(exp.Case):
-            if not _is_rewritable(case):
+            if not _is_rewritable(case) or not self.enabled_for_node(case):
                 continue
             _line, _col = _node_pos(case)
             violations.append(

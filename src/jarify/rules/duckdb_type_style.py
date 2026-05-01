@@ -29,7 +29,8 @@ class DuckdbTypeStyleRule(LintOnlyRule):
     be detected here.
     """
 
-    def __init__(self, severity: str = "warn") -> None:
+    def __init__(self, severity: str = "warn", overrides=None) -> None:
+        super().__init__(overrides=overrides)
         self.severity = severity
 
     @property
@@ -41,6 +42,8 @@ class DuckdbTypeStyleRule(LintOnlyRule):
             return []
         violations: list[LintViolation] = []
         for dtype in tree.find_all(exp.DataType):
+            if not self.enabled_for_node(dtype):
+                continue
             canonical = _NON_CANONICAL.get(dtype.this)
             if canonical:
                 raw = dtype.this.name

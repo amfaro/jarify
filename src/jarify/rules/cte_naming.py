@@ -11,7 +11,8 @@ from jarify.types import LintViolation
 class CteNamingRule(FormatterRule):
     """Lint: CTE names must begin with an underscore (e.g. _people)."""
 
-    def __init__(self, severity: str = "warn") -> None:
+    def __init__(self, severity: str = "warn", overrides=None) -> None:
+        super().__init__(overrides=overrides)
         self.severity = severity
 
     @property
@@ -25,7 +26,7 @@ class CteNamingRule(FormatterRule):
 
         renames: dict[str, str] = {}
         for cte in with_clause.expressions:
-            if cte.alias and not cte.alias.startswith("_"):
+            if cte.alias and not cte.alias.startswith("_") and self.enabled_for_node(cte):
                 renames[cte.alias] = f"_{cte.alias}"
 
         if not renames:
@@ -55,7 +56,7 @@ class CteNamingRule(FormatterRule):
         if not with_clause:
             return []
         for cte in with_clause.expressions:
-            if cte.alias and not cte.alias.startswith("_"):
+            if cte.alias and not cte.alias.startswith("_") and self.enabled_for_node(cte):
                 _line, _col = _node_pos(cte)
                 violations.append(
                     LintViolation(
