@@ -22,6 +22,7 @@ uv sync --all-groups
 | Run linter | `mise run lint` |
 | Run both | `mise run check` |
 | Format source | `mise run fmt` |
+| Regenerate rule docs | `mise run gen-rules-doc` |
 
 **Always run `mise run check` before committing** — this runs both lint (`ruff check`) and tests. Never push without a clean check. CI will fail if you do.
 
@@ -32,8 +33,9 @@ Load `.agents/skills/add-formatter-rule.md` before implementing a new or changed
 1. **Formatting rules** live in `src/jarify/generator.py` (override a generator method) or `src/jarify/rules/` (subclass `FormatterRule` and implement `apply()`).
 2. **Lint-only rules** live in `src/jarify/rules/` (implement `check()`, leave `apply()` as a no-op).
 3. Register new rules in `src/jarify/rules/__init__.py` and add a config knob to `src/jarify/config.py`.
-4. Add a fixture pair in `tests/fixtures/<category>/` and unit tests in `tests/`.
-5. **Document every new or changed rule in [`docs/sql-style-guide.md`](docs/sql-style-guide.md)** with a bad/good SQL example.
+4. **Run `mise run gen-rules-doc`** to regenerate `docs/rules.md` from `RULE_CATALOG`. CI enforces this with `mise run check-rules-doc` — the step fails if the generated file is out of sync.
+5. Add a fixture pair in `tests/fixtures/<category>/` and unit tests in `tests/`.
+6. **Document every new or changed rule in [`docs/sql-style-guide.md`](docs/sql-style-guide.md)** with a bad/good SQL example.
 
 ## Adding fixture tests
 

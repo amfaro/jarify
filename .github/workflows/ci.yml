@@ -25,5 +25,8 @@ jobs:
       - name: Lint
         run: mise run lint
 
+      - name: Check rules doc is up to date
+        run: mise run check-rules-doc
+
       - name: Test
         run: mise run test
