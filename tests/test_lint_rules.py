@@ -395,3 +395,25 @@ class TestPreferIfOverCase:
         sql = "SELECT CASE WHEN a > 1 THEN 'big' ELSE 'small' END FROM t"
         rules = _lint(sql, prefer_if_over_case="off")
         assert "prefer-if-over-case" not in rules
+
+
+class TestPreferIfnullOverCoalesce:
+    def test_warns_on_two_arg_coalesce(self):
+        sql = "SELECT coalesce(a, b) FROM t"
+        rules = _lint(sql)
+        assert "prefer-ifnull-over-coalesce" in rules
+
+    def test_no_warn_on_three_arg_coalesce(self):
+        sql = "SELECT coalesce(a, b, c) FROM t"
+        rules = _lint(sql)
+        assert "prefer-ifnull-over-coalesce" not in rules
+
+    def test_no_warn_on_ifnull(self):
+        sql = "SELECT ifnull(a, b) FROM t"
+        rules = _lint(sql)
+        assert "prefer-ifnull-over-coalesce" not in rules
+
+    def test_off_disables_rule(self):
+        sql = "SELECT coalesce(a, b) FROM t"
+        rules = _lint(sql, prefer_ifnull_over_coalesce="off")
+        assert "prefer-ifnull-over-coalesce" not in rules

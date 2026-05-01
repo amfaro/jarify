@@ -61,6 +61,10 @@ class TestLintOverrides:
         sql = "-- jarify: disable-file no-select-star\nSELECT * FROM t\nSELECT * FROM u"
         assert "no-select-star" not in _lint(sql, prefer_from_first=False)
 
+    def test_disable_next_line_suppresses_prefer_ifnull_over_coalesce(self):
+        sql = "-- jarify: disable-next-line prefer-ifnull-over-coalesce\nSELECT coalesce(a, b) FROM t"
+        assert "prefer-ifnull-over-coalesce" not in _lint(sql)
+
     def test_enable_restores_rule_after_region(self):
         sql = "-- jarify: disable no-select-star\nSELECT * FROM t;\n-- jarify: enable no-select-star\nSELECT * FROM u\n"
         assert _lint(sql, prefer_from_first=False) == ["no-select-star"]
@@ -85,6 +89,14 @@ class TestFormatOverrides:
 
         assert "CROSS JOIN" not in formatted
         assert "FROM t1, t2" in formatted
+
+    def test_disable_next_line_preserves_two_arg_coalesce(self):
+        sql = "-- jarify: disable-next-line prefer-ifnull-over-coalesce\nSELECT coalesce(a, b) FROM t"
+
+        formatted, _ = format_sql(sql)
+
+        assert "coalesce(a, b)" in formatted
+        assert "ifnull(a, b)" not in formatted
 
     def test_disable_next_line_preserves_cte_name(self):
         sql = "-- jarify: disable-next-line cte-naming\nWITH people AS (SELECT 1 AS id) SELECT id FROM people"

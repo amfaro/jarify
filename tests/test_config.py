@@ -61,9 +61,16 @@ def test_load_config_explicit_path_takes_precedence(tmp_path: Path) -> None:
 
 def test_config_from_dict_kebab_keys():
     """Kebab-case keys in jarify.toml are accepted and normalized."""
-    config = JarifyConfig.from_dict({"no-select-star": "error", "prefer-if-over-case": "off"})
+    config = JarifyConfig.from_dict(
+        {
+            "no-select-star": "error",
+            "prefer-if-over-case": "off",
+            "prefer-ifnull-over-coalesce": "error",
+        }
+    )
     assert config.no_select_star == "error"
     assert config.prefer_if_over_case == "off"
+    assert config.prefer_ifnull_over_coalesce == "error"
 
 
 def test_config_from_dict_mixed_case_keys():

@@ -14,6 +14,7 @@ def test_rules_cmd_text_output() -> None:
     assert "RULE" in result.output
     assert "no-select-star" in result.output
     assert "prefer-if-over-case" in result.output
+    assert "prefer-ifnull-over-coalesce" in result.output
 
 
 def test_rules_cmd_json_output() -> None:
@@ -28,6 +29,7 @@ def test_rules_cmd_json_output() -> None:
     names = {r["name"] for r in data}
     assert "no-select-star" in names
     assert "prefer-if-over-case" in names
+    assert "prefer-ifnull-over-coalesce" in names
     # Every entry has the required keys
     required = {"name", "config_key", "default", "auto_fix", "description"}
     for row in data:

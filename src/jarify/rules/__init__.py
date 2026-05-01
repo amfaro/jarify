@@ -16,6 +16,7 @@ from jarify.rules.no_select_star import NoSelectStarRule
 from jarify.rules.no_unused_cte import NoUnusedCteRule
 from jarify.rules.prefer_group_by_all import PreferGroupByAllRule
 from jarify.rules.prefer_if_over_case import PreferIfOverCaseRule
+from jarify.rules.prefer_ifnull_over_coalesce import PreferIfnullOverCoalesceRule
 from jarify.rules.prefer_neq_operator import PreferNeqOperatorRule
 from jarify.rules.prefer_using_over_on import PreferUsingOverOnRule
 from jarify.rules.trailing_commas import TrailingCommasRule
@@ -134,6 +135,13 @@ RULE_CATALOG: list[RuleInfo] = [
         auto_fix=True,
         description="rewrite single-WHEN CASE expressions to IF()",
     ),
+    RuleInfo(
+        name="prefer-ifnull-over-coalesce",
+        config_key="prefer_ifnull_over_coalesce",
+        default="warn",
+        auto_fix=True,
+        description="rewrite two-argument COALESCE(x, y) to ifnull(x, y)",
+    ),
 ]
 
 
@@ -181,5 +189,12 @@ def get_default_rules(config: JarifyConfig, overrides: CommentOverrides | None =
         rules.append(PreferNeqOperatorRule(severity=config.prefer_neq_operator, overrides=overrides))
     if config.prefer_if_over_case != "off":
         rules.append(PreferIfOverCaseRule(severity=config.prefer_if_over_case, overrides=overrides))
+    if config.prefer_ifnull_over_coalesce != "off":
+        rules.append(
+            PreferIfnullOverCoalesceRule(
+                severity=config.prefer_ifnull_over_coalesce,
+                overrides=overrides,
+            )
+        )
 
     return rules
