@@ -1,0 +1,3 @@
+FROM data
+ORDER BY ALL
+;

@@ -1210,7 +1210,7 @@ class JarifyGenerator(DuckDB.Generator):
         return f"VALUES\n{body}"
 
     # ------------------------------------------------------------------
-    # GROUP BY: one expression per line in pretty mode
+    # GROUP BY / ORDER BY ALL: keep ALL inline; otherwise one expression per line
     # ------------------------------------------------------------------
 
     def group_sql(self, expression: exp.Group) -> str:
@@ -1223,6 +1223,27 @@ class JarifyGenerator(DuckDB.Generator):
             expressions_sql = self.expressions(expression, flat=False)
             return f"{self.seg(f'GROUP BY{modifier}')}{self.sep() if expressions_sql else ''}{expressions_sql}"
         return super().group_sql(expression)
+
+    def order_sql(self, expression: exp.Order, flat: bool = False) -> str:
+        if self.pretty and self._is_order_by_all(expression):
+            return self.seg("ORDER BY ALL")
+        return super().order_sql(expression, flat=flat)
+
+    @staticmethod
+    def _is_order_by_all(expression: exp.Order) -> bool:
+        if expression.args.get("this") is not None or expression.args.get("siblings"):
+            return False
+        if len(expression.expressions) != 1:
+            return False
+
+        ordered = expression.expressions[0]
+        return (
+            isinstance(ordered, exp.Ordered)
+            and ordered.args.get("desc") is None
+            and ordered.args.get("with_fill") is None
+            and isinstance(ordered.this, exp.Var)
+            and ordered.this.name.upper() == "ALL"
+        )
 
     # ------------------------------------------------------------------
     # -> / ->>: render without surrounding spaces (value->>'key' not value ->> 'key').
