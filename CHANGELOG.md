@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.6.2] - 2026-05-01
+### Bug Fixes
+
+- keep alias alignment stable across nested ctes ([#277](https://github.com/amfaro/jarify/pull/277)) ([#277](https://github.com/amfaro/jarify/pull/277))
+
 ## [0.6.1] - 2026-05-01
 ### Bug Fixes
 
