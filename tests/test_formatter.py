@@ -54,6 +54,22 @@ def test_as_alignment():
     assert len(set(as_positions)) == 1, f"AS keywords not aligned: {as_positions}"
 
 
+def test_as_alignment_spans_ctes_and_outer_select():
+    sql = (
+        "WITH a AS (SELECT x AS first, yy AS second FROM t), "
+        "b AS (SELECT zzz AS third, w AS fourth FROM u) "
+        "SELECT q AS fifth, rr AS sixth FROM a JOIN b ON 1 = 1"
+    )
+    result, _ = format_sql(sql)
+    alias_lines = [
+        line
+        for line in result.splitlines()
+        if any(f" AS {alias}" in line for alias in ("first", "second", "third", "fourth", "fifth", "sixth"))
+    ]
+    lhs_widths = [len(line.split(" AS ")[0].lstrip(" ,")) for line in alias_lines]
+    assert len(set(lhs_widths)) == 1, f"AS keywords not aligned across query: {lhs_widths}"
+
+
 def test_searched_case_issue_260_layout_is_preserved():
     sql = """SELECT
    foo_bar_baz AS xyz

@@ -525,7 +525,7 @@ CROSS JOIN UNNEST(o.vals) t(v)
 
 ### Column alias alignment
 
-When two or more columns in a `SELECT` list have aliases, the `AS` keyword is aligned to the widest column expression. Multi-line expressions still participate — the closing line (for example `END`) is padded so its trailing `AS` lines up with neighboring single-line aliases.
+When a query contains two or more column aliases anywhere in its `SELECT` lists, the `AS` keyword is aligned to the widest column expression across the full query. That includes outer queries, CTE bodies, and nested subqueries. Multi-line expressions still participate — the closing line (for example `END`) is padded so its trailing `AS` lines up with neighboring single-line aliases.
 
 **Bad**
 ```sql
@@ -551,6 +551,30 @@ SELECT
      ELSE NULL
    END        AS abc
 FROM data
+;
+```
+
+**Also good**
+```sql
+WITH _a AS
+(
+  SELECT
+     x   AS first
+    ,yy  AS second
+  FROM t
+)
+,_b AS
+(
+  SELECT
+     zzz AS third
+    ,w   AS fourth
+  FROM u
+)
+SELECT
+   q   AS fifth
+  ,rr  AS sixth
+FROM _a
+INNER JOIN _b ON 1 = 1
 ;
 ```
 
