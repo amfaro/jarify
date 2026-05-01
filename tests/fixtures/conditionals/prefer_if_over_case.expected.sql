@@ -4,13 +4,15 @@ SELECT
   ,if(b IS NULL, 0, NULL)      AS b_or_zero
   ,if(status = 'active', 1, 0) AS is_active
   ,CASE
-    WHEN a = 1 THEN 'one'
-    WHEN a = 2 THEN 'two'
-    ELSE 'other'
-  END AS label
+     WHEN a = 1
+     THEN 'one'
+     WHEN a = 2
+     THEN 'two'
+     ELSE 'other'
+   END                        AS label
   ,CASE a
     WHEN 1 THEN 'one'
     ELSE 'other'
-  END AS simple_case
+  END                        AS simple_case
 FROM t
 ;

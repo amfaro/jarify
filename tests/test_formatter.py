@@ -54,6 +54,25 @@ def test_as_alignment():
     assert len(set(as_positions)) == 1, f"AS keywords not aligned: {as_positions}"
 
 
+def test_searched_case_issue_260_layout_is_preserved():
+    sql = """SELECT
+   foo_bar_baz AS xyz
+  ,CASE
+     WHEN foo
+     THEN bar
+     WHEN baz
+      AND baq
+     THEN world
+     ELSE null
+   END        AS abc
+FROM data
+;"""
+    result, _ = format_sql(sql)
+    assert "\n     WHEN foo\n     THEN bar\n" in result
+    assert "\n     WHEN baz\n      AND baq\n     THEN world\n" in result
+    assert "\n   END        AS abc\n" in result
+
+
 def test_parse_failure_returns_original_with_warning():
     """Unparseable SQL is returned unchanged with a warning instead of crashing."""
     bad_sql = "THIS IS NOT VALID SQL @@@!!!"
@@ -147,6 +166,20 @@ WHERE 1 = 1
     )
     assert swallowed_or not in result
     assert "OR t.threshold_value >= r.threshold" in result
+
+
+def test_searched_case_puts_then_on_its_own_line_and_expands_connectors():
+    sql = "SELECT CASE WHEN foo THEN bar WHEN baz AND baq THEN world ELSE NULL END AS abc FROM data"
+    result, _ = format_sql(sql)
+    assert "WHEN foo\n     THEN bar" in result
+    assert "WHEN baz\n      AND baq\n     THEN world" in result
+    assert "ELSE NULL" in result
+
+
+def test_searched_case_right_aligns_or_with_and():
+    sql = "SELECT CASE WHEN foo THEN bar WHEN baz OR hello THEN world ELSE NULL END AS abc FROM data"
+    result, _ = format_sql(sql)
+    assert "WHEN baz\n       OR hello\n     THEN world" in result
 
 
 class TestFromFirst:

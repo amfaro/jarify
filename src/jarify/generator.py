@@ -308,30 +308,29 @@ class JarifyGenerator(DuckDB.Generator):
     def _compute_as_align_width(self, expressions_list: list) -> int | None:
         """Compute the column width for AS alignment in a SELECT expression list.
 
-        Returns None if alignment should not be applied (< 2 single-line aliases).
+        Returns None if alignment should not be applied (< 2 aliases total).
 
-        Multi-line aliased expressions (e.g. CASE … END AS foo) are excluded from
-        measurement and from alignment, but their presence no longer disables
-        alignment for the remaining single-line aliases in the same SELECT.
+        Multi-line aliased expressions (e.g. CASE … END AS foo) participate in
+        alignment using the width of their closing line (typically ``END``), so
+        the trailing ``AS`` can align with single-line aliases in the same
+        SELECT list.
         """
         col_widths: list[int] = []
-        single_line_alias_count = 0
+        alias_count = 0
         for e in expressions_list:
             if isinstance(e, exp.Alias):
+                alias_count += 1
                 col_sql = self.sql(e.this)
-                if "\n" in col_sql:
-                    # Multi-line aliased expression — skip it, but don't abort
-                    continue
-                single_line_alias_count += 1
-                col_widths.append(len(col_sql))
+                last_line = col_sql.splitlines()[-1]
+                col_widths.append(len(last_line.lstrip() if "\n" in col_sql else last_line))
             else:
-                # Non-aliased columns count toward the alignment width so AS
-                # keywords clear the longest expression in the list.
+                # Non-aliased single-line columns count toward the alignment
+                # width so AS keywords clear the longest expression in the list.
                 col_sql = self.sql(e)
                 if "\n" not in col_sql:
                     col_widths.append(len(col_sql))
 
-        if single_line_alias_count < 2:
+        if alias_count < 2:
             return None
 
         return max(col_widths)
@@ -346,7 +345,13 @@ class JarifyGenerator(DuckDB.Generator):
         if not alias_name:
             return this_sql
         align_width = self._as_align_width
-        if align_width is not None and isinstance(expression.parent, exp.Select) and "\n" not in this_sql:
+        if align_width is not None and isinstance(expression.parent, exp.Select):
+            if "\n" in this_sql:
+                lines = this_sql.splitlines()
+                visible_width = len(lines[-1].lstrip())
+                padding = " " * max(0, align_width - visible_width - 1)
+                lines[-1] = f"{lines[-1]}{padding} AS {alias_name}"
+                return "\n".join(lines)
             padding = " " * max(0, align_width - len(this_sql))
             return f"{this_sql}{padding} AS {alias_name}"
         return f"{this_sql} AS {alias_name}"
@@ -807,8 +812,8 @@ class JarifyGenerator(DuckDB.Generator):
         return "\n".join(lines)
 
     # ------------------------------------------------------------------
-    # CASE: keep WHEN/THEN on one line; align THEN across branches;
-    # compact THEN/ELSE values so OR/AND chains don't expand.
+    # CASE: simple CASE keeps WHEN/THEN on one line; searched CASE puts
+    # THEN on its own line and expands AND/OR conditions inside WHEN.
     # ------------------------------------------------------------------
 
     def case_sql(self, expression: exp.Case) -> str:
@@ -818,11 +823,20 @@ class JarifyGenerator(DuckDB.Generator):
         then_parts: list[str] = []
         for e in expression.args["ifs"]:
             wp_expr = e.args.get("this")
-            wp = self._compact_sql(wp_expr) if wp_expr is not None else self.sql(e, "this")
+            if self.pretty and not this and wp_expr is not None:
+                prev_force = self._connector_force_expand
+                self._connector_force_expand = True
+                try:
+                    wp = self.sql(wp_expr)
+                finally:
+                    self._connector_force_expand = prev_force
+            else:
+                wp = self._compact_sql(wp_expr) if wp_expr is not None else self.sql(e, "this")
+
             true_expr = e.args.get("true")
             if self.pretty and true_expr is not None:
                 compact = self._compact_sql(true_expr)
-                tp = compact if not self.too_wide([f"WHEN {wp} THEN {compact}"]) else self.sql(e, "true")
+                tp = compact if not self.too_wide([f"THEN {compact}"]) else self.sql(e, "true")
             else:
                 tp = self.sql(e, "true")
             when_parts.append(wp)
@@ -837,7 +851,14 @@ class JarifyGenerator(DuckDB.Generator):
             else:
                 default_sql = self.sql(expression, "default")
 
-        def _build(align: bool) -> list[str]:
+        def _append_multiline(
+            stmts: list[str], keyword: str, value: str, *, prefix: str = "", continuation_prefix: str = ""
+        ) -> None:
+            lines = value.splitlines()
+            stmts.append(f"{prefix}{keyword} {lines[0]}")
+            stmts.extend(f"{continuation_prefix}{line}" for line in lines[1:])
+
+        def _build_simple(align: bool) -> list[str]:
             max_w = max((len(w) for w in when_parts), default=0) if align else 0
             stmts = [f"CASE {this}" if this else "CASE"]
             for wp, tp in zip(when_parts, then_parts, strict=True):
@@ -847,16 +868,31 @@ class JarifyGenerator(DuckDB.Generator):
             stmts.append("END")
             return stmts
 
-        compact_stmts = _build(align=False)
-        compact_inline = " ".join(compact_stmts)
-        # In pretty mode, always emit multi-line — every WHEN/ELSE branch on its
-        # own line. Inline only in non-pretty (e.g. compact sub-expression) mode.
-        if not self.pretty:
-            return compact_inline
+        def _searched_when_continuation(line: str) -> str:
+            if line.startswith("OR "):
+                return f"   {line}"
+            return f"  {line}"
 
-        # Multi-line: align THEN when all branches have single-line THEN values
+        def _build_searched() -> list[str]:
+            stmts = ["CASE"]
+            for wp, tp in zip(when_parts, then_parts, strict=True):
+                wp_lines = wp.splitlines()
+                stmts.append(f" WHEN {wp_lines[0]}")
+                stmts.extend(_searched_when_continuation(line) for line in wp_lines[1:])
+                _append_multiline(stmts, "THEN", tp, prefix=" ", continuation_prefix="  ")
+            if default_sql is not None:
+                _append_multiline(stmts, "ELSE", default_sql, prefix=" ", continuation_prefix="  ")
+            stmts.append(" END")
+            return stmts
+
+        if not self.pretty:
+            return " ".join(_build_simple(align=False))
+
+        if not this:
+            return self.indent("\n".join(_build_searched()), skip_first=True, skip_last=True)
+
         align = len(when_parts) >= 2 and all("\n" not in tp for tp in then_parts)
-        return self.indent("\n".join(_build(align=align)), skip_first=True, skip_last=True)
+        return self.indent("\n".join(_build_simple(align=align)), skip_first=True, skip_last=True)
 
     # ------------------------------------------------------------------
     # WHERE / HAVING: first condition inline, AND/OR right-justified

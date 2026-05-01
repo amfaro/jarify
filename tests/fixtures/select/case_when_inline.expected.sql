@@ -23,9 +23,11 @@ FROM t
 -- general case expression: short THEN values, multi-line
 SELECT
    CASE
-    WHEN x > 0 THEN 'positive'
-    WHEN x < 0 THEN 'negative'
-    ELSE 'zero'
-  END AS sign
+     WHEN x > 0
+     THEN 'positive'
+     WHEN x < 0
+     THEN 'negative'
+     ELSE 'zero'
+   END AS sign
 FROM t
 ;
