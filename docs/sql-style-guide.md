@@ -492,7 +492,7 @@ CROSS JOIN UNNEST(o.vals) t(v)
 
 ### Column alias alignment
 
-When two or more columns in a `SELECT` list have aliases, the `AS` keyword is aligned to the widest column expression.
+When two or more columns in a `SELECT` list have aliases, the `AS` keyword is aligned to the widest column expression. Multi-line expressions still participate — the closing line (for example `END`) is padded so its trailing `AS` lines up with neighboring single-line aliases.
 
 **Bad**
 ```sql
@@ -505,6 +505,19 @@ SELECT
    a                    AS foo
   ,some_long_expression AS bar
 FROM t
+;
+```
+
+**Also good**
+```sql
+SELECT
+   foo_bar_baz AS xyz
+  ,CASE
+     WHEN foo
+     THEN bar
+     ELSE NULL
+   END        AS abc
+FROM data
 ;
 ```
 
@@ -731,7 +744,10 @@ FROM t
 
 ### `CASE` — always multi-line
 
-`CASE` expressions are always formatted across multiple lines in pretty mode, regardless of branch count or line length. Each `WHEN … THEN` pair appears on its own line, and `THEN` values are column-aligned when all branches fit on a single line.
+`CASE` expressions are always formatted across multiple lines in pretty mode, regardless of branch count or line length.
+
+- **Simple CASE** (`CASE expr WHEN lit THEN val`) keeps `WHEN … THEN` on one line, and `THEN` values are column-aligned when all branches fit on a single line.
+- **Searched CASE** (`CASE WHEN cond THEN val`) puts `THEN` on its own line. Multi-line boolean conditions keep `AND` / `OR` on their own lines under `WHEN`, with `AND` / `OR` right-aligned as in the issue #260 examples.
 
 **Bad** (flattened to one line)
 ```sql
@@ -739,7 +755,7 @@ SELECT CASE o.part WHEN 'AND' THEN '&&' WHEN 'OR' THEN '||' WHEN 'NOT' THEN '!' 
 FROM data
 ```
 
-**Good**
+**Good** (simple CASE)
 ```sql
 SELECT
    *
@@ -752,15 +768,20 @@ SELECT
 FROM data
 ```
 
-**Also good** (even 2 branches go multi-line)
+**Also good** (searched CASE)
 ```sql
 SELECT
-   CASE status
-    WHEN 'active'   THEN true
-    WHEN 'inactive' THEN false
-    ELSE NULL
-  END AS is_active
-FROM accounts
+   foo_bar_baz AS xyz
+  ,CASE
+     WHEN foo
+     THEN bar
+     WHEN baz
+      AND baq
+     THEN world
+     ELSE NULL
+   END        AS abc
+FROM data
+;
 ```
 
 ---
