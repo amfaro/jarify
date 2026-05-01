@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.6.1] - 2026-05-01
+### Bug Fixes
+
+- write unchanged stdin input to stdout ([#274](https://github.com/amfaro/jarify/pull/274)) ([#274](https://github.com/amfaro/jarify/pull/274))
+
 ## [0.6.0] - 2026-05-01
 ### Features
 
