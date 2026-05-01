@@ -332,6 +332,13 @@ class TestGroupByPerLine:
         assert "a" in out
 
 
+class TestOrderByAll:
+    def test_order_by_all_stays_inline(self):
+        out, _ = format_sql("SELECT * FROM data ORDER BY ALL")
+        assert "ORDER BY ALL" in out
+        assert "ORDER BY\n" not in out
+
+
 class TestTrailingRustFmtPlaceholder:
     """Trailing whole-line Rust format placeholders must land *before* the
     statement-terminating semicolon, not after it.

@@ -354,6 +354,39 @@ GROUP BY ALL
 
 ---
 
+### `ORDER BY` — one expression per line, except `ORDER BY ALL`
+
+Every explicit `ORDER BY` expression is on its own line using the same leading-comma style as `SELECT`. DuckDB's `ORDER BY ALL` shorthand is exempt and stays on one line.
+
+**Bad**
+```sql
+FROM data
+ORDER BY
+   ALL
+```
+
+**Good**
+```sql
+FROM data
+ORDER BY ALL
+;
+```
+
+Explicit sort keys still wrap one per line:
+
+```sql
+SELECT
+   a
+  ,b
+FROM data
+ORDER BY
+   a
+  ,b DESC
+;
+```
+
+---
+
 ### CTE layout
 
 The opening parenthesis goes on its own line. Each subsequent CTE is prefixed with a comma (no space between comma and name).
