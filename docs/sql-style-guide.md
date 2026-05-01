@@ -117,6 +117,8 @@ FROM t
 
 ### Two-argument null fallback — prefer `ifnull()`
 
+Rule: `prefer-ifnull-over-coalesce`
+
 Use `ifnull(x, y)` for the two-argument null-fallback case. `coalesce(...)` stays in place when there are three or more arguments.
 
 **Bad**

@@ -46,6 +46,7 @@ class JarifyConfig:
     consistent_empty_array: str = "warn"  # prefer [] over '[]'::type[] empty array
     prefer_neq_operator: str = "warn"  # rewrite <> to != inequality operator
     prefer_if_over_case: str = "warn"  # rewrite single-WHEN CASE to IF()
+    prefer_ifnull_over_coalesce: str = "warn"  # rewrite two-argument COALESCE(x, y) to ifnull(x, y)
 
     # --- per-rule overrides (populated from [rules.*] in toml) ---
     rules: dict[str, Any] = field(default_factory=dict)

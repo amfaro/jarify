@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from jarify.comment_overrides import parse_comment_overrides
 from jarify.config import JarifyConfig
-from jarify.parser import _mask_rust_fmt_placeholders, parse_sql_lenient
+from jarify.parser import _mask_ifnull, _mask_rust_fmt_placeholders, parse_sql_lenient
 from jarify.rules import get_default_rules
 from jarify.types import LintViolation
 
@@ -16,6 +16,7 @@ def lint_sql(sql: str, config: JarifyConfig | None = None) -> list[LintViolation
     config = config or JarifyConfig()
     overrides = parse_comment_overrides(sql)
     masked_sql, _ = _mask_rust_fmt_placeholders(sql)
+    masked_sql = _mask_ifnull(masked_sql)
     trees, parse_errors = parse_sql_lenient(masked_sql, dialect=config.dialect)
     violations: list[LintViolation] = []
 

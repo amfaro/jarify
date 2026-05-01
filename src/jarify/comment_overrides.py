@@ -24,6 +24,7 @@ RULE_ALIASES: dict[str, str] = {
     "no-select-star-in-cte": "no-select-star-in-cte",
     "prefer-neq-operator": "prefer-neq-operator",
     "prefer-if-over-case": "prefer-if-over-case",
+    "prefer-ifnull-over-coalesce": "prefer-ifnull-over-coalesce",
     "parse-error": "parse-error",
     "all": "all",
 }

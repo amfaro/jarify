@@ -30,6 +30,7 @@ examples see [`sql-style-guide.md`](sql-style-guide.md).
 | `consistent-empty-array` | `consistent_empty_array` | warn | yes | rewrite '[]'::type[] cast form to bare [] empty array literal |
 | `prefer-neq-operator` | `prefer_neq_operator` | warn | yes | rewrite <> inequality operator to != |
 | `prefer-if-over-case` | `prefer_if_over_case` | warn | yes | rewrite single-WHEN CASE expressions to IF() |
+| `prefer-ifnull-over-coalesce` | `prefer_ifnull_over_coalesce` | warn | yes | rewrite two-argument COALESCE(x, y) to ifnull(x, y) |
 
 ## Configuring rules
 
