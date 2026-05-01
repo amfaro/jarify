@@ -41,6 +41,22 @@ class TestLintOverrides:
         sql = "-- jarify: disable-next-line no-select-star\nSELECT * FROM t"
         assert "no-select-star" not in _lint(sql, prefer_from_first=False)
 
+    def test_disable_next_line_suppresses_multiline_expression(self):
+        # CASE spans multiple lines after formatting; the directive is on the line
+        # before SELECT, so the violation must be suppressed across all body lines.
+        sql = (
+            "-- jarify: disable-next-line prefer-if-over-case\n"
+            "SELECT\n"
+            "   CASE\n"
+            "     WHEN a > 1\n"
+            "     THEN 'big'\n"
+            "     ELSE 'small'\n"
+            "   END\n"
+            "FROM t\n"
+            ";\n"
+        )
+        assert "prefer-if-over-case" not in _lint(sql)
+
     def test_disable_file_suppresses_entire_rule(self):
         sql = "-- jarify: disable-file no-select-star\nSELECT * FROM t\nSELECT * FROM u"
         assert "no-select-star" not in _lint(sql, prefer_from_first=False)

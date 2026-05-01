@@ -99,6 +99,23 @@ def normalize_setting_name(name: str) -> str:
     return SETTING_ALIASES.get(normalized, normalized)
 
 
+def _stmt_end_line(lines: list[str], after_line_no: int) -> int:
+    """Return the 1-indexed line number of the end of the SQL statement that
+    starts on or after *after_line_no* (1-indexed).
+
+    Scans forward for the first line that ends with a bare ``;`` (the jarify
+    canonical terminator) or for end-of-file.  Block comments and directive
+    comments are skipped so a ``;`` inside a comment does not terminate early.
+    """
+    for i in range(after_line_no, len(lines)):  # 0-indexed
+        stripped = lines[i].strip()
+        if not stripped or stripped.startswith("--"):
+            continue
+        if stripped == ";" or stripped.endswith(";"):
+            return i + 1  # convert to 1-indexed
+    return len(lines)
+
+
 def parse_comment_overrides(sql: str) -> CommentOverrides:
     """Return parsed comment directives from raw SQL text."""
 
@@ -110,7 +127,8 @@ def parse_comment_overrides(sql: str) -> CommentOverrides:
     open_rule_ranges: dict[str, int] = {}
     open_setting_ranges: dict[str, tuple[int, Any]] = {}
 
-    for line_no, raw_line in enumerate(sql.splitlines(), start=1):
+    lines = sql.splitlines()
+    for line_no, raw_line in enumerate(lines, start=1):
         directive = _parse_directive(raw_line)
         if directive is None:
             continue
@@ -126,8 +144,9 @@ def parse_comment_overrides(sql: str) -> CommentOverrides:
             continue
 
         if directive.kind == "disable-next-line":
+            stmt_end = _stmt_end_line(lines, line_no)  # line_no is 1-indexed; lines is 0-indexed
             for rule in _parse_rules(directive.args):
-                line_disabled_rules[line_no + 1].add(rule)
+                rule_ranges.append(_RuleRange(line_no + 1, stmt_end, rule))
             continue
 
         if directive.kind == "disable":
