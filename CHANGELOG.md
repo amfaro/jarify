@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.10.1] - 2026-05-03
+### Bug Fixes
+
+- align modified star formatter blocks ([#294](https://github.com/amfaro/jarify/pull/294)) ([#294](https://github.com/amfaro/jarify/pull/294))
+
 ## [0.10.0] - 2026-05-01
 ### Features
 
