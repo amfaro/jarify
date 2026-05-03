@@ -31,14 +31,19 @@ class NoSelectStarRule(LintOnlyRule):
                 isinstance(parent, exp.Column) and isinstance(parent.parent, exp.Select)
             ):
                 select = parent if isinstance(parent, exp.Select) else parent.parent
+                if not isinstance(select, exp.Select):
+                    continue
                 # When prefer_from_first is on, SELECT * FROM t gets rewritten to
                 # FROM t by the formatter. Linting the formatted output (FROM t)
                 # would re-parse to the same AST, so skip single-table star selects
                 # that the formatter already handles via FROM-first syntax.
+                star_expr = select.expressions[0] if len(select.expressions) == 1 else None
+                plain_star = isinstance(star_expr, exp.Star) and not any(
+                    star_expr.args.get(k) for k in ("except_", "replace", "rename")
+                )
                 if (
                     self.prefer_from_first
-                    and len(select.expressions) == 1
-                    and isinstance(select.expressions[0], exp.Star)
+                    and plain_star
                     and not select.args.get("distinct")
                     and not select.args.get("joins")
                 ):
