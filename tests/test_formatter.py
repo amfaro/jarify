@@ -274,6 +274,25 @@ class TestFromFirst:
         out, _ = format_sql("SELECT * FROM people", JarifyConfig(prefer_from_first=False))
         assert "SELECT" in out
 
+    def test_modified_star_keeps_select_and_expands_modifiers(self):
+        out, _ = format_sql(
+            "SELECT * EXCLUDE (a, b) REPLACE (x + 1 AS x, y + 2 AS y) "
+            "RENAME (old_name AS new_name, legacy_name AS display_name) FROM people"
+        )
+        assert out.startswith("SELECT")
+        assert "FROM people" in out
+        assert "   *\n   EXCLUDE (\n      a\n     ,b\n   )" in out
+        assert "   REPLACE (\n      x + 1 AS x\n     ,y + 2 AS y\n   )" in out
+        assert "   RENAME (\n      old_name    AS new_name\n     ,legacy_name AS display_name\n   )" in out
+
+    def test_modified_star_aligns_aliases_within_replace_and_rename(self):
+        out, _ = format_sql(
+            "SELECT * REPLACE (id + 1 AS vendor_id, name || suffix AS vendor_name) "
+            "RENAME (id AS vendor_id, name AS vendor_name) FROM vendors"
+        )
+        assert "      id + 1         AS vendor_id\n     ,name || suffix AS vendor_name" in out
+        assert "      id   AS vendor_id\n     ,name AS vendor_name" in out
+
 
 class TestLeftOuterJoinNormalization:
     def test_left_outer_join_normalized(self):

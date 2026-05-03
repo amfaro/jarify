@@ -411,7 +411,7 @@ class JarifyGenerator(DuckDB.Generator):
         if not alias_name:
             return this_sql
         align_width = self._as_align_width
-        if align_width is not None and isinstance(expression.parent, exp.Select):
+        if align_width is not None and isinstance(expression.parent, (exp.Select, exp.Star)):
             if "\n" in this_sql:
                 lines = this_sql.splitlines()
                 visible_width = len(lines[-1].lstrip())
@@ -1134,7 +1134,7 @@ class JarifyGenerator(DuckDB.Generator):
         return super().in_sql(expression)
 
     # ------------------------------------------------------------------
-    # Star: keep * EXCLUDE / REPLACE / RENAME inline when it fits
+    # Star: expand EXCLUDE / REPLACE / RENAME as multi-line select content
     # ------------------------------------------------------------------
 
     def star_sql(self, expression: exp.Star) -> str:
@@ -1147,9 +1147,27 @@ class JarifyGenerator(DuckDB.Generator):
         rename_sql = f" RENAME ({rename})" if rename else ""
 
         inline = f"*{except_sql}{replace_sql}{rename_sql}"
-        if self.pretty and not self.too_wide([inline]):
-            return inline
-        return super().star_sql(expression)
+        has_modifiers = bool(except_ or replace or rename)
+        if not (self.pretty and has_modifiers):
+            return inline if self.pretty and not self.too_wide([inline]) else super().star_sql(expression)
+
+        lines = ["*"]
+        for keyword, key in ((self.STAR_EXCEPT, "except_"), ("REPLACE", "replace"), ("RENAME", "rename")):
+            saved_align = self._as_align_width
+            payload_expressions = list(expression.args.get(key) or [])
+            if key in ("replace", "rename"):
+                self._as_align_width = self._compute_as_align_width(payload_expressions)
+            try:
+                payload = self.expressions(expression, key=key, indent=False)
+            finally:
+                self._as_align_width = saved_align
+            if not payload:
+                continue
+            lines.append(f" {keyword} (")
+            lines.extend(f"   {line}" for line in payload.splitlines())
+            lines.append(" )")
+
+        return "\n".join(lines)
 
     # ------------------------------------------------------------------
     # Inequality operator: always emit != (never <>)
@@ -1184,14 +1202,16 @@ class JarifyGenerator(DuckDB.Generator):
             exprs = expression.expressions
             from_ = expression.args.get("from_")
 
+            star = exprs[0] if len(exprs) == 1 and isinstance(exprs[0], exp.Star) else None
+            plain_star = star is not None and not any(star.args.get(k) for k in ("except_", "replace", "rename"))
+
             # Detect VALUES-only CTE body: SELECT * FROM (VALUES ...) AS _values
             # sqlglot parses `WITH t(a,b) AS (VALUES ...)` into this shape; render
             # it back to a plain VALUES block instead of FROM (VALUES ...) AS _values.
             if (
                 self.pretty
                 and self._config.prefer_from_first
-                and len(exprs) == 1
-                and isinstance(exprs[0], exp.Star)
+                and plain_star
                 and not expression.args.get("distinct")
                 and not expression.args.get("joins")
                 and isinstance(from_, exp.From)
@@ -1213,8 +1233,6 @@ class JarifyGenerator(DuckDB.Generator):
                 and not j.args.get("using")
                 for j in joins
             )
-            star = exprs[0] if len(exprs) == 1 and isinstance(exprs[0], exp.Star) else None
-            plain_star = star is not None and not any(star.args.get(k) for k in ("except_", "replace", "rename"))
             if (
                 self.pretty
                 and self._config.prefer_from_first

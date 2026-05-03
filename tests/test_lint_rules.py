@@ -96,6 +96,11 @@ class TestNoSelectStar:
         rules = _lint("SELECT * FROM t JOIN u ON t.id = u.id", prefer_from_first=True)
         assert "no-select-star" in rules
 
+    def test_warns_on_modified_star_when_prefer_from_first_enabled(self):
+        # Modified stars are not rewritten to FROM-first, so they stay lint violations.
+        rules = _lint("SELECT * EXCLUDE (secret_col) FROM t", prefer_from_first=True)
+        assert "no-select-star" in rules
+
     def test_warns_when_prefer_from_first_disabled(self):
         # FROM t parses as SELECT * FROM t; should fire when prefer_from_first=False.
         rules = _lint("FROM t", prefer_from_first=False)

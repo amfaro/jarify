@@ -878,7 +878,7 @@ FROM data
 
 ### `SELECT *` — rewritten as FROM-first
 
-`SELECT *` is rewritten to DuckDB's FROM-first syntax, omitting the `SELECT` clause entirely. Applies only when there are no JOINs.
+Plain, unmodified `SELECT *` is rewritten to DuckDB's FROM-first syntax, omitting the `SELECT` clause entirely. Applies only when there are no JOINs.
 
 **Bad**
 ```sql
@@ -901,6 +901,25 @@ FROM orders
 WHERE status = 'active'
 ORDER BY
    created_at
+;
+```
+
+Modified stars stay in `SELECT` form and expand their modifiers. `REPLACE` and `RENAME` keep jarify's alias alignment inside the modifier list.
+
+**Bad**
+```sql
+SELECT * RENAME (id AS vendor_id, name AS vendor_name) FROM orders
+```
+
+**Good**
+```sql
+SELECT
+   *
+   RENAME (
+      id   AS vendor_id
+     ,name AS vendor_name
+   )
+FROM orders
 ;
 ```
 
@@ -1054,7 +1073,7 @@ FROM sizes
 
 Flag top-level `SELECT *` and `table.*` in `SELECT` lists. `COUNT(*)` is exempt.
 
-When `prefer_from_first = true` (the default), single-table `SELECT *` queries are not flagged because the formatter already rewrites them to FROM-first syntax (`FROM t`). The rule still fires for `SELECT *` with JOINs, since those are not rewritten.
+When `prefer_from_first = true` (the default), only plain single-table `SELECT *` queries are exempt because the formatter rewrites them to FROM-first syntax (`FROM t`). Modified stars such as `SELECT * EXCLUDE (...)` and `SELECT * REPLACE (...)` are still flagged, as are `SELECT *` queries with JOINs.
 
 **Bad** (with `prefer_from_first = false`)
 ```sql
