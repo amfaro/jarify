@@ -7,7 +7,7 @@ SELECT
       AND baq
      THEN world
      ELSE NULL
-   END        AS abc
+   END         AS abc
   ,CASE
      WHEN foo
      THEN bar
@@ -15,6 +15,6 @@ SELECT
        OR hello
      THEN world
      ELSE NULL
-   END        AS def
+   END         AS def
 FROM data
 ;

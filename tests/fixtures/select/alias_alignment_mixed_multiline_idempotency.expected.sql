@@ -8,6 +8,6 @@ SELECT
      WHEN a.x = 2
      THEN 'no'
      ELSE 'maybe'
-   END              AS category
+   END               AS category
 FROM t a
 ;

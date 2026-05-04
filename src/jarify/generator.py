@@ -414,8 +414,12 @@ class JarifyGenerator(DuckDB.Generator):
         if align_width is not None and isinstance(expression.parent, (exp.Select, exp.Star)):
             if "\n" in this_sql:
                 lines = this_sql.splitlines()
-                visible_width = len(lines[-1].lstrip())
-                padding = " " * max(0, align_width - visible_width - 1)
+                # For multi-line expressions the last line (e.g. ``)``, ``END``)
+                # has no leader character prepended in the expressions loop
+                # (the `` ``/``,`` leader only goes on the first line).  To land
+                # ``AS`` at the same visual column as single-line aliases — which
+                # DO carry a 1-char leader — we add an extra +1 to the padding.
+                padding = " " * max(0, align_width - len(lines[-1]) + 1)
                 lines[-1] = f"{lines[-1]}{padding} AS {alias_name}"
                 return "\n".join(lines)
             padding = " " * max(0, align_width - len(this_sql))
