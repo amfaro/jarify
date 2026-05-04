@@ -1,6 +1,11 @@
 # Changelog
 
-## [0.10.1] - 2026-05-03
+## [0.10.2] - 2026-05-04
+### Bug Fixes
+
+- align AS keyword correctly for multi-line expressions ([#297](https://github.com/amfaro/jarify/pull/297)) ([#297](https://github.com/amfaro/jarify/pull/297))
+
+## [0.10.1] - 2026-05-04
 ### Bug Fixes
 
 - align modified star formatter blocks ([#294](https://github.com/amfaro/jarify/pull/294)) ([#294](https://github.com/amfaro/jarify/pull/294))
