@@ -9,10 +9,10 @@ SELECT
      WHEN a = 2
      THEN 'two'
      ELSE 'other'
-   END                        AS label
+   END                         AS label
   ,CASE a
     WHEN 1 THEN 'one'
     ELSE 'other'
-  END                        AS simple_case
+  END                          AS simple_case
 FROM t
 ;

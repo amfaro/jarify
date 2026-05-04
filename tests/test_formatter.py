@@ -122,7 +122,7 @@ FROM data
     result, _ = format_sql(sql)
     assert "\n     WHEN foo\n     THEN bar\n" in result
     assert "\n     WHEN baz\n      AND baq\n     THEN world\n" in result
-    assert "\n   END        AS abc\n" in result
+    assert "\n   END         AS abc\n" in result
 
 
 def test_parse_failure_returns_original_with_warning():
