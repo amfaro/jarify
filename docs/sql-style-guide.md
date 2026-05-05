@@ -1183,16 +1183,16 @@ Flag non-canonical DuckDB type names. Use the canonical form instead.
 | Non-canonical | Canonical |
 |---------------|-----------|
 | `float`, `float4` | `real` |
-| `varchar`, `nvarchar` | `text` |
+| `varchar` | `text` |
 
 **Bad**
 ```sql
-CREATE TABLE t (score FLOAT, short_label VARCHAR, long_label NVARCHAR)
+CREATE TABLE t (score FLOAT, short_label VARCHAR)
 ```
 
 **Good**
 ```sql
-CREATE TABLE t (score real, short_label text, long_label text)
+CREATE TABLE t (score real, short_label text)
 ```
 
 ---
