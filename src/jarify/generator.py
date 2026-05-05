@@ -1492,25 +1492,21 @@ class JarifyGenerator(DuckDB.Generator):
 
     def arrayagg_sql(self, expression: exp.ArrayAgg) -> str:
         func_name = self.normalize_func("list")
-        if not (self.pretty and isinstance(expression.this, exp.Distinct)):
-            # Non-DISTINCT or compact mode: emit list(<inner>)
-            inner = self.sql(expression, "this")
-            list_sql = f"{func_name}({inner})"
-            return self._add_arrayagg_null_filter(list_sql, expression, expression.this)
-        distinct = expression.this
-        exprs_sqls = [self.sql(e) for e in distinct.expressions]
-        # Wrap when any expression is already multi-line, or when the flat inline is too wide
-        any_multiline = any("\n" in s for s in exprs_sqls)
-        flat_inline = f"{func_name}(DISTINCT {', '.join(exprs_sqls)})"
-        if not any_multiline and not self.too_wide([flat_inline]):
-            # Fits inline — emit list(DISTINCT <exprs>)
-            inner = self.sql(expression, "this")
-            list_sql = f"{func_name}({inner})"
-            return self._add_arrayagg_null_filter(list_sql, expression, expression.this)
-        exprs_str = "\n".join(exprs_sqls)
-        inner = self.indent(f"\nDISTINCT {exprs_str}\n", skip_first=True, skip_last=True)
-        list_sql = f"{func_name}({inner})"
-        return self._add_arrayagg_null_filter(list_sql, expression, expression.this)
+        distinct = expression.this if isinstance(expression.this, exp.Distinct) else None
+        if self.pretty and distinct is not None:
+            exprs_sqls = [self.sql(e) for e in distinct.expressions]
+            # Wrap when any expression is already multi-line, or when the flat inline is too wide
+            any_multiline = any("\n" in s for s in exprs_sqls)
+            flat_inline = f"{func_name}(DISTINCT {', '.join(exprs_sqls)})"
+            if any_multiline or self.too_wide([flat_inline]):
+                exprs_str = "\n".join(exprs_sqls)
+                inner = self.indent(f"\nDISTINCT {exprs_str}\n", skip_first=True, skip_last=True)
+                result = f"{func_name}({inner})"
+                return self._add_arrayagg_null_filter(result, expression, expression.this)
+        # Non-DISTINCT, compact mode, or DISTINCT that fits inline: emit list(<inner>)
+        inner = self.sql(expression, "this")
+        result = f"{func_name}({inner})"
+        return self._add_arrayagg_null_filter(result, expression, expression.this)
 
     def list_sql(self, expression: exp.List) -> str:
         """Handle exp.List with DISTINCT wrapping (mirrors arrayagg_sql for idempotency).

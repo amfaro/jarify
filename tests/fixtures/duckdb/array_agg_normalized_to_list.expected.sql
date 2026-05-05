@@ -26,3 +26,10 @@ SELECT
    list(x ORDER BY y)
 FROM t
 ;
+
+SELECT
+   list(DISTINCT x)
+FROM t
+GROUP BY
+   z
+;
