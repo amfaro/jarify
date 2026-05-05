@@ -10,6 +10,7 @@ from jarify.rules.consistent_empty_array import ConsistentEmptyArrayRule
 from jarify.rules.cte_naming import CteNamingRule
 from jarify.rules.duckdb_prefer_qualify import DuckdbPreferQualifyRule
 from jarify.rules.duckdb_type_style import DuckdbTypeStyleRule
+from jarify.rules.explicit_cross_join_needs_condition import ExplicitCrossJoinNeedsConditionRule
 from jarify.rules.keyword_case import KeywordCaseRule
 from jarify.rules.no_implicit_cross_join import NoImplicitCrossJoinRule
 from jarify.rules.no_select_star import NoSelectStarRule
@@ -64,6 +65,13 @@ RULE_CATALOG: list[RuleInfo] = [
         default="warn",
         auto_fix=True,
         description="rewrite implicit cross joins to explicit CROSS JOIN",
+    ),
+    RuleInfo(
+        name="explicit-cross-join-needs-condition",
+        config_key="explicit_cross_join_needs_condition",
+        default="warn",
+        auto_fix=False,
+        description="flag explicit CROSS JOINs without ON/USING clauses",
     ),
     RuleInfo(
         name="no-select-star",
@@ -171,6 +179,12 @@ def get_default_rules(config: JarifyConfig, overrides: CommentOverrides | None =
         )
     if config.no_unused_cte != "off":
         rules.append(NoUnusedCteRule(severity=config.no_unused_cte, overrides=overrides))
+    if config.explicit_cross_join_needs_condition != "off":
+        rules.append(
+            ExplicitCrossJoinNeedsConditionRule(
+                severity=config.explicit_cross_join_needs_condition, overrides=overrides
+            )
+        )
 
     # --- DuckDB-specific lint rules ---
     if config.duckdb_type_style != "off":

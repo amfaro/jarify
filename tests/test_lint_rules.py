@@ -60,6 +60,41 @@ class TestNoImplicitCrossJoin:
         assert "no-implicit-cross-join" not in rules
 
 
+class TestExplicitCrossJoinNeedsCondition:
+    def test_warns_on_explicit_cross_join_without_condition(self):
+        rules = _lint("SELECT a FROM t1 CROSS JOIN t2")
+        assert "explicit-cross-join-needs-condition" in rules
+
+    def test_no_warn_on_cross_join_with_on(self):
+        rules = _lint("SELECT a FROM t1 CROSS JOIN t2 ON t1.id = t2.id")
+        assert "explicit-cross-join-needs-condition" not in rules
+
+    def test_no_warn_on_cross_join_with_using(self):
+        rules = _lint("SELECT a FROM t1 CROSS JOIN t2 USING (id)")
+        assert "explicit-cross-join-needs-condition" not in rules
+
+    def test_no_warn_on_inner_join(self):
+        rules = _lint("SELECT a FROM t1 INNER JOIN t2 ON t1.id = t2.id")
+        assert "explicit-cross-join-needs-condition" not in rules
+
+    def test_off_disables_rule(self):
+        rules = _lint("SELECT a FROM t1 CROSS JOIN t2", explicit_cross_join_needs_condition="off")
+        assert "explicit-cross-join-needs-condition" not in rules
+
+    def test_multiple_cross_joins_all_flagged(self):
+        rules = _lint("SELECT a FROM t1 CROSS JOIN t2 CROSS JOIN t3")
+        assert rules.count("explicit-cross-join-needs-condition") == 2
+
+    def test_severity_error_level(self):
+        from jarify.linter import lint_sql
+
+        sql = "SELECT a FROM t1 CROSS JOIN t2"
+        config = JarifyConfig(explicit_cross_join_needs_condition="error")
+        violations = lint_sql(sql, config)
+        v = next(v for v in violations if v.rule == "explicit-cross-join-needs-condition")
+        assert v.severity == "error"
+
+
 class TestNoSelectStar:
     def test_warns_on_select_star(self):
         # prefer_from_first=False: formatter won't rewrite, so lint should warn
