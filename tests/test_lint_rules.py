@@ -13,12 +13,12 @@ def _lint(sql: str, **config_overrides) -> list[str]:
 
 
 class TestCrossJoinWithWhereCondition:
-    def test_warns_on_cross_join_with_where_condition(self):
+    def test_errors_on_cross_join_with_where_condition(self):
         sql = "SELECT a.x FROM a CROSS JOIN b WHERE a.id = b.id"
         rules = _lint(sql)
         assert "cross-join-with-where-condition" in rules
 
-    def test_warns_on_comma_join_with_where_condition(self):
+    def test_errors_on_comma_join_with_where_condition(self):
         sql = "SELECT a.x FROM a, b WHERE a.id = b.id"
         rules = _lint(sql)
         assert "cross-join-with-where-condition" in rules

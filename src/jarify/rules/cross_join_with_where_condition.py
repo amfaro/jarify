@@ -66,7 +66,7 @@ class CrossJoinWithWhereConditionRule(LintOnlyRule):
     should be rewritten as an INNER JOIN with an ON clause.
     """
 
-    def __init__(self, severity: str = "warn", overrides=None) -> None:
+    def __init__(self, severity: str = "error", overrides=None) -> None:
         super().__init__(overrides=overrides)
         self.severity = severity
 
