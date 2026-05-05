@@ -21,6 +21,7 @@ examples see [`sql-style-guide.md`](sql-style-guide.md).
 | `trailing-commas` | `trailing_commas` | off | yes | trailing comma placement (default: leading commas) |
 | `no-implicit-cross-join` | `no_implicit_cross_join` | warn | yes | rewrite implicit cross joins to explicit CROSS JOIN |
 | `explicit-cross-join-needs-condition` | `explicit_cross_join_needs_condition` | warn | no | flag explicit CROSS JOINs without ON/USING clauses |
+| `cross-join-with-where-condition` | `cross_join_with_where_condition` | error | no | flag CROSS JOINs with WHERE clauses connecting multiple tables (should be INNER JOIN) |
 | `no-select-star` | `no_select_star` | warn | no | flag SELECT * usage, including inside CTE bodies |
 | `no-unused-cte` | `no_unused_cte` | warn | no | flag CTEs that are defined but never referenced |
 | `duckdb-type-style` | `duckdb_type_style` | warn | no | prefer canonical DuckDB type names (e.g. int not integer) |

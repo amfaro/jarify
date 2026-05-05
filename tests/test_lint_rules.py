@@ -12,6 +12,39 @@ def _lint(sql: str, **config_overrides) -> list[str]:
     return [v.rule for v in lint_sql(sql, config)]
 
 
+class TestCrossJoinWithWhereCondition:
+    def test_errors_on_cross_join_with_where_condition(self):
+        sql = "SELECT a.x FROM a CROSS JOIN b WHERE a.id = b.id"
+        rules = _lint(sql)
+        assert "cross-join-with-where-condition" in rules
+
+    def test_errors_on_comma_join_with_where_condition(self):
+        sql = "SELECT a.x FROM a, b WHERE a.id = b.id"
+        rules = _lint(sql)
+        assert "cross-join-with-where-condition" in rules
+
+    def test_no_warn_on_cross_join_with_local_where(self):
+        # WHERE filters only one table
+        sql = "SELECT a.x FROM a CROSS JOIN b WHERE a.id > 10"
+        rules = _lint(sql)
+        assert "cross-join-with-where-condition" not in rules
+
+    def test_no_warn_on_cross_join_without_where(self):
+        sql = "SELECT a.x FROM a CROSS JOIN b"
+        rules = _lint(sql)
+        assert "cross-join-with-where-condition" not in rules
+
+    def test_no_warn_on_inner_join(self):
+        sql = "SELECT a.x FROM a INNER JOIN b ON a.id = b.id"
+        rules = _lint(sql)
+        assert "cross-join-with-where-condition" not in rules
+
+    def test_off_disables_rule(self):
+        sql = "SELECT a.x FROM a CROSS JOIN b WHERE a.id = b.id"
+        rules = _lint(sql, cross_join_with_where_condition="off")
+        assert "cross-join-with-where-condition" not in rules
+
+
 class TestNoImplicitCrossJoin:
     def test_warns_on_comma_join(self):
         rules = _lint("SELECT a FROM t1, t2")

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from jarify.rules.base import FormatterRule
 from jarify.rules.consistent_empty_array import ConsistentEmptyArrayRule
+from jarify.rules.cross_join_with_where_condition import CrossJoinWithWhereConditionRule
 from jarify.rules.cte_naming import CteNamingRule
 from jarify.rules.duckdb_prefer_qualify import DuckdbPreferQualifyRule
 from jarify.rules.duckdb_type_style import DuckdbTypeStyleRule
@@ -72,6 +73,13 @@ RULE_CATALOG: list[RuleInfo] = [
         default="warn",
         auto_fix=False,
         description="flag explicit CROSS JOINs without ON/USING clauses",
+    ),
+    RuleInfo(
+        name="cross-join-with-where-condition",
+        config_key="cross_join_with_where_condition",
+        default="error",
+        auto_fix=False,
+        description="flag CROSS JOINs with WHERE clauses connecting multiple tables (should be INNER JOIN)",
     ),
     RuleInfo(
         name="no-select-star",
@@ -184,6 +192,10 @@ def get_default_rules(config: JarifyConfig, overrides: CommentOverrides | None =
             ExplicitCrossJoinNeedsConditionRule(
                 severity=config.explicit_cross_join_needs_condition, overrides=overrides
             )
+        )
+    if config.cross_join_with_where_condition != "off":
+        rules.append(
+            CrossJoinWithWhereConditionRule(severity=config.cross_join_with_where_condition, overrides=overrides)
         )
 
     # --- DuckDB-specific lint rules ---
