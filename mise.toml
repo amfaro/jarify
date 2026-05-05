@@ -1,5 +1,8 @@
 [tools]
-uv = "latest"
+# uv pinned: 0.11.9 was published manually (crates.io timeout) and explicitly
+# lacks GitHub attestations. check-uv-pin.yml polls weekly and will auto-PR to
+# restore "latest" once attestations pass. See: amfaro/calc#3232
+uv = "0.11.8"
 git-cliff = "latest"
 
 [env]

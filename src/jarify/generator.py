@@ -357,6 +357,11 @@ class JarifyGenerator(DuckDB.Generator):
         Query-wide alignment spans the main SELECT plus any CTE-body SELECTs,
         including nested CTEs. It intentionally excludes unrelated subqueries in
         expressions or JOINs, which keep their local alignment behavior.
+
+        When ``expression`` is not itself a SELECT (e.g. a CREATE MACRO wrapping
+        a ``WITH … SELECT`` body) we walk into the statement to find the inner
+        SELECT that owns the top-level WITH clause, then recurse from there so
+        that all CTEs inside the statement share a single alignment column.
         """
         if isinstance(expression, exp.Select):
             yield expression
@@ -365,6 +370,14 @@ class JarifyGenerator(DuckDB.Generator):
                 for cte in with_.expressions:
                     if isinstance(cte, exp.CTE) and isinstance(cte.this, exp.Select):
                         yield from self._iter_query_aligned_selects(cte.this)
+        else:
+            # Non-Select wrapper (e.g. CREATE OR REPLACE MACRO … AS TABLE (…)):
+            # find the inner SELECT that owns the WITH clause and treat it as
+            # the root of the query-aligned tree.
+            for node in expression.walk():
+                if isinstance(node, exp.Select) and node.args.get("with_"):
+                    yield from self._iter_query_aligned_selects(node)
+                    return
 
     def _select_expression_prefix_width(self, select: exp.Select) -> int:
         """Return visible prefix width before a SELECT-list expression.
@@ -383,15 +396,37 @@ class JarifyGenerator(DuckDB.Generator):
         return self.pad + 1 + (ancestor_selects * self._indent)
 
     def _collect_as_alignment_metrics(self, expressions_list: list) -> tuple[list[int], int]:
-        """Return ``(column_widths, alias_count)`` for a SELECT expression list."""
+        """Return ``(column_widths, alias_count)`` for a SELECT expression list.
+
+        For single-line aliased expressions the width is simply ``len(col_sql)``.
+        For multi-line aliased expressions (e.g. scalar subqueries, CASE blocks)
+        the effective width is ``max(0, len(last_line.lstrip()) - 1)``.
+
+        The ``-1`` adjustment exists because ``alias_sql`` adds ``+1`` to the
+        padding for multi-line expressions in order to compensate for the
+        missing leader character on continuation lines (the `` ``/``,`` leader
+        is only prepended to the *first* line of an expression by the
+        ``expressions()`` loop, not subsequent lines including the last).  When
+        a SELECT list contains *only* multi-line expressions there is no
+        single-line expression to drive ``align_width`` higher, so without the
+        ``-1`` correction the ``+1`` in ``alias_sql`` causes a spurious extra
+        space before ``AS`` (yielding ``), 1)  AS alias`` instead of the
+        expected ``), 1) AS alias``).
+        """
         col_widths: list[int] = []
         alias_count = 0
         for e in expressions_list:
             if isinstance(e, exp.Alias):
                 alias_count += 1
                 col_sql = self.sql(e.this)
-                last_line = col_sql.splitlines()[-1]
-                col_widths.append(len(last_line.lstrip() if "\n" in col_sql else last_line))
+                if "\n" in col_sql:
+                    last_line = col_sql.splitlines()[-1]
+                    # Subtract 1: cancels the +1 compensation in alias_sql so that
+                    # SELECT lists with only multi-line expressions don't produce a
+                    # spurious extra space before AS.
+                    col_widths.append(max(0, len(last_line.lstrip()) - 1))
+                else:
+                    col_widths.append(len(col_sql))
             else:
                 # Non-aliased single-line columns count toward the alignment
                 # width so AS keywords clear the longest expression in the list.
