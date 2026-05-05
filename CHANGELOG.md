@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.10.3] - 2026-05-05
+### Bug Fixes
+
+- fix AS alias alignment for multi-line expressions and macro wrappers ([#300](https://github.com/amfaro/jarify/pull/300)) ([#300](https://github.com/amfaro/jarify/pull/300))
+
 ## [0.10.2] - 2026-05-04
 ### Bug Fixes
 
