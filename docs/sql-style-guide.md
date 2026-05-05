@@ -97,7 +97,7 @@ FROM t
 
 ### Built-in function aliases — canonical DuckDB names
 
-Built-in aliases are normalized to jarify's canonical DuckDB names. In practice that means `listagg(...)` becomes `STRING_AGG(...)`, and `array_contains(...)` becomes `list_contains(...)`.
+Built-in aliases are normalized to jarify's canonical DuckDB names. In practice that means `listagg(...)` becomes `STRING_AGG(...)`, and `array_contains(...)` becomes `list_contains(...)`. `array_agg(...)` is also normalized — see below.
 
 **Bad**
 ```sql
@@ -110,6 +110,37 @@ SELECT
    STRING_AGG(code, ' | ')  AS codes
   ,list_contains(tags, 'x') AS has_tag
 FROM t
+;
+```
+
+---
+
+### `array_agg()` → `list()` — canonical DuckDB aggregate
+
+In DuckDB, `list()` is the canonical aggregate function; `array_agg()` is an alias. Jarify rewrites all `array_agg(...)` calls to `list(...)` regardless of arguments.
+
+**Bad**
+```sql
+SELECT array_agg(x) FROM t;
+SELECT array_agg(x ORDER BY y) FROM t;
+SELECT array_agg(DISTINCT x) FROM t GROUP BY z;
+```
+
+**Good**
+```sql
+SELECT
+   list(x)
+FROM t
+;
+SELECT
+   list(x ORDER BY y)
+FROM t
+;
+SELECT
+   list(DISTINCT x)
+FROM t
+GROUP BY
+   z
 ;
 ```
 
@@ -809,7 +840,7 @@ FROM sku_composition
 
 ### `DISTINCT` inside aggregates — own line when wrapping
 
-When `ARRAY_AGG(DISTINCT expr ...)` wraps across lines, `DISTINCT` appears on its own line.
+When `list(DISTINCT expr ...)` wraps across lines, `DISTINCT` appears on its own line.
 
 **Bad**
 ```sql
@@ -819,7 +850,7 @@ SELECT ARRAY_AGG(DISTINCT (active_ingredient_key, quantity, uom_key)::active_ing
 **Good**
 ```sql
 SELECT
-   ARRAY_AGG(
+   list(
     DISTINCT (
        active_ingredient_key
       ,quantity

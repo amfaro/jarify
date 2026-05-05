@@ -1,6 +1,6 @@
 SELECT
    sku_key
-  ,ARRAY_AGG((
+  ,list((
      key
     ,'string'
     ,value
