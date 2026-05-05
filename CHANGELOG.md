@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.10.4] - 2026-05-05
+### Bug Fixes
+
+- prefer list() over ARRAY_AGG for DuckDB canonical aggregate ([#303](https://github.com/amfaro/jarify/pull/303)) ([#303](https://github.com/amfaro/jarify/pull/303))
+
 ## [0.10.3] - 2026-05-05
 ### Bug Fixes
 
