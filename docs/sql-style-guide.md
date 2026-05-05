@@ -1072,7 +1072,7 @@ Use `jarify` comment directives when one line or region needs an exception witho
 Supported directives:
 
 - `-- jarify: disable-line <rule>` — disable a rule on the current line
-- `-- jarify: disable-next-line <rule>` — disable a rule on the following line
+- `-- jarify: disable-next-line <rule>` — disable a rule for the entire next SQL statement, including multi-line statements
 - `-- jarify: disable <rule>` / `-- jarify: enable <rule>` — disable a rule for a region
 - `-- jarify: disable-file <rule>` — disable a rule for the whole file
 - `-- jarify: set max_line_length = 140` / `-- jarify: reset max_line_length` — override line length for following statements until reset

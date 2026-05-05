@@ -65,6 +65,10 @@ FROM my_table
 ;
 ```
 
+The `disable-next-line` directive disables a rule for the *entire next SQL
+statement*, not just the next literal line. Multi-line statements are fully
+covered by a single directive placed before the statement.
+
 Run `jarify rules` to print this table in your terminal, or
 `jarify rules --format json` for a machine-readable list suitable for
 editor integrations (e.g. LSP completion for disable directives).
