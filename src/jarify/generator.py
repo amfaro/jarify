@@ -1483,24 +1483,56 @@ class JarifyGenerator(DuckDB.Generator):
         return f"{params} {arrow_sep}\n{indented_body}"
 
     # ------------------------------------------------------------------
-    # ArrayAgg with DISTINCT: put DISTINCT on its own line when wrapping
+    # ArrayAgg → list(): DuckDB canonical aggregate name
+    # array_agg() is an alias; jarify always emits list() regardless of input.
+    # Also handles DISTINCT with wrapping when pretty-printing.
+    # list_sql handles the same wrapping for List nodes (idempotency: list(DISTINCT ...)
+    # re-parses as exp.List, not exp.ArrayAgg).
     # ------------------------------------------------------------------
 
     def arrayagg_sql(self, expression: exp.ArrayAgg) -> str:
+        func_name = self.normalize_func("list")
         if not (self.pretty and isinstance(expression.this, exp.Distinct)):
-            return super().arrayagg_sql(expression)
+            # Non-DISTINCT or compact mode: emit list(<inner>)
+            inner = self.sql(expression, "this")
+            list_sql = f"{func_name}({inner})"
+            return self._add_arrayagg_null_filter(list_sql, expression, expression.this)
         distinct = expression.this
         exprs_sqls = [self.sql(e) for e in distinct.expressions]
-        func_name = self.normalize_func("ARRAY_AGG")
         # Wrap when any expression is already multi-line, or when the flat inline is too wide
         any_multiline = any("\n" in s for s in exprs_sqls)
         flat_inline = f"{func_name}(DISTINCT {', '.join(exprs_sqls)})"
         if not any_multiline and not self.too_wide([flat_inline]):
-            return super().arrayagg_sql(expression)
+            # Fits inline — emit list(DISTINCT <exprs>)
+            inner = self.sql(expression, "this")
+            list_sql = f"{func_name}({inner})"
+            return self._add_arrayagg_null_filter(list_sql, expression, expression.this)
         exprs_str = "\n".join(exprs_sqls)
         inner = self.indent(f"\nDISTINCT {exprs_str}\n", skip_first=True, skip_last=True)
-        array_agg_sql = f"{func_name}({inner})"
-        return self._add_arrayagg_null_filter(array_agg_sql, expression, expression.this)
+        list_sql = f"{func_name}({inner})"
+        return self._add_arrayagg_null_filter(list_sql, expression, expression.this)
+
+    def list_sql(self, expression: exp.List) -> str:
+        """Handle exp.List with DISTINCT wrapping (mirrors arrayagg_sql for idempotency).
+
+        list(DISTINCT ...) re-parses as exp.List (not exp.ArrayAgg), so this
+        method must apply the same DISTINCT-wrapping logic to keep formatting
+        stable across multiple passes.
+        """
+        func_name = self.normalize_func("list")
+        # expressions[0] is Distinct when written as list(DISTINCT ...)
+        distinct = expression.expressions[0] if expression.expressions else None
+        if not (self.pretty and isinstance(distinct, exp.Distinct)):
+            # Non-DISTINCT or compact mode: delegate to default
+            return super().function_fallback_sql(expression)
+        exprs_sqls = [self.sql(e) for e in distinct.expressions]
+        any_multiline = any("\n" in s for s in exprs_sqls)
+        flat_inline = f"{func_name}(DISTINCT {', '.join(exprs_sqls)})"
+        if not any_multiline and not self.too_wide([flat_inline]):
+            return super().function_fallback_sql(expression)
+        exprs_str = "\n".join(exprs_sqls)
+        inner = self.indent(f"\nDISTINCT {exprs_str}\n", skip_first=True, skip_last=True)
+        return f"{func_name}({inner})"
 
     def format_args(self, *args: t.Any, sep: str = ", ") -> str:
         arg_sqls = tuple(self.sql(arg) for arg in args if arg is not None and not isinstance(arg, bool))

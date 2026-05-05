@@ -1,5 +1,5 @@
 SELECT
-   ARRAY_AGG(
+   list(
     DISTINCT (
        active_ingredient_key
       ,quantity
