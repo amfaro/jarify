@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.11.0] - 2026-05-05
+### Documentation
+
+- clarify disable-next-line applies to entire SQL statement ([#308](https://github.com/amfaro/jarify/pull/308)) ([#308](https://github.com/amfaro/jarify/pull/308))
+- remove nvarchar reference from style guide ([#309](https://github.com/amfaro/jarify/pull/309)) ([#309](https://github.com/amfaro/jarify/pull/309))
+
+### Features
+
+- add explicit-cross-join-needs-condition lint rule
+- add cross-join-with-where-condition lint rule ([#312](https://github.com/amfaro/jarify/pull/312)) ([#312](https://github.com/amfaro/jarify/pull/312))
+
 ## [0.10.4] - 2026-05-05
 ### Bug Fixes
 
