@@ -36,6 +36,7 @@ class JarifyConfig:
     no_select_star: str = "warn"
     no_implicit_cross_join: str = "warn"
     explicit_cross_join_needs_condition: str = "warn"
+    cross_join_with_where_condition: str = "error"
     no_unused_cte: str = "warn"
 
     # --- DuckDB-specific lint rules ---
