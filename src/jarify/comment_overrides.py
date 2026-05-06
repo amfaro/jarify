@@ -26,6 +26,8 @@ RULE_ALIASES: dict[str, str] = {
     "prefer-if-over-case": "prefer-if-over-case",
     "prefer-ifnull-over-coalesce": "prefer-ifnull-over-coalesce",
     "parse-error": "parse-error",
+    # `all` is a wildcard handled directly in is_rule_disabled() and the
+    # `enable` directive — there is no rule named "all".
     "all": "all",
 }
 
@@ -157,7 +159,13 @@ def parse_comment_overrides(sql: str) -> CommentOverrides:
             continue
 
         if directive.kind == "enable":
-            for rule in _parse_rules(directive.args):
+            rules = _parse_rules(directive.args)
+            if "all" in rules:
+                for open_rule, start in open_rule_ranges.items():
+                    rule_ranges.append(_RuleRange(start, line_no - 1, open_rule))
+                open_rule_ranges.clear()
+                continue
+            for rule in rules:
                 if rule in open_rule_ranges:
                     rule_ranges.append(_RuleRange(open_rule_ranges.pop(rule), line_no - 1, rule))
             continue
