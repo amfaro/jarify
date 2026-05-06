@@ -1077,12 +1077,18 @@ Supported directives:
 - `-- jarify: disable-file <rule>` — disable a rule for the whole file
 - `-- jarify: set max_line_length = 140` / `-- jarify: reset max_line_length` — override line length for following statements until reset
 
-Rules use their lint names such as `no-select-star`, `cte-naming`, or `prefer-if-over-case`.
+Rules use their lint names such as `no-select-star`, `cte-naming`, or `prefer-if-over-case`. The wildcard `all` matches every rule — handy for silencing files edited in a non-DuckDB IDE. `enable all` closes every open `disable` region.
 
 **Example**
 ```sql
 -- jarify: disable-next-line prefer-if-over-case
 SELECT CASE WHEN is_large THEN 'big' ELSE 'small' END FROM sizes
+```
+
+**Disable everything for a file**
+```sql
+-- jarify: disable-file all
+SELECT * FROM scratchpad
 ```
 
 **Good output**

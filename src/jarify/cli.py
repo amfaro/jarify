@@ -232,6 +232,10 @@ def rules_cmd(output_format: str) -> None:
     for r in RULE_CATALOG:
         fix = "yes" if r.auto_fix else "no"
         console.print(f"{r.name:<{name_w}} {r.default:<{sev_w}} {fix:<{fix_w}} {r.description}")
+    console.print(
+        "\n[dim]Use `all` in disable directives to match every rule "
+        "(e.g. `-- jarify: disable-file all`).[/dim]"
+    )
 
 
 @main.command("init")

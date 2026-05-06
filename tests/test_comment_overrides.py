@@ -69,6 +69,77 @@ class TestLintOverrides:
         sql = "-- jarify: disable no-select-star\nSELECT * FROM t;\n-- jarify: enable no-select-star\nSELECT * FROM u\n"
         assert _lint(sql, prefer_from_first=False) == ["no-select-star"]
 
+    def test_disable_line_all_suppresses_every_rule(self):
+        sql = "SELECT coalesce(a, b) FROM T -- jarify: disable-line all"
+        assert _lint(sql, prefer_from_first=False) == []
+
+    def test_disable_next_line_all_suppresses_every_rule(self):
+        sql = "-- jarify: disable-next-line all\nSELECT coalesce(a, b) FROM T\n;\n"
+        assert _lint(sql, prefer_from_first=False) == []
+
+    def test_disable_file_all_suppresses_every_rule(self):
+        sql = (
+            "-- jarify: disable-file all\n"
+            "SELECT * FROM t;\n"
+            "SELECT coalesce(a, b) FROM u;\n"
+        )
+        assert _lint(sql, prefer_from_first=False) == []
+
+    def test_disable_all_region_suppresses_every_rule(self):
+        sql = (
+            "-- jarify: disable all\n"
+            "SELECT * FROM t;\n"
+            "SELECT coalesce(a, b) FROM u;\n"
+            "-- jarify: enable all\n"
+            "SELECT * FROM v\n"
+        )
+        assert _lint(sql, prefer_from_first=False) == ["no-select-star"]
+
+    def test_enable_all_closes_specific_open_disables(self):
+        # `disable some-rule` followed by `enable all` should close the open
+        # range, so violations after `enable all` are reported normally.
+        sql = (
+            "-- jarify: disable no-select-star\n"
+            "SELECT * FROM t;\n"
+            "-- jarify: enable all\n"
+            "SELECT * FROM u\n"
+        )
+        assert _lint(sql, prefer_from_first=False) == ["no-select-star"]
+
+    def test_disable_line_all_is_case_insensitive(self):
+        sql = "SELECT coalesce(a, b) FROM T -- jarify: disable-line ALL"
+        assert _lint(sql, prefer_from_first=False) == []
+
+    def test_enable_specific_rule_inside_disable_all_is_noop(self):
+        # Pin current behavior: `disable all` is range-keyed by "all", so
+        # `enable some-rule` does not split the range. Document this rather
+        # than silently change it.
+        sql = (
+            "-- jarify: disable all\n"
+            "SELECT * FROM t;\n"
+            "-- jarify: enable no-select-star\n"
+            "SELECT * FROM u\n"
+        )
+        assert _lint(sql, prefer_from_first=False) == []
+
+
+class TestFormatOverridesAll:
+    def test_disable_next_line_all_preserves_multiple_rewrites(self):
+        # Format-side coverage for `all`: a single statement that would trigger
+        # several formatter rewrites must be left alone end-to-end.
+        sql = (
+            "-- jarify: disable-next-line all\n"
+            "SELECT CASE WHEN a > 1 THEN 'big' ELSE 'small' END, coalesce(x, y) FROM t1, t2\n"
+        )
+
+        formatted, _ = format_sql(sql)
+
+        assert "CASE" in formatted
+        assert "if(" not in formatted
+        assert "coalesce(x, y)" in formatted
+        assert "ifnull(x, y)" not in formatted
+        assert "CROSS JOIN" not in formatted
+
 
 class TestFormatOverrides:
     def test_disable_next_line_preserves_case_expression(self):

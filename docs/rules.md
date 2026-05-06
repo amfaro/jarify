@@ -64,6 +64,11 @@ The `disable-next-line` directive disables a rule for the *entire next SQL
 statement*, not just the next literal line. Multi-line statements are fully
 covered by a single directive placed before the statement.
 
+Use `all` in place of a rule name to match every rule (e.g.
+`-- jarify: disable-file all`). `enable all` closes every open `disable`
+region. See [`sql-style-guide.md`](sql-style-guide.md#comment-overrides) for
+the full directive reference.
+
 Run `jarify rules` to print this table in your terminal, or
 `jarify rules --format json` for a machine-readable list suitable for
 editor integrations (e.g. LSP completion for disable directives).
