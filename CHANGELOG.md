@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.12.1] - 2026-05-06
+### Bug Fixes
+
+- preserve MATERIALIZED keyword on CTEs ([#319](https://github.com/amfaro/jarify/pull/319)) ([#319](https://github.com/amfaro/jarify/pull/319))
+
 ## [0.12.0] - 2026-05-06
 ### Features
 
