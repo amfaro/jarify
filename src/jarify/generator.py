@@ -532,7 +532,16 @@ class JarifyGenerator(DuckDB.Generator):
             if text:
                 trail_parts.append(f"/*{c}*/" if "\n" in c else f"-- {text}")
         comment_suffix = (" " + " ".join(trail_parts)) if trail_parts else ""
-        body = f"{alias_sql} AS{comment_suffix}\n{self.wrap(expression)}"
+
+        materialized = expression.args.get("materialized")
+        if materialized is True:
+            materialized_str = " MATERIALIZED"
+        elif materialized is False:
+            materialized_str = " NOT MATERIALIZED"
+        else:
+            materialized_str = ""
+
+        body = f"{alias_sql} AS{materialized_str}{comment_suffix}\n{self.wrap(expression)}"
 
         if lead:
             prefix = "\n".join(f"-- {c.strip()}" for c in lead if c.strip())
