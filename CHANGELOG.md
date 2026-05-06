@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.12.0] - 2026-05-06
+### Features
+
+- support `all` wildcard in disable directives ([#317](https://github.com/amfaro/jarify/pull/317)) ([#317](https://github.com/amfaro/jarify/pull/317))
+
 ## [0.11.0] - 2026-05-05
 ### Documentation
 
