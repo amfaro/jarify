@@ -69,3 +69,25 @@ def test_show_config_uses_global_config(tmp_path: Path, monkeypatch: pytest.Monk
     assert result.exit_code == 0
     assert "indent" in result.output
     assert "= 6" in result.output
+    assert "min_column_alias" not in result.output
+
+
+def test_show_config_includes_min_column_alias_when_set(tmp_path: Path) -> None:
+    config_file = tmp_path / "jarify.toml"
+    config_file.write_text("[jarify]\nmin-column-alias = 80\n")
+
+    with CliRunner().isolated_filesystem(temp_dir=tmp_path):
+        result = CliRunner().invoke(main, ["show-config", "--config", str(config_file)], catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert "min_column_alias" in result.output
+    assert "= 80" in result.output
+
+
+def test_init_mentions_min_column_alias(tmp_path: Path) -> None:
+    with CliRunner().isolated_filesystem(temp_dir=tmp_path):
+        result = CliRunner().invoke(main, ["init"], catch_exceptions=False)
+        starter = Path("jarify.toml").read_text()
+
+    assert result.exit_code == 0
+    assert "min_column_alias" in starter

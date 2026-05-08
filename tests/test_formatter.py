@@ -4,6 +4,14 @@ from jarify.config import JarifyConfig
 from jarify.formatter import format_sql
 
 
+def _alias_positions(sql: str, *aliases: str) -> list[int]:
+    return [
+        line.index(" AS ")
+        for line in sql.splitlines()
+        if any(f" AS {alias}" in line for alias in aliases)
+    ]
+
+
 def test_format_simple_select():
     result, _ = format_sql("select 1")
     assert result.strip() != ""
@@ -49,9 +57,24 @@ def test_semicolon_own_line_multi_statement():
 def test_as_alignment():
     sql = "SELECT first_name AS first, last_name AS last, email AS email_address FROM t"
     result, _ = format_sql(sql)
-    lines = [line for line in result.splitlines() if " AS " in line]
-    as_positions = [line.index(" AS ") for line in lines]
+    as_positions = _alias_positions(result, "first", "last", "email_address")
     assert len(set(as_positions)) == 1, f"AS keywords not aligned: {as_positions}"
+
+
+def test_min_column_alias_pushes_aliases_to_configured_visible_column():
+    sql = "SELECT a AS one, bb AS two FROM t"
+    result, _ = format_sql(sql, JarifyConfig(min_column_alias=24))
+
+    as_positions = _alias_positions(result, "one", "two")
+    assert as_positions == [24, 24]
+
+
+def test_min_column_alias_does_not_shrink_longer_alignment():
+    sql = "SELECT a AS one, some_really_long_expression AS two FROM t"
+    baseline, _ = format_sql(sql)
+    result, _ = format_sql(sql, JarifyConfig(min_column_alias=12))
+
+    assert _alias_positions(result, "one", "two") == _alias_positions(baseline, "one", "two")
 
 
 def test_as_alignment_spans_ctes_and_outer_select():
@@ -61,13 +84,21 @@ def test_as_alignment_spans_ctes_and_outer_select():
         "SELECT q AS fifth, rr AS sixth FROM a JOIN b ON 1 = 1"
     )
     result, _ = format_sql(sql)
-    alias_lines = [
-        line
-        for line in result.splitlines()
-        if any(f" AS {alias}" in line for alias in ("first", "second", "third", "fourth", "fifth", "sixth"))
-    ]
-    as_positions = [line.index(" AS ") for line in alias_lines]
+    as_positions = _alias_positions(result, "first", "second", "third", "fourth", "fifth", "sixth")
     assert len(set(as_positions)) == 1, f"AS keywords not aligned across query: {as_positions}"
+
+
+def test_min_column_alias_applies_across_ctes_and_outer_select():
+    sql = (
+        "WITH a AS (SELECT x AS first, yy AS second FROM t), "
+        "b AS (SELECT zzz AS third, w AS fourth FROM u) "
+        "SELECT q AS fifth, rr AS sixth FROM a JOIN b ON 1 = 1"
+    )
+    result, _ = format_sql(sql, JarifyConfig(min_column_alias=28))
+
+    as_positions = _alias_positions(result, "first", "second", "third", "fourth", "fifth", "sixth")
+    assert len(set(as_positions)) == 1
+    assert as_positions[0] >= 28
 
 
 def test_as_alignment_stays_visually_consistent_across_nested_ctes():
@@ -85,24 +116,17 @@ def test_as_alignment_stays_visually_consistent_across_nested_ctes():
         "FROM outer_group JOIN sibling_group ON outer_one = sibling_one"
     )
     result, _ = format_sql(sql)
-    alias_lines = [
-        line
-        for line in result.splitlines()
-        if any(
-            f" AS {alias}" in line
-            for alias in (
-                "seed_one",
-                "seed_two",
-                "outer_one",
-                "outer_two",
-                "sibling_one",
-                "sibling_two",
-                "final_one",
-                "final_two",
-            )
-        )
-    ]
-    as_positions = [line.index(" AS ") for line in alias_lines]
+    as_positions = _alias_positions(
+        result,
+        "seed_one",
+        "seed_two",
+        "outer_one",
+        "outer_two",
+        "sibling_one",
+        "sibling_two",
+        "final_one",
+        "final_two",
+    )
     assert len(set(as_positions)) == 1, f"Nested CTE alias alignment drifted: {as_positions}"
 
 
@@ -292,6 +316,17 @@ class TestFromFirst:
         )
         assert "      id + 1         AS vendor_id\n     ,name || suffix AS vendor_name" in out
         assert "      id   AS vendor_id\n     ,name AS vendor_name" in out
+
+    def test_modified_star_respects_min_column_alias(self):
+        out, _ = format_sql(
+            "SELECT * REPLACE (id AS vendor_id, name AS vendor_name) "
+            "RENAME (id AS display_id, name AS display_name) FROM vendors",
+            JarifyConfig(min_column_alias=24),
+        )
+
+        replace_rename_lines = [line for line in out.splitlines() if " AS vendor_" in line or " AS display_" in line]
+        assert len({line.index(" AS ") for line in replace_rename_lines}) == 1
+        assert replace_rename_lines[0].index(" AS ") == 24
 
 
 class TestLeftOuterJoinNormalization:

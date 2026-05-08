@@ -31,6 +31,28 @@ class TestOverrideParsing:
         assert overrides.config_for_line(config, 2).max_line_length == 200
         assert overrides.config_for_line(config, 4).max_line_length == 40
 
+    def test_set_min_column_alias_tracks_by_line(self):
+        overrides = parse_comment_overrides(
+            "-- jarify: set min-column-alias = 80\nSELECT 1 AS one, 22 AS two\n"
+            "-- jarify: reset min-column-alias\nSELECT 3 AS three, 44 AS four\n"
+        )
+
+        config = JarifyConfig(min_column_alias=64)
+        assert overrides.config_for_line(config, 2).min_column_alias == 80
+        assert overrides.config_for_line(config, 4).min_column_alias == 64
+
+    def test_set_min_column_alias_ignores_non_positive_values(self):
+        overrides = parse_comment_overrides("-- jarify: set min-column-alias = 0\nSELECT 1 AS one, 2 AS two\n")
+
+        config = JarifyConfig(min_column_alias=72)
+        assert overrides.config_for_line(config, 2).min_column_alias == 72
+
+    def test_set_min_column_alias_ignores_invalid_text_value(self):
+        overrides = parse_comment_overrides("-- jarify: set min-column-alias = nope\nSELECT 1 AS one, 2 AS two\n")
+
+        config = JarifyConfig(min_column_alias=72)
+        assert overrides.config_for_line(config, 2).min_column_alias == 72
+
 
 class TestLintOverrides:
     def test_disable_line_suppresses_inline_violation(self):
@@ -194,3 +216,28 @@ class TestFormatOverrides:
             in formatted
         )
         assert "if(\n" not in formatted
+
+    def test_set_min_column_alias_applies_to_following_statement(self):
+        sql = "-- jarify: set min-column-alias = 24\nSELECT a AS one, bb AS two FROM t"
+
+        formatted, _ = format_sql(sql)
+
+        alias_lines = [line for line in formatted.splitlines() if " AS " in line]
+        assert len({line.index(" AS ") for line in alias_lines}) == 1
+        assert alias_lines[0].index(" AS ") == 24
+
+    def test_reset_min_column_alias_restores_base_config_behavior(self):
+        sql = (
+            "-- jarify: set min-column-alias = 24\n"
+            "SELECT a AS one, bb AS two FROM t;\n"
+            "-- jarify: reset min-column-alias\n"
+            "SELECT c AS three, dd AS four FROM t"
+        )
+
+        formatted, _ = format_sql(sql)
+
+        alias_lines = [line for line in formatted.splitlines() if " AS " in line]
+        assert alias_lines[0].index(" AS ") == 24
+        assert alias_lines[1].index(" AS ") == 24
+        assert alias_lines[2].index(" AS ") < 24
+        assert alias_lines[3].index(" AS ") < 24

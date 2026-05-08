@@ -560,6 +560,15 @@ CROSS JOIN UNNEST(o.vals) t(v)
 
 When a query contains two or more column aliases anywhere in its query-wide `SELECT` lists, the `AS` keyword is aligned to one visible column across the full query. That includes the outer query plus CTE bodies, including nested CTEs, even when those `SELECT` lists are indented at different depths. Multi-line expressions still participate — the closing line (for example `END`) is padded so its trailing `AS` lines up with neighboring single-line aliases.
 
+You can also set a minimum visible alias column with `min-column-alias`. Jarify then uses the greater of the configured minimum and the naturally computed alignment column. Longer expressions still win; the setting is a floor, not a fixed hard stop.
+
+Project config example:
+
+```toml
+[jarify]
+min-column-alias = 24
+```
+
 **Bad**
 ```sql
 SELECT a AS foo, some_long_expression AS bar FROM t
@@ -639,6 +648,15 @@ SELECT
   ,sibling_two         AS final_two
 FROM _outer_group
 INNER JOIN _sibling_group ON outer_one = sibling_one
+;
+```
+
+**Also good** (`min-column-alias = 24`)
+```sql
+SELECT
+   a                    AS one
+  ,bb                   AS two
+FROM t
 ;
 ```
 
@@ -1076,6 +1094,7 @@ Supported directives:
 - `-- jarify: disable <rule>` / `-- jarify: enable <rule>` — disable a rule for a region
 - `-- jarify: disable-file <rule>` — disable a rule for the whole file
 - `-- jarify: set max_line_length = 140` / `-- jarify: reset max_line_length` — override line length for following statements until reset
+- `-- jarify: set min-column-alias = 80` / `-- jarify: reset min-column-alias` — set or clear a minimum visible column-alias alignment floor for following statements
 
 Rules use their lint names such as `no-select-star`, `cte-naming`, or `prefer-if-over-case`. The wildcard `all` matches every rule — handy for silencing files edited in a non-DuckDB IDE. `enable all` closes every open `disable` region.
 
@@ -1083,6 +1102,15 @@ Rules use their lint names such as `no-select-star`, `cte-naming`, or `prefer-if
 ```sql
 -- jarify: disable-next-line prefer-if-over-case
 SELECT CASE WHEN is_large THEN 'big' ELSE 'small' END FROM sizes
+```
+
+**File-specific alias floor**
+```sql
+-- jarify: set min-column-alias = 80
+SELECT short_col AS short_alias, other_col AS other_alias FROM t
+;
+
+-- jarify: reset min-column-alias
 ```
 
 **Disable everything for a file**

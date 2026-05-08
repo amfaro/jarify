@@ -321,7 +321,7 @@ class JarifyGenerator(DuckDB.Generator):
             return "\n".join(parts)
         return " " + " ".join(parts)
 
-    def _compute_as_align_width(self, expressions_list: list) -> int | None:
+    def _compute_as_align_width(self, expressions_list: list, *, prefix_width: int = 0) -> int | None:
         """Compute the column width for AS alignment in a SELECT expression list.
 
         Returns None if alignment should not be applied (< 2 aliases total).
@@ -334,7 +334,11 @@ class JarifyGenerator(DuckDB.Generator):
         col_widths, alias_count = self._collect_as_alignment_metrics(expressions_list)
         if alias_count < 2:
             return None
-        return max(col_widths)
+        align_width = max(col_widths)
+        min_column_alias = self._config.min_column_alias
+        if min_column_alias is None:
+            return align_width
+        return max(align_width, max(0, min_column_alias - prefix_width))
 
     def _compute_tree_as_align_column(self, expression: exp.Expr) -> int | None:
         """Compute one visible AS column across the query-wide CTE/select tree."""
@@ -349,7 +353,11 @@ class JarifyGenerator(DuckDB.Generator):
         if alias_count < 2 or not as_columns:
             return None
 
-        return max(as_columns)
+        align_column = max(as_columns)
+        min_column_alias = self._config.min_column_alias
+        if min_column_alias is None:
+            return align_column
+        return max(align_column, min_column_alias)
 
     def _iter_query_aligned_selects(self, expression: exp.Expr) -> t.Iterator[exp.Select]:
         """Yield SELECTs that share query-wide alias alignment.
@@ -1204,7 +1212,7 @@ class JarifyGenerator(DuckDB.Generator):
             saved_align = self._as_align_width
             payload_expressions = list(expression.args.get(key) or [])
             if key in ("replace", "rename"):
-                self._as_align_width = self._compute_as_align_width(payload_expressions)
+                self._as_align_width = self._compute_as_align_width(payload_expressions, prefix_width=self.pad + 4)
             try:
                 payload = self.expressions(expression, key=key, indent=False)
             finally:
