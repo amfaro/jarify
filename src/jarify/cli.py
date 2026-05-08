@@ -56,7 +56,7 @@ def main() -> None:
 @click.option("--config", "config_path", type=click.Path(exists=True, path_type=Path), default=None)
 @click.option("--check", is_flag=True, help="Exit non-zero if any file would change; don't write.")
 @click.option("--diff", is_flag=True, help="Print a unified diff of changes instead of writing.")
-@click.option("--stdin-filename", default="<stdin>", help="Filename label when reading from stdin.")
+@click.option("--stdin-filename", default="<stdin>", help="Config discovery anchor and filename label for stdin.")
 def fmt(
     files: tuple[Path, ...],
     config_path: Path | None,
@@ -118,7 +118,7 @@ def fmt(
 @main.command("lint")
 @click.argument("files", nargs=-1, type=click.Path(path_type=Path))
 @click.option("--config", "config_path", type=click.Path(exists=True, path_type=Path), default=None)
-@click.option("--stdin-filename", default="<stdin>", help="Filename label when reading from stdin.")
+@click.option("--stdin-filename", default="<stdin>", help="Config discovery anchor and filename label for stdin.")
 @click.option(
     "--format",
     "output_format",

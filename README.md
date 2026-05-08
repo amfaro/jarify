@@ -41,9 +41,10 @@ Reads each file, formats it, and writes the result back in place.
 | Option | Description |
 |--------|-------------|
 | `-` | Read from stdin |
+| `--config PATH` | Load config from an explicit file path |
 | `--check` | Exit non-zero if any file would change (useful in CI) |
 | `--diff` | Print a unified diff instead of rewriting files |
-| `--stdin-filename NAME` | Label to use in diff output when reading from stdin |
+| `--stdin-filename NAME` | Config discovery anchor and diff label when reading from stdin |
 
 **Exit codes:** `0` = all files already formatted, `1` = files were reformatted, `2` = error.
 
@@ -69,6 +70,12 @@ jarify lint [OPTIONS] [FILES]...
 
 Reports style and semantic violations. Does not modify files.
 
+| Option | Description |
+|--------|-------------|
+| `--config PATH` | Load config from an explicit file path |
+| `--stdin-filename NAME` | Config discovery anchor and filename label when reading from stdin |
+| `--format text|json` | Output format |
+
 ```bash
 jarify lint query.sql
 ```
@@ -79,19 +86,52 @@ jarify lint query.sql
 jarify init
 ```
 
-Writes a `jarify.toml` in the current directory. Config is internal to the tool — this is primarily useful for future per-project rule overrides.
+Writes a project-local `jarify.toml` in the current directory.
 
 ### `jarify show-config` — inspect active config
 
 ```bash
 jarify show-config
+jarify show-config --config path/to/jarify.toml
 ```
 
 Prints the effective configuration (syntax-highlighted TOML).
 
+## Configuration files
+
+When `--config PATH` is provided, that file wins and no discovery runs. Without `--config`, Jarify looks for config in this order:
+
+1. Project-local `jarify.toml`, found by walking upward from the config start directory.
+   - For stdin, `--stdin-filename` sets the start directory.
+   - Otherwise, discovery starts from the current working directory.
+2. The first existing global config:
+   1. `$XDG_CONFIG_HOME/jarify/config.toml`
+   2. `$XDG_CONFIG_HOME/jarify/jarify.toml`
+   3. `~/.config/jarify/config.toml`
+   4. `~/.config/jarify/jarify.toml`
+   5. `~/jarify.toml`
+3. Built-in defaults
+
+When both project-local and global config exist, Jarify loads the global config first and overlays the project-local config on top. This lets global config hold personal defaults while project config still enforces repository policy. Explicit `--config PATH` is not merged with any other config.
+
+Project-local config is best for repository style rules that should be shared by every contributor:
+
+```toml
+[jarify]
+no_select_star = "error"
+```
+
+Global config is useful for personal preferences that should not be committed to a repo:
+
+```toml
+# ~/.config/jarify/config.toml
+[jarify]
+indent = 4
+```
+
 ## Style and lint rules
 
-Jarify enforces a single, opinionated style. There are no knobs to turn. See the **[SQL Style Guide](docs/sql-style-guide.md)** for the complete rule reference with bad/good examples for every formatting and lint rule.
+Jarify enforces a single, opinionated default style with limited config for rule severity and personal preferences. See the **[SQL Style Guide](docs/sql-style-guide.md)** for the complete rule reference with bad/good examples for every formatting and lint rule.
 
 ## Development
 
