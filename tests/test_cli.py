@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from jarify.cli import main
@@ -52,3 +53,19 @@ def test_fmt_file_reports_unchanged_when_input_is_file(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert "unchanged" in result.output
     assert str(sql_file) in result.output.replace("\n", "")
+
+
+def test_show_config_uses_global_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    global_config = home / ".config" / "jarify" / "config.toml"
+    global_config.parent.mkdir(parents=True)
+    global_config.write_text("[jarify]\nindent = 6\n")
+
+    with CliRunner().isolated_filesystem(temp_dir=tmp_path):
+        result = CliRunner().invoke(main, ["show-config"], catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert "indent" in result.output
+    assert "= 6" in result.output

@@ -4,7 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from jarify.config import JarifyConfig, find_config, load_config
+from jarify.config import (
+    JarifyConfig,
+    _merge_config_data,
+    find_config,
+    find_global_config,
+    iter_global_config_paths,
+    load_config,
+)
 
 
 def test_default_config():
@@ -59,6 +66,130 @@ def test_load_config_explicit_path_takes_precedence(tmp_path: Path) -> None:
     assert config.indent == 3
 
 
+def test_global_config_paths_follow_precedence_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    home = tmp_path / "home"
+    xdg_config_home = tmp_path / "xdg"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_config_home))
+
+    assert list(iter_global_config_paths()) == [
+        xdg_config_home / "jarify" / "config.toml",
+        xdg_config_home / "jarify" / "jarify.toml",
+        home / ".config" / "jarify" / "config.toml",
+        home / ".config" / "jarify" / "jarify.toml",
+        home / "jarify.toml",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("global_path", "indent"),
+    [
+        (("xdg", "jarify", "config.toml"), 3),
+        (("xdg", "jarify", "jarify.toml"), 4),
+        (("home", ".config", "jarify", "config.toml"), 5),
+        (("home", ".config", "jarify", "jarify.toml"), 6),
+        (("home", "jarify.toml"), 7),
+    ],
+)
+def test_load_config_uses_each_global_config_location(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    global_path: tuple[str, ...],
+    indent: int,
+) -> None:
+    home = tmp_path / "home"
+    xdg_config_home = tmp_path / "xdg"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_config_home))
+    root = xdg_config_home if global_path[0] == "xdg" else home
+    global_config = root.joinpath(*global_path[1:])
+    global_config.parent.mkdir(parents=True, exist_ok=True)
+    global_config.write_text(f"[jarify]\nindent = {indent}\n")
+
+    assert find_global_config() == global_config
+    assert load_config(start=tmp_path).indent == indent
+
+
+def test_find_global_config_uses_earliest_candidate_when_multiple_exist(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    xdg_config_home = tmp_path / "xdg"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_config_home))
+
+    candidates = list(iter_global_config_paths())
+    for index, candidate in enumerate(candidates, start=3):
+        candidate.parent.mkdir(parents=True, exist_ok=True)
+        candidate.write_text(f"[jarify]\nindent = {index}\n")
+
+    assert find_global_config() == candidates[0]
+    assert load_config(start=tmp_path).indent == 3
+
+
+def test_load_config_merges_project_config_over_global_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    global_config = home / ".config" / "jarify" / "config.toml"
+    global_config.parent.mkdir(parents=True)
+    global_config.write_text("[jarify]\nindent = 6\nmax_line_length = 100\n")
+    project_config = tmp_path / "project" / "jarify.toml"
+    project_config.parent.mkdir()
+    project_config.write_text("[jarify]\nindent = 3\n")
+
+    config = load_config(start=project_config.parent)
+
+    assert config.indent == 3
+    assert config.max_line_length == 100
+
+
+def test_load_config_merges_nested_rules_from_project_and_global_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    global_config = home / ".config" / "jarify" / "config.toml"
+    global_config.parent.mkdir(parents=True)
+    global_config.write_text('[jarify.rules.no_select_star]\nseverity = "error"\n')
+    project_config = tmp_path / "project" / "jarify.toml"
+    project_config.parent.mkdir()
+    project_config.write_text('[jarify.rules.no_unused_cte]\nseverity = "off"\n')
+
+    config = load_config(start=project_config.parent)
+
+    assert config.rules == {
+        "no_select_star": {"severity": "error"},
+        "no_unused_cte": {"severity": "off"},
+    }
+
+
+def test_load_config_explicit_path_takes_precedence_over_project_and_global(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    global_config = home / ".config" / "jarify" / "config.toml"
+    global_config.parent.mkdir(parents=True)
+    global_config.write_text("[jarify]\nindent = 6\n")
+    project_config = tmp_path / "project" / "jarify.toml"
+    project_config.parent.mkdir()
+    project_config.write_text("[jarify]\nindent = 3\n")
+    explicit = tmp_path / "explicit.toml"
+    explicit.write_text("[jarify]\nindent = 9\n")
+
+    config = load_config(path=explicit, start=project_config.parent)
+
+    assert config.indent == 9
+
+
+def test_load_config_uses_defaults_when_no_config_exists(tmp_path: Path) -> None:
+    config = load_config(start=tmp_path)
+
+    assert config.indent == JarifyConfig().indent
+
+
 def test_config_from_dict_kebab_keys():
     """Kebab-case keys in jarify.toml are accepted and normalized."""
     config = JarifyConfig.from_dict(
@@ -78,6 +209,26 @@ def test_config_from_dict_mixed_case_keys():
     config = JarifyConfig.from_dict({"indent": 4, "no-unused-cte": "error"})
     assert config.indent == 4
     assert config.no_unused_cte == "error"
+
+
+def test_config_from_dict_does_not_mutate_input() -> None:
+    data = {"indent": 4, "rules": {"no_select_star": {"severity": "error"}}}
+
+    JarifyConfig.from_dict(data)
+
+    assert data == {"indent": 4, "rules": {"no_select_star": {"severity": "error"}}}
+
+
+def test_merge_config_data_does_not_alias_inputs() -> None:
+    base = {"rules": {"no_select_star": {"severity": "warn"}}}
+    overlay = {"rules": {"no_unused_cte": {"severity": "off"}}}
+
+    merged = _merge_config_data(base, overlay)
+    merged["rules"]["no_select_star"]["severity"] = "error"
+    merged["rules"]["no_unused_cte"]["severity"] = "warn"
+
+    assert base == {"rules": {"no_select_star": {"severity": "warn"}}}
+    assert overlay == {"rules": {"no_unused_cte": {"severity": "off"}}}
 
 
 @pytest.mark.parametrize("command", ["fmt", "lint"])
