@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.14.0] - 2026-05-08
+### Features
+
+- add min column alias ([#326](https://github.com/amfaro/jarify/pull/326)) ([#326](https://github.com/amfaro/jarify/pull/326))
+
 ## [0.13.0] - 2026-05-08
 ### Features
 
