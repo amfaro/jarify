@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.13.0] - 2026-05-08
+### Features
+
+- support user-global config files ([#323](https://github.com/amfaro/jarify/pull/323)) ([#323](https://github.com/amfaro/jarify/pull/323))
+
 ## [0.12.1] - 2026-05-06
 ### Bug Fixes
 
