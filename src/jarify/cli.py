@@ -28,6 +28,10 @@ dialect         = "duckdb"
 indent          = 2
 max_line_length = 120
 
+# Minimum visible column for SELECT alias alignment.
+# Longer expressions still push aliases farther right.
+# min_column_alias = 80
+
 # Comma placement: set trailing_commas = false and leading_commas = true
 # to use leading commas (SQL Server / dbt style)
 trailing_commas = true
@@ -264,7 +268,7 @@ def show_config(config_path: Path | None) -> None:
             lines.append(f"{f.name:<22} = {'true' if val else 'false'}")
         elif isinstance(val, str):
             lines.append(f'{f.name:<22} = "{val}"')
-        else:
+        elif val is not None:
             lines.append(f"{f.name:<22} = {val}")
     toml_text = "\n".join(lines) + "\n"
     console.print(Syntax(toml_text, "toml", theme="monokai"))

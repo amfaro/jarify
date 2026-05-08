@@ -22,6 +22,7 @@ class JarifyConfig:
     dialect: str = "duckdb"
     indent: int = 2
     max_line_length: int = 120
+    min_column_alias: int | None = None
 
     # --- keyword / identifier casing ---
     uppercase_keywords: bool = True
@@ -62,6 +63,10 @@ class JarifyConfig:
         # leading_commas takes precedence if explicitly set
         if self.leading_commas:
             self.trailing_commas = False
+
+        # Non-positive alias columns are treated as unset.
+        if self.min_column_alias is not None and self.min_column_alias <= 0:
+            self.min_column_alias = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> JarifyConfig:

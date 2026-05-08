@@ -35,6 +35,8 @@ SETTING_ALIASES: dict[str, str] = {
     "max-line-length": "max_line_length",
     "line-length": "max_line_length",
     "max_line_length": "max_line_length",
+    "min-column-alias": "min_column_alias",
+    "min_column_alias": "min_column_alias",
 }
 
 _DIRECTIVE_RE = re.compile(r"jarify:\s*(.+)", re.IGNORECASE)
@@ -217,6 +219,12 @@ def _parse_setting(args: str) -> tuple[str | None, Any]:
         return None, None
     raw_name, raw_value = [part.strip() for part in args.split("=", 1)]
     name = normalize_setting_name(raw_name)
-    if name == "max_line_length":
-        return name, int(raw_value)
+    if name in {"max_line_length", "min_column_alias"}:
+        try:
+            value = int(raw_value)
+        except ValueError:
+            return None, None
+        if name == "min_column_alias" and value <= 0:
+            return None, None
+        return name, value
     return name, raw_value

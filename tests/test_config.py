@@ -21,12 +21,14 @@ def test_default_config():
     assert config.leading_commas is True
     assert config.trailing_commas is False
     assert config.indent == 2
+    assert config.min_column_alias is None
 
 
 def test_config_from_dict():
-    config = JarifyConfig.from_dict({"indent": 4, "uppercase_keywords": False})
+    config = JarifyConfig.from_dict({"indent": 4, "uppercase_keywords": False, "min-column-alias": 80})
     assert config.indent == 4
     assert config.uppercase_keywords is False
+    assert config.min_column_alias == 80
 
 
 def test_find_config_walks_up(tmp_path: Path) -> None:
@@ -206,17 +208,18 @@ def test_config_from_dict_kebab_keys():
 
 def test_config_from_dict_mixed_case_keys():
     """Snake_case and kebab-case keys coexist without conflict."""
-    config = JarifyConfig.from_dict({"indent": 4, "no-unused-cte": "error"})
+    config = JarifyConfig.from_dict({"indent": 4, "no-unused-cte": "error", "min_column_alias": 72})
     assert config.indent == 4
     assert config.no_unused_cte == "error"
+    assert config.min_column_alias == 72
 
 
 def test_config_from_dict_does_not_mutate_input() -> None:
-    data = {"indent": 4, "rules": {"no_select_star": {"severity": "error"}}}
+    data = {"indent": 4, "min-column-alias": 80, "rules": {"no_select_star": {"severity": "error"}}}
 
     JarifyConfig.from_dict(data)
 
-    assert data == {"indent": 4, "rules": {"no_select_star": {"severity": "error"}}}
+    assert data == {"indent": 4, "min-column-alias": 80, "rules": {"no_select_star": {"severity": "error"}}}
 
 
 def test_merge_config_data_does_not_alias_inputs() -> None:
@@ -229,6 +232,12 @@ def test_merge_config_data_does_not_alias_inputs() -> None:
 
     assert base == {"rules": {"no_select_star": {"severity": "warn"}}}
     assert overlay == {"rules": {"no_unused_cte": {"severity": "off"}}}
+
+
+def test_min_column_alias_ignores_non_positive_values() -> None:
+    assert JarifyConfig(min_column_alias=0).min_column_alias is None
+    assert JarifyConfig(min_column_alias=-5).min_column_alias is None
+    assert JarifyConfig.from_dict({"min-column-alias": 0}).min_column_alias is None
 
 
 @pytest.mark.parametrize("command", ["fmt", "lint"])
