@@ -16,6 +16,11 @@ jobs:
   prepare:
     runs-on: blacksmith-2vcpu-ubuntu-2404
 
+    env:
+      MISE_ENV: ci
+      MISE_JOBS: "1"
+      MISE_ENABLE_TOOLS: uv,git-cliff
+
     steps:
       - name: Fetch secrets from Doppler
         uses: dopplerhq/secrets-fetch-action@v2.0.0
@@ -39,9 +44,10 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
 
       - name: Install mise
-        uses: amfaro/actions/setup-mise@v1
+        uses: jdx/mise-action@v4
         with:
-          tools: uv git-cliff
+          experimental: true
+          cache_key_prefix: mise-v1-tools-uv-git-cliff
 
       - name: Install dependencies
         run: uv sync --frozen
