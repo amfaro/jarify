@@ -1,0 +1,81 @@
+# Opens or updates the release PR (.mise/tasks/release/prepare) when src/ or
+# tests/ change on main. Dispatch jarify-prepare-release to force a run.
+on:
+  cli:
+    init:
+      commit-sha: ${{ event.git.sha }}
+      base-ref: ${{ event.git.sha }}
+      head-ref: ${{ event.git.sha }}
+      force: false
+
+  dispatch:
+    key: jarify-prepare-release
+    init:
+      commit-sha: ${{ event.git.sha }}
+      base-ref: ${{ event.git.sha }}
+      head-ref: ${{ event.git.sha }}
+      force: true
+
+  github:
+    push:
+      if: ${{ event.git.branch == 'main' }}
+      init:
+        commit-sha: ${{ event.git.sha }}
+        base-ref: ${{ event.github.push.before }}
+        head-ref: ${{ event.git.sha }}
+        force: false
+
+concurrency-pools:
+  - id: amfaro/jarify:prepare-release
+    capacity: 1
+    on-overflow: queue
+
+base:
+  image: ubuntu:24.04
+  config: rwx/base 1.2.0
+
+tasks:
+  - key: github-cli
+    call: github/install-cli 1.1.0
+
+  - key: code
+    call: git/clone 2.2.0
+    with:
+      repository: https://github.com/amfaro/jarify.git
+      ref: ${{ init.commit-sha }}
+      fetch-full-depth: true
+      preserve-git-dir: true
+      github-token: ${{ vaults.rwx-github-workflows.github-apps.amfaro-rwx-workflows-management.token }}
+
+  - key: mise
+    use: code
+    call: gmatter/setup-mise 1.1.0
+    filter:
+      - mise.toml
+    with:
+      tools: uv,git-cliff
+
+  - key: deps
+    use: mise
+    run: uv sync --frozen
+
+  - key: release-paths
+    use: github-cli
+    call: github/compare 1.1.1
+    with:
+      repository: amfaro/jarify
+      base-ref: ${{ init.base-ref }}
+      head-ref: ${{ init.head-ref }}
+      github-token: ${{ vaults.rwx-github-workflows.github-apps.amfaro-rwx-workflows-management.token }}
+      patterns: |
+        src/**
+        tests/**
+
+  - key: prepare-release
+    use: [github-cli, deps, release-paths]
+    if: ${{ init.force || tasks.release-paths.values.have-changes }}
+    cache: false
+    run: mise run release:prepare
+    env:
+      GITHUB_TOKEN: ${{ vaults.rwx-github-workflows.github-apps.amfaro-rwx-workflows-management.token }}
+      GH_TOKEN: ${{ vaults.rwx-github-workflows.github-apps.amfaro-rwx-workflows-management.token }}

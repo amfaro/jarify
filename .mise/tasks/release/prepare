@@ -4,6 +4,9 @@
 
 set -euo pipefail
 
+# Release tags drive the git-cliff bump; CI clones may not fetch them.
+git fetch origin main --tags
+
 # git-cliff computes the next version from conventional commits -- no manual parsing needed
 new_version=$(git-cliff --bumped-version 2>/dev/null || true)
 new_version="${new_version#v}"  # strip leading 'v' if present
@@ -64,7 +67,7 @@ Automated release PR (\`${current}\` -> \`${new_version}\`).
 - [ ] CHANGELOG entries look accurate
 
 ---
-*Automated by \`prepare-release.yml\`*"
+*Automated by \`.rwx/prepare-release.yml\`*"
 
 if [[ -n "${pr_number}" ]]; then
   gh pr edit "${pr_number}" \
