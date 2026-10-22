@@ -25,7 +25,6 @@ tasks:
       ref: ${{ init.commit-sha }}
       # check-rules-doc compares the regenerated docs with git diff.
       preserve-git-dir: true
-      github-token: ${{ github.token }}
 
   - key: mise
     use: code
