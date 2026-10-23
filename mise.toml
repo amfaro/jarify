@@ -4,6 +4,7 @@ rwx = "github:rwx-cloud/rwx"
 [tools]
 uv = "latest"
 git-cliff = "latest"
+doppler = "latest"
 rwx = "3.35.0"
 
 [env]

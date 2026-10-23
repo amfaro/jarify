@@ -63,7 +63,7 @@ tasks:
     filter:
       - mise.toml
     with:
-      tools: uv
+      tools: uv,doppler
 
   - key: release-paths
     use: github-cli
@@ -80,8 +80,10 @@ tasks:
     use: [github-cli, mise, release-paths]
     if: ${{ init.force || tasks.release-paths.values.have-changes }}
     cache: false
-    run: mise run release:publish
+    run: |
+      doppler run -p shared -c prod --only-secrets PYPI_TOKEN_JARIFY -- \
+        bash -c 'UV_PUBLISH_TOKEN="$PYPI_TOKEN_JARIFY" mise run release:publish'
     env:
       DRY_RUN: ${{ init.dry-run }}
       GH_TOKEN: ${{ vaults.rwx-github-workflows.github-apps.amfaro-rwx-workflows-management.token }}
-      UV_PUBLISH_TOKEN: ${{ vaults.jarify-pypi.secrets.PYPI_API_TOKEN }}
+      DOPPLER_TOKEN: ${{ vaults.jarify.secrets.DOPPLER_TOKEN }}
