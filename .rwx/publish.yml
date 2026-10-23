@@ -1,0 +1,89 @@
+# Publishes to PyPI, tags and creates the GitHub release when pyproject.toml
+# changes on main. Runs stay dry (build only) until the first live publish is
+# verified: dispatch jarify-publish with dry-run=false to publish live.
+on:
+  cli:
+    init:
+      commit-sha: ${{ event.git.sha }}
+      base-ref: ${{ event.git.sha }}
+      head-ref: ${{ event.git.sha }}
+      force: true
+      dry-run: 'true'
+
+  dispatch:
+    key: jarify-publish
+    if: ${{ event.git.branch == 'main' }}
+    params:
+      - key: dry-run
+        name: Dry run
+        description: Build only; set to false to upload, tag and release.
+        values: ['true', 'false']
+        default: 'true'
+    init:
+      commit-sha: ${{ event.git.sha }}
+      base-ref: ${{ event.git.sha }}
+      head-ref: ${{ event.git.sha }}
+      force: true
+      dry-run: ${{ event.dispatch.params.dry-run }}
+
+  github:
+    push:
+      if: ${{ event.git.branch == 'main' }}
+      init:
+        commit-sha: ${{ event.git.sha }}
+        base-ref: ${{ event.github.push.before }}
+        head-ref: ${{ event.git.sha }}
+        force: false
+        dry-run: 'true'
+
+concurrency-pools:
+  - id: amfaro/jarify:publish
+    capacity: 1
+    on-overflow: queue
+
+base:
+  image: ubuntu:24.04
+  config: rwx/base 1.2.0
+
+tasks:
+  - key: github-cli
+    call: github/install-cli 1.1.0
+
+  - key: code
+    call: git/clone 2.2.0
+    with:
+      repository: https://github.com/amfaro/jarify.git
+      ref: ${{ init.commit-sha }}
+      preserve-git-dir: true
+      github-token: ${{ vaults.rwx-github-workflows.github-apps.amfaro-rwx-workflows-management.token }}
+
+  - key: mise
+    use: code
+    call: gmatter/setup-mise 1.1.0
+    filter:
+      - mise.toml
+    with:
+      tools: uv,doppler
+
+  - key: release-paths
+    use: github-cli
+    call: github/compare 1.1.1
+    with:
+      repository: amfaro/jarify
+      base-ref: ${{ init.base-ref }}
+      head-ref: ${{ init.head-ref }}
+      github-token: ${{ vaults.rwx-github-workflows.github-apps.amfaro-rwx-workflows-management.token }}
+      patterns: |
+        pyproject.toml
+
+  - key: publish
+    use: [github-cli, mise, release-paths]
+    if: ${{ init.force || tasks.release-paths.values.have-changes }}
+    cache: false
+    run: |
+      doppler run -p shared -c prod --only-secrets PYPI_TOKEN_JARIFY -- \
+        bash -c 'UV_PUBLISH_TOKEN="$PYPI_TOKEN_JARIFY" mise run release:publish'
+    env:
+      DRY_RUN: ${{ init.dry-run }}
+      GH_TOKEN: ${{ vaults.rwx-github-workflows.github-apps.amfaro-rwx-workflows-management.token }}
+      DOPPLER_TOKEN: ${{ vaults.jarify.secrets.DOPPLER_TOKEN }}
