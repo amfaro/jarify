@@ -546,7 +546,9 @@ class JarifyGenerator(DuckDB.Generator):
             else:
                 # Non-aliased single-line columns count toward the alignment
                 # width so AS keywords clear the longest expression in the list.
-                col_sql = self.sql(e)
+                # Measure without comments, as expressions() renders the column:
+                # a comment after it or on its own line shouldn't move the AS.
+                col_sql = self.sql(e, comment=False)
                 if "\n" not in col_sql:
                     col_widths.append(len(col_sql))
 
@@ -722,7 +724,9 @@ class JarifyGenerator(DuckDB.Generator):
             table_ref = self.table_parts(this)
             alias_str = self._table_alias_str(this)
             if alias_str:
-                pad = " " * max(1, self._join_alias_col - len(op_sql) - 1 - len(table_ref) - len(alias_str))
+                pad = " " * max(
+                    1, self._join_alias_col - len(op_sql) - 1 - len(table_ref) - self._table_alias_width(this)
+                )
                 return self.seg(self._inline_on_sql(expression, f"{op_sql} {table_ref}{pad}{alias_str}"))
             return self.seg(self._inline_on_sql(expression, f"{op_sql} {table_ref}"))
 
@@ -777,7 +781,7 @@ class JarifyGenerator(DuckDB.Generator):
 
         table_ref = self.table_parts(table)
         if self._join_alias_col is not None:
-            pad = " " * max(1, self._join_alias_col - len("FROM") - 1 - len(table_ref) - len(alias_str))
+            pad = " " * max(1, self._join_alias_col - len("FROM") - 1 - len(table_ref) - self._table_alias_width(table))
             return self.seg(f"FROM {table_ref}{pad}{alias_str}")
         return self.seg(f"FROM {table_ref} {alias_str}")
 
@@ -799,6 +803,12 @@ class JarifyGenerator(DuckDB.Generator):
         """Return the alias string for a table node, or empty string if none."""
         alias_node = table.args.get("alias")
         return self.sql(alias_node) if alias_node else ""
+
+    def _table_alias_width(self, table: exp.Table) -> int:
+        """Return the alias's width for alignment: without its comments, which
+        follow the alias on the line."""
+        alias_node = table.args.get("alias")
+        return len(self.sql(alias_node, comment=False)) if alias_node else 0
 
     def _inline_on_sql(self, expression: exp.Join, head: str) -> str:
         """Append the ON or USING clause to the JOIN line *head*.
@@ -896,7 +906,7 @@ class JarifyGenerator(DuckDB.Generator):
                 alias = self._table_alias_str(table_expr)
                 if alias:
                     has_alias = True
-                    max_total = max(max_total, kw_len + 1 + len(ref) + len(alias))
+                    max_total = max(max_total, kw_len + 1 + len(ref) + self._table_alias_width(table_expr))
             elif isinstance(table_expr, exp.Unnest):
                 alias_node = table_expr.args.get("alias")
                 if alias_node:
