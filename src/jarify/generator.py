@@ -1883,11 +1883,11 @@ class JarifyGenerator(DuckDB.Generator):
                 inner = self.indent(f"\nDISTINCT {exprs_str}\n", skip_first=True, skip_last=True)
                 result = f"{func_name}({inner})"
                 return self._add_arrayagg_null_filter(result, expression, expression.this)
-        # Non-DISTINCT, compact mode, or DISTINCT that fits inline: emit list(<inner>)
-        inner = self.sql(expression, "this")
-        if self.pretty and self._has_comments(expression.this):
-            # e.g. list(x ORDER BY y -- note): put the argument on its own line
-            inner = self._wrapped_args([inner])
+        # Non-DISTINCT, compact mode, or DISTINCT that fits inline: emit list(<inner>).
+        # format_args wraps a too-wide or commented argument the way list_sql's
+        # fallback does; sqlglot parses list(x ORDER BY y) as ArrayAgg, so this
+        # path must match it.
+        inner = self.format_args(expression.this)
         result = f"{func_name}({inner})"
         return self._add_arrayagg_null_filter(result, expression, expression.this)
 

@@ -20,7 +20,7 @@ classifiers = [
 dependencies = [
     "click>=8.3.2",
     "rich>=14.3.3",
-    "sqlglot>=30.4.2",
+    "sqlglot>=30.25.0",
 ]
 
 [project.urls]
