@@ -168,7 +168,7 @@ def _find_leading_comment_texts(sql: str) -> frozenset[str]:
         prev_type = tokens[idx - 1].token_type if idx > 0 else None
         for comment in tok.comments:
             stripped = comment.strip()
-            if not stripped or f"-- {stripped}" not in before:
+            if not stripped or not _line_comment_in(before, stripped):
                 continue
             # When the owning token is a comma AND the preceding token is a
             # plain expression (not a closing paren), sqlglot's parser moves
@@ -212,9 +212,18 @@ def _find_trailing_sep_comment_texts(sql: str) -> frozenset[str]:
         before = sql[prev_end : tok.start]
         for comment in tok.comments:
             stripped = comment.strip()
-            if stripped and f"-- {stripped}" in before:
+            if stripped and _line_comment_in(before, stripped):
                 trailing_sep.add(stripped)
     return frozenset(trailing_sep)
+
+
+def _line_comment_in(text: str, stripped: str) -> bool:
+    """Return True when *text* holds the line comment ``--<stripped>``.
+
+    Authors write both ``-- note`` and ``--note``, so any spacing after ``--``
+    matches.
+    """
+    return re.search(rf"--[ \t]*{re.escape(stripped)}", text) is not None
 
 
 # ---------------------------------------------------------------------------
