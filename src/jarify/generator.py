@@ -688,13 +688,21 @@ class JarifyGenerator(DuckDB.Generator):
     # JOIN normalization: bare JOIN → INNER JOIN; LEFT/RIGHT OUTER → LEFT/RIGHT
     # ------------------------------------------------------------------
 
+    def _normalize_bare_join(self, expression: exp.Join) -> exp.Join:
+        """Write a bare JOIN that has an ON or USING condition as INNER JOIN."""
+        has_condition = expression.args.get("on") or expression.args.get("using")
+        if expression.side or expression.kind or expression.method or not has_condition:
+            return expression
+        normalized = expression.copy()
+        normalized.set("kind", "INNER")
+        return normalized
+
     def join_sql(self, expression: exp.Join) -> str:
         has_condition = expression.args.get("on") or expression.args.get("using")
         if not expression.side and not expression.kind and not expression.method:
             if has_condition:
                 # Bare JOIN with a condition — normalize to INNER JOIN
-                expression = expression.copy()
-                expression.set("kind", "INNER")
+                expression = self._normalize_bare_join(expression)
             else:
                 # Comma join (no condition) — delegate to DuckDB's renderer,
                 # which emits comma-separated syntax instead of a bare JOIN keyword
@@ -865,16 +873,17 @@ class JarifyGenerator(DuckDB.Generator):
         entries.append((len("FROM"), from_ref, from_expr.this))
 
         for join in joins:
-            # Normalize OUTER before measuring keyword length so the alignment
+            # Normalize the keyword before measuring its length so the alignment
             # width matches what join_sql actually renders.  For example,
-            # LEFT OUTER JOIN (15 chars) is rendered as LEFT JOIN (9 chars),
-            # so we must use the post-normalization keyword here.
+            # LEFT OUTER JOIN (15 chars) is rendered as LEFT JOIN (9 chars), and
+            # a bare JOIN (4 chars) as INNER JOIN (10 chars), so we must use the
+            # post-normalization keyword here.
             if join.side in ("LEFT", "RIGHT") and join.kind == "OUTER":
                 normalized = join.copy()
                 normalized.set("kind", None)
                 kw = self._join_keyword(normalized)
             else:
-                kw = self._join_keyword(join)
+                kw = self._join_keyword(self._normalize_bare_join(join))
             ref = self._table_ref_only_sql(join.this)
             if ref is None:
                 return None
