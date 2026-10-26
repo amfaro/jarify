@@ -1053,6 +1053,49 @@ FROM t
 
 ---
 
+### Comments inside one-line constructs — wrap, or use `/* */`
+
+Window specs, function calls, `IN (…)` lists and list literals stay on one line when they fit. A `--` comment inside one would comment out the rest of that line, so a construct that carries a comment takes its multi-line form instead, and each `--` comment ends its line:
+
+- A window spec puts `PARTITION BY`, `ORDER BY` and the frame on their own lines, one key per line in leading-comma style, and the closing `)` lines up under the function name. A comment on `ORDER BY` itself stays on its own line above it.
+- A function call, `IN (…)` list or list literal puts one argument per line, like any wrapped call. An aggregate's `ORDER BY` stays with its argument on that argument's line.
+
+**Bad** (the `)` and alias are commented out)
+```sql
+SELECT
+   ROW_NUMBER() OVER (PARTITION BY userId, customFieldId ORDER BY id DESC -- latest first) AS rev_seq
+FROM t
+```
+
+**Good**
+```sql
+SELECT
+   ROW_NUMBER() OVER (
+     PARTITION BY
+        userId
+       ,customFieldId
+     ORDER BY
+        id DESC -- latest first
+   ) AS rev_seq
+  ,list(
+     a ORDER BY b -- oldest first
+  ) AS a_list
+FROM t
+;
+```
+
+A comment that has no line end to sit at, such as one inside an arithmetic expression or before an alias, a `::` cast or `DESC`, is written as a `/* */` block comment:
+
+```sql
+SELECT
+   a /* note */ + 1 AS c
+  ,b /* raw */::int AS d
+FROM t
+;
+```
+
+---
+
 ### `CASE` — always multi-line
 
 `CASE` expressions are always formatted across multiple lines in pretty mode, regardless of branch count or line length.

@@ -768,3 +768,88 @@ class TestSQLMeshFormatting:
         assert not warnings
         assert not warnings2
         assert out == out2
+
+
+class TestCommentsInOneLineConstructs:
+    """A -- comment must never swallow SQL that a one-line layout puts after it."""
+
+    def test_commented_window_order_by_breaks_into_clauses(self):
+        sql = (
+            "SELECT ROW_NUMBER() OVER (PARTITION BY userId, customFieldId\n"
+            "  ORDER BY id DESC -- latest record first\n) AS rev_seq FROM t\n"
+        )
+        result, _ = format_sql(sql)
+        expected = "\n".join(
+            [
+                "   ROW_NUMBER() OVER (",
+                "     PARTITION BY",
+                "        userId",
+                "       ,customFieldId",
+                "     ORDER BY",
+                "        id DESC -- latest record first",
+                "   ) AS rev_seq",
+            ]
+        )
+        assert expected in result
+
+    def test_commented_partition_key_and_frame_keep_comments_at_line_end(self):
+        sql = (
+            "SELECT SUM(x) OVER (PARTITION BY a -- by a\n"
+            "  ORDER BY b ROWS BETWEEN 1 PRECEDING AND CURRENT ROW -- pair\n) AS s FROM t\n"
+        )
+        result, _ = format_sql(sql)
+        assert "     PARTITION BY\n        a -- by a\n     ORDER BY\n        b\n" in result
+        assert "     ROWS BETWEEN 1 PRECEDING AND CURRENT ROW -- pair\n   ) AS s" in result
+
+    def test_comment_before_window_order_by_stays_on_its_own_line(self):
+        sql = "SELECT SUM(x) OVER (PARTITION BY a\n  -- newest first\n  ORDER BY b DESC) AS s FROM t\n"
+        result, _ = format_sql(sql)
+        assert "        a\n     -- newest first\n     ORDER BY\n        b DESC\n" in result
+
+    def test_uncommented_window_stays_inline(self):
+        result, _ = format_sql("SELECT SUM(x) OVER (PARTITION BY a ORDER BY b) AS s FROM t")
+        assert "SUM(x) OVER (PARTITION BY a ORDER BY b) AS s" in result
+
+    def test_commented_argument_wraps_the_call(self):
+        result, _ = format_sql("SELECT foo(a /* first */, b) AS c FROM t")
+        assert "   foo(\n     a -- first\n    ,b\n  ) AS c" in result
+
+    def test_last_argument_comment_does_not_swallow_the_paren(self):
+        result, _ = format_sql("SELECT bar(a, b -- last\n) AS c FROM t")
+        assert "    ,b -- last\n  ) AS c" in result
+
+    def test_aggregate_order_by_comment_gets_its_own_line(self):
+        sql = "SELECT list(a ORDER BY b -- oldest\n) AS l, string_agg(a, ',' ORDER BY b -- abc\n) AS s FROM t"
+        result, _ = format_sql(sql)
+        assert "   list(\n     a ORDER BY b -- oldest\n  ) AS l" in result
+        assert "  ,STRING_AGG(\n     a, ',' ORDER BY b -- abc\n  ) AS s" in result
+
+    def test_commented_in_list_wraps(self):
+        result, _ = format_sql("SELECT a FROM t WHERE a IN (1 -- one\n, 2 -- two\n)")
+        assert "WHERE a IN (\n   1 -- one\n  ,2 -- two\n)" in result
+
+    def test_uncommented_call_and_in_list_stay_inline(self):
+        result, _ = format_sql("SELECT foo(a, b) AS c FROM t WHERE a IN (1, 2)")
+        assert "foo(a, b) AS c" in result
+        assert "WHERE a IN (1, 2)" in result
+
+    def test_comment_inside_binary_expression_becomes_block_comment(self):
+        result, _ = format_sql("SELECT a /* note */ + 1 AS c, longer_name AS d FROM t")
+        # The block comment's width counts toward AS alignment.
+        assert "   a /* note */ + 1 AS c\n  ,longer_name      AS d" in result
+
+    def test_comment_before_alias_cast_or_direction_becomes_block_comment(self):
+        sql = "SELECT a + 1 -- sum\n AS d, a -- cast\n::int AS e FROM t ORDER BY a -- dir\n DESC"
+        result, _ = format_sql(sql)
+        assert "   a + 1 /* sum */   AS d\n  ,a /* cast */::int AS e\n" in result
+        assert "   a /* dir */ DESC\n" in result
+        assert "--" not in result
+
+    def test_comment_followed_only_by_comments_is_not_converted(self):
+        result, _ = format_sql("SELECT\n   a -- first\n   -- second\nFROM t")
+        assert "/*" not in result
+
+    def test_block_comment_output_is_idempotent(self):
+        once, _ = format_sql("SELECT a /* note */ + 1 AS c FROM t")
+        twice, _ = format_sql(once)
+        assert once == twice
