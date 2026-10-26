@@ -1471,10 +1471,22 @@ class JarifyGenerator(DuckDB.Generator):
             return f"(\n{exprs_sql}\n)::{type_sql}"
 
         value_sql = self.sql(expression, "this")
-        if isinstance(expression.this, (exp.JSONExtract, exp.JSONExtractScalar)):
+        if self._needs_cast_parens(expression.this):
             value_sql = f"({value_sql})"
 
         return f"{value_sql}::{type_sql}"
+
+    def _needs_cast_parens(self, value: exp.Expr) -> bool:
+        """Return True when ``value::type`` would cast only part of *value*.
+
+        ``::`` binds tighter than every operator except ``.``, so an operator
+        expression keeps its grouping in parentheses: ``CAST(a + b AS int)`` is
+        ``(a + b)::int``, not ``a + b::int``. That includes JSON extraction:
+        ``(j->'x')::int``.
+        """
+        if isinstance(value, (exp.Paren, exp.Dot)):
+            return False
+        return isinstance(value, (exp.Binary, exp.Unary, exp.Predicate, exp.Interval))
 
     # ------------------------------------------------------------------
     # Lambda: wrap body when the flat form exceeds max_line_length

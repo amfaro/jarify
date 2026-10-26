@@ -791,6 +791,23 @@ FROM t
 ;
 ```
 
+`::` binds tighter than every operator except `.`, so a cast of an operator expression keeps it in parentheses. Without them, `CAST(a + b AS int)` would become `a + b::int`, which casts only `b`.
+
+**Bad**
+```sql
+SELECT CAST(a + b AS int) AS total, CAST(x IN (1, 2) AS int) AS is_small, CAST(-a AS text) AS label FROM t
+```
+
+**Good**
+```sql
+SELECT
+   (a + b)::int       AS total
+  ,(x IN (1, 2))::int AS is_small
+  ,(-a)::text         AS label
+FROM t
+;
+```
+
 ---
 
 ### JSON extraction casts — preserve grouping
