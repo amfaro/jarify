@@ -21,7 +21,8 @@ Subclasses sqlglot's DuckDBGenerator to enforce jarify's opinionated rules:
 - CREATE TABLE: opening paren on its own line, column name/type alignment,
   blank line before table-level constraints
 - Aggregate and window functions (COUNT, SUM, ROW_NUMBER, RANK, …) are uppercase;
-  all other DuckDB built-in functions remain lowercase
+  all other DuckDB built-in functions remain lowercase, unless a name is listed in
+  the uppercase_functions / lowercase_functions config
 - FROM/JOIN block: AS omitted from table aliases; ON/USING inline; aliases
   column-aligned when the block contains only simple (single-line) table refs
 - A -- comment never swallows SQL: commented windows, calls and IN lists take
@@ -38,6 +39,8 @@ from typing import TYPE_CHECKING, ClassVar
 import sqlglot.expressions as exp
 from sqlglot.dialects.dialect import groupconcat_sql as _groupconcat_sql
 from sqlglot.dialects.duckdb import DuckDB
+
+from jarify.parser import _IFNULL_SENTINEL
 
 if TYPE_CHECKING:
     from jarify.config import JarifyConfig
@@ -183,6 +186,8 @@ class JarifyGenerator(DuckDB.Generator):
             dialect="duckdb",  # tells generator to skip default NULLS ordering
         )
         self._config = config
+        self._uppercase_func_overrides = frozenset(name.lower() for name in config.uppercase_functions)
+        self._lowercase_func_overrides = frozenset(name.lower() for name in config.lowercase_functions)
         self._as_align_width: int | None = None  # set during SELECT expression rendering
         self._tree_as_align_column: int | None = None  # visible AS column target per statement tree during generate()
         self._col_name_align: int | None = None  # set during CREATE TABLE column rendering
@@ -275,11 +280,23 @@ class JarifyGenerator(DuckDB.Generator):
         return found
 
     # ------------------------------------------------------------------
-    # Function name casing: aggregates/window functions → UPPER, rest → lower
+    # Function name casing: aggregates/window functions → UPPER, rest → lower.
+    # The uppercase_functions / lowercase_functions config lists override the
+    # built-in classification for the name as finally written (after
+    # canonical renames such as array_agg → list).
     # ------------------------------------------------------------------
 
     def normalize_func(self, name: str) -> str:
-        return name.upper() if name.lower() in self._UPPERCASE_FUNCS else name.lower()
+        if name.lower() == _IFNULL_SENTINEL:
+            # The formatter masks ifnull as a same-length sentinel before parsing;
+            # emit the real name so its configured case applies.
+            name = "ifnull"
+        key = name.lower()
+        if key in self._uppercase_func_overrides:
+            return name.upper()
+        if key in self._lowercase_func_overrides:
+            return key
+        return name.upper() if key in self._UPPERCASE_FUNCS else key
 
     # ------------------------------------------------------------------
     # Comment rendering: use -- for single-line, /* */ for multi-line
@@ -1123,7 +1140,8 @@ class JarifyGenerator(DuckDB.Generator):
         def _fits(arg: exp.Expr, compact: str) -> bool:
             return not self._has_comments(arg) and not self.too_wide([compact])
 
-        inline = f"if({', '.join(compact_args)})"
+        func_name = self.normalize_func("if")
+        inline = f"{func_name}({', '.join(compact_args)})"
         args = [a for a in (expression.this, true_expr, false_expr) if a is not None]
         if not any(self._has_comments(a) for a in args) and not self.too_wide([inline]):
             return inline
@@ -1143,7 +1161,7 @@ class JarifyGenerator(DuckDB.Generator):
             lines = arg_sql.splitlines() or [arg_sql]
             return [f"{first}{lines[0]}", *(f"{rest}{line}" for line in lines[1:])]
 
-        lines = ["if("]
+        lines = [f"{func_name}("]
         lines.extend(_prefixed(branch_sqls[0], first=" " * (p + 2), rest=" " * (p + 2)))
         for arg_sql in branch_sqls[1:]:
             lines.extend(_prefixed(arg_sql, first=" " * (p + 1) + ",", rest=" " * (p + 2)))

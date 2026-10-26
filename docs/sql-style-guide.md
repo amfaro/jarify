@@ -74,7 +74,7 @@ WHERE a.active = true
 
 ### Functions — aggregate and window uppercase, scalar lowercase
 
-Aggregate and window functions (`COUNT`, `SUM`, `AVG`, `ROW_NUMBER`, `RANK`, `LEAD`, etc.) are always uppercase. All other DuckDB built-in functions (`regexp_extract`, `strftime`, `date_trunc`, etc.) remain lowercase. User-defined macro and function names are preserved and must not be rewritten to a different built-in name.
+Aggregate and window functions (`COUNT`, `SUM`, `AVG`, `ROW_NUMBER`, `RANK`, `LEAD`, etc.) are always uppercase. All other DuckDB built-in functions (`regexp_extract`, `strftime`, `date_trunc`, etc.) remain lowercase. User-defined macro and function names are preserved and must not be rewritten to a different built-in name. To change the case of specific names, see [Function case overrides](#function-case-overrides) below.
 
 **Bad**
 ```sql
@@ -89,6 +89,41 @@ SELECT
   ,ROW_NUMBER() OVER (ORDER BY ts)
   ,regexp_extract(x, '[0-9]+')
   ,strftime(ts, '%Y')
+FROM t
+;
+```
+
+---
+
+### Function case overrides
+
+Two config lists override the built-in classification above for specific function names. `uppercase-functions` always writes a name uppercase, and `lowercase-functions` always writes it lowercase, whichever case Jarify would otherwise use. Names match case-insensitively. Both lists default to empty, which leaves the output unchanged.
+
+An override applies to the function name as Jarify finally writes it, so it also covers canonical renames: `list` in `uppercase-functions` turns `array_agg(x)` into `LIST(x)`, and `string_agg` in `lowercase-functions` turns `listagg(x, ',')` into `string_agg(x, ',')`. User-defined macro and function calls keep the default lowercase unless listed. Schema-qualified calls such as `main.my_macro(x)` and SQLMesh `@macro(...)` calls are never changed.
+
+Listing a name in both lists is a config error. A list in a project `jarify.toml` replaces the same list from global config instead of extending it. If the project lists a name that global config puts in the other list, the project wins and the name is dropped from the global list. `-- jarify: set` comment directives can't set these lists.
+
+Project config example:
+
+```toml
+[jarify]
+uppercase-functions = ["list"]
+lowercase-functions = ["any_value"]
+```
+
+**Bad**
+```sql
+SELECT string_agg(a, ',') AS s, any_value(b) AS v, array_agg(c) AS l, lag(d) OVER () AS lg, regexp_extract(x, 'y') AS r FROM t
+```
+
+**Good** (with the config above; by default `any_value` is uppercase and `list` lowercase)
+```sql
+SELECT
+   STRING_AGG(a, ',')     AS s
+  ,any_value(b)           AS v
+  ,LIST(c)                AS l
+  ,LAG(d) OVER ()         AS lg
+  ,regexp_extract(x, 'y') AS r
 FROM t
 ;
 ```
@@ -171,7 +206,7 @@ FROM t
 
 ### Custom macros — preserve original names
 
-User-defined macro and function names keep their original identifier instead of being rewritten to a DuckDB built-in alias. Jarify still normalizes casing for scalar-style calls.
+User-defined macro and function names keep their original identifier instead of being rewritten to a DuckDB built-in alias. Jarify still normalizes casing for scalar-style calls; list a macro name in [`uppercase-functions`](#function-case-overrides) to write it uppercase.
 
 **Bad**
 ```sql

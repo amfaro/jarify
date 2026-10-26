@@ -12,6 +12,11 @@ from typing import Any
 
 DEFAULT_CONFIG_NAME = "jarify.toml"
 GLOBAL_CONFIG_NAMES = ("config.toml", DEFAULT_CONFIG_NAME)
+FUNCTION_CASE_FIELDS = ("uppercase_functions", "lowercase_functions")
+
+
+class ConfigError(ValueError):
+    """Raised when a jarify configuration is invalid."""
 
 
 @dataclass
@@ -27,6 +32,10 @@ class JarifyConfig:
 
     # --- keyword / identifier casing ---
     uppercase_keywords: bool = True
+    # Function names (case-insensitive) whose case overrides the built-in
+    # aggregate/window → UPPER, everything else → lower classification.
+    uppercase_functions: list[str] = field(default_factory=list)
+    lowercase_functions: list[str] = field(default_factory=list)
 
     # --- comma style ---
     trailing_commas: bool = False
@@ -72,6 +81,17 @@ class JarifyConfig:
         if self.alias_visual_guide_interval is not None and self.alias_visual_guide_interval <= 0:
             self.alias_visual_guide_interval = None
 
+        for name in FUNCTION_CASE_FIELDS:
+            value = getattr(self, name)
+            if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+                raise ConfigError(f"{name} must be a list of function names, got {value!r}")
+        both = {f.lower() for f in self.uppercase_functions} & {f.lower() for f in self.lowercase_functions}
+        if both:
+            raise ConfigError(
+                "function names cannot be in both uppercase_functions and lowercase_functions: "
+                + ", ".join(sorted(both))
+            )
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> JarifyConfig:
         config_data = dict(data)
@@ -116,14 +136,28 @@ def find_global_config() -> Path | None:
 
 
 def _load_config_data(path: Path) -> dict[str, Any]:
-    """Load raw config data from *path*."""
+    """Load raw config data from *path*.
+
+    Raises ``ConfigError`` naming *path* if its function case lists are invalid,
+    so an error is attributed to the right file before global and project
+    config are merged.
+    """
     with path.open("rb") as f:
         data = tomllib.load(f)
-    return copy.deepcopy(data.get("jarify", data))
+    data = copy.deepcopy(data.get("jarify", data))
+    try:
+        JarifyConfig.from_dict({k: v for k, v in data.items() if k.replace("-", "_") in FUNCTION_CASE_FIELDS})
+    except ConfigError as exc:
+        raise ConfigError(f"{path}: {exc}") from None
+    return data
 
 
 def _merge_config_data(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
-    """Merge config data, with *overlay* values taking precedence."""
+    """Merge config data, with *overlay* values taking precedence.
+
+    Tables merge key by key; any other value, including a list such as
+    ``uppercase_functions``, replaces the base value as a whole.
+    """
     merged = copy.deepcopy(base)
     for key, value in overlay.items():
         base_value = merged.get(key)
@@ -134,6 +168,33 @@ def _merge_config_data(base: dict[str, Any], overlay: dict[str, Any]) -> dict[st
     return merged
 
 
+def _function_case_names(data: dict[str, Any], name: str) -> set[str]:
+    """Return the lowercased names in a function case list of raw config *data*."""
+    names: set[str] = set()
+    for key in (name, name.replace("_", "-")):
+        value = data.get(key)
+        if isinstance(value, list):
+            names.update(item.lower() for item in value if isinstance(item, str))
+    return names
+
+
+def _drop_function_case_overrides(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+    """Remove from *base* the function names *overlay* lists with the opposite case.
+
+    A project that lists ``list`` in ``lowercase_functions`` thereby overrides a
+    global ``uppercase_functions = ["list"]`` instead of the merged config
+    listing the name in both lists.
+    """
+    base = copy.deepcopy(base)
+    upper, lower = (_function_case_names(overlay, name) for name in FUNCTION_CASE_FIELDS)
+    for name, overridden in zip(FUNCTION_CASE_FIELDS, (lower, upper), strict=True):
+        for key in (name, name.replace("_", "-")):
+            value = base.get(key)
+            if isinstance(value, list):
+                base[key] = [item for item in value if not (isinstance(item, str) and item.lower() in overridden)]
+    return base
+
+
 def load_config(path: Path | None = None, start: Path | None = None) -> JarifyConfig:
     """Load config from a file path, or discover one automatically.
 
@@ -142,6 +203,8 @@ def load_config(path: Path | None = None, start: Path | None = None) -> JarifyCo
     ``--stdin-filename``) so config discovery anchors to that file rather
     than ``cwd``. Discovered project config is overlaid onto the first
     discovered global config.
+
+    Raises ``ConfigError`` when a config file is invalid.
     """
     if path is not None:
         return JarifyConfig.from_dict(_load_config_data(path))
@@ -149,7 +212,9 @@ def load_config(path: Path | None = None, start: Path | None = None) -> JarifyCo
     project_config_path = find_config(start)
     global_config_path = find_global_config()
     if project_config_path is not None and global_config_path is not None:
-        data = _merge_config_data(_load_config_data(global_config_path), _load_config_data(project_config_path))
+        global_data = _load_config_data(global_config_path)
+        project_data = _load_config_data(project_config_path)
+        data = _merge_config_data(_drop_function_case_overrides(global_data, project_data), project_data)
         return JarifyConfig.from_dict(data)
     if project_config_path is not None:
         return JarifyConfig.from_dict(_load_config_data(project_config_path))

@@ -11,9 +11,10 @@ from pathlib import Path
 
 import click
 from rich.console import Console
+from rich.markup import escape
 from rich.syntax import Syntax
 
-from jarify.config import load_config
+from jarify.config import ConfigError, JarifyConfig, load_config
 from jarify.formatter import format_sql
 from jarify.linter import lint_sql
 
@@ -80,7 +81,7 @@ def fmt(
     Pass - as a file argument to read from stdin.
     """
     config_start = Path(stdin_filename).parent if stdin_filename != "<stdin>" else None
-    config = load_config(config_path, start=config_start)
+    config = _load_config_or_exit(config_path, start=config_start)
     any_changed = False
 
     inputs = _resolve_inputs(files, stdin_filename)
@@ -149,7 +150,7 @@ def lint(
     Pass - as a file argument to read from stdin.
     """
     config_start = Path(stdin_filename).parent if stdin_filename != "<stdin>" else None
-    config = load_config(config_path, start=config_start)
+    config = _load_config_or_exit(config_path, start=config_start)
     total_violations = 0
     has_errors = False
     all_results: list[tuple[str, list]] = []
@@ -265,7 +266,7 @@ def init(force: bool) -> None:
 @click.option("--config", "config_path", type=click.Path(exists=True, path_type=Path), default=None)
 def show_config(config_path: Path | None) -> None:
     """Display the resolved configuration as TOML."""
-    config = load_config(config_path)
+    config = _load_config_or_exit(config_path)
     lines = ["[jarify]"]
     for f in dataclasses.fields(config):
         if f.name == "rules":
@@ -275,6 +276,8 @@ def show_config(config_path: Path | None) -> None:
             lines.append(f"{f.name:<22} = {'true' if val else 'false'}")
         elif isinstance(val, str):
             lines.append(f'{f.name:<22} = "{val}"')
+        elif isinstance(val, list):
+            lines.append(f"{f.name:<22} = {json.dumps(val)}")
         elif val is not None:
             lines.append(f"{f.name:<22} = {val}")
     toml_text = "\n".join(lines) + "\n"
@@ -284,6 +287,15 @@ def show_config(config_path: Path | None) -> None:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _load_config_or_exit(config_path: Path | None, start: Path | None = None) -> JarifyConfig:
+    """Load config, reporting an invalid config as an error (exit code 2)."""
+    try:
+        return load_config(config_path, start=start)
+    except ConfigError as exc:
+        console.print(f"[red]ERROR[/] {escape(str(exc))}")
+        sys.exit(2)
 
 
 def _resolve_inputs(

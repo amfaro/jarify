@@ -1,0 +1,3 @@
+[jarify]
+uppercase-functions = ["list", "ifnull", "IF", "my_macro"]
+lowercase_functions = ["any_value", "LAG", "string_agg"]

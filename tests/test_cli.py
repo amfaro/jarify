@@ -142,3 +142,42 @@ def test_init_mentions_alias_visual_guide_interval(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert "alias_visual_guide_interval" in starter
+
+
+@pytest.mark.parametrize("command", ["fmt", "lint", "show-config"])
+def test_function_case_conflict_is_reported_as_config_error(tmp_path: Path, command: str) -> None:
+    config_file = tmp_path / "jarify.toml"
+    config_file.write_text('[jarify]\nuppercase_functions = ["list"]\nlowercase-functions = ["LIST"]\n')
+    args = [command, "--config", str(config_file)] + (["-"] if command != "show-config" else [])
+
+    result = CliRunner().invoke(main, args, input="SELECT list(a) FROM t", catch_exceptions=False)
+
+    assert result.exit_code == 2
+    output = result.output.replace("\n", "")
+    assert "ERROR" in output
+    assert "function names cannot be in both uppercase_functions and lowercase_functions: list" in output
+
+
+def test_fmt_applies_function_case_overrides_from_config(tmp_path: Path) -> None:
+    config_file = tmp_path / "jarify.toml"
+    config_file.write_text('[jarify]\nuppercase-functions = ["list"]\nlowercase_functions = ["any_value"]\n')
+
+    result = CliRunner().invoke(
+        main,
+        ["fmt", "--config", str(config_file), "-"],
+        input="SELECT list(a) AS l, any_value(b) AS v FROM t",
+        catch_exceptions=False,
+    )
+
+    assert result.output == "SELECT\n   LIST(a)      AS l\n  ,any_value(b) AS v\nFROM t\n;\n"
+
+
+def test_show_config_prints_function_case_lists_as_toml_arrays(tmp_path: Path) -> None:
+    config_file = tmp_path / "jarify.toml"
+    config_file.write_text('[jarify]\nuppercase_functions = ["list", "ifnull"]\n')
+
+    result = CliRunner().invoke(main, ["show-config", "--config", str(config_file)], catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert 'uppercase_functions    = ["list", "ifnull"]' in result.output
+    assert "lowercase_functions    = []" in result.output

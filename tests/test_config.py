@@ -1,10 +1,12 @@
 """Tests for config loading."""
 
+import re
 from pathlib import Path
 
 import pytest
 
 from jarify.config import (
+    ConfigError,
     JarifyConfig,
     _merge_config_data,
     find_config,
@@ -22,6 +24,8 @@ def test_default_config():
     assert config.trailing_commas is False
     assert config.indent == 2
     assert config.min_column_alias is None
+    assert config.uppercase_functions == []
+    assert config.lowercase_functions == []
 
 
 def test_config_from_dict():
@@ -306,3 +310,86 @@ def test_stdin_filename_anchors_config(tmp_path: Path, command: str) -> None:
         catch_exceptions=False,
     )
     assert result.exit_code in (0, 1), result.output
+
+
+def test_function_case_lists_from_dict_accept_kebab_keys() -> None:
+    config = JarifyConfig.from_dict({"uppercase-functions": ["list"], "lowercase_functions": ["any_value"]})
+    assert config.uppercase_functions == ["list"]
+    assert config.lowercase_functions == ["any_value"]
+
+
+def test_function_in_both_case_lists_is_a_config_error() -> None:
+    with pytest.raises(ConfigError, match="both uppercase_functions and lowercase_functions: any_value, list"):
+        JarifyConfig.from_dict(
+            {"uppercase_functions": ["LIST", "any_value"], "lowercase-functions": ["list", "Any_Value", "lag"]}
+        )
+
+
+@pytest.mark.parametrize("value", ["list", [1], None])
+def test_function_case_list_must_be_list_of_strings(value: object) -> None:
+    with pytest.raises(ConfigError, match="uppercase_functions must be a list of function names"):
+        JarifyConfig.from_dict({"uppercase_functions": value})
+
+
+def test_load_config_reports_function_case_conflict_with_path(tmp_path: Path) -> None:
+    config_file = tmp_path / "jarify.toml"
+    config_file.write_text('[jarify]\nuppercase_functions = ["list"]\nlowercase_functions = ["list"]\n')
+
+    with pytest.raises(ConfigError, match=f"^{re.escape(str(config_file))}: function names cannot be in both"):
+        load_config(config_file)
+
+
+def _write_global_and_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, global_text: str, project_text: str
+) -> tuple[Path, Path]:
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    global_config = home / ".config" / "jarify" / "config.toml"
+    global_config.parent.mkdir(parents=True)
+    global_config.write_text(global_text)
+    project_config = tmp_path / "project" / "jarify.toml"
+    project_config.parent.mkdir()
+    project_config.write_text(project_text)
+    return global_config, project_config
+
+
+def test_project_function_case_list_replaces_global_list(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _, project_config = _write_global_and_project(
+        tmp_path,
+        monkeypatch,
+        '[jarify]\nuppercase_functions = ["list", "ifnull"]\nlowercase_functions = ["lag"]\n',
+        '[jarify]\nuppercase-functions = ["if"]\n',
+    )
+
+    config = load_config(start=project_config.parent)
+
+    assert config.uppercase_functions == ["if"]
+    assert config.lowercase_functions == ["lag"]
+
+
+def test_project_function_case_overrides_opposite_global_list(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _, project_config = _write_global_and_project(
+        tmp_path,
+        monkeypatch,
+        '[jarify]\nuppercase-functions = ["list", "ifnull"]\n',
+        '[jarify]\nlowercase_functions = ["LIST"]\n',
+    )
+
+    config = load_config(start=project_config.parent)
+
+    assert config.uppercase_functions == ["ifnull"]
+    assert config.lowercase_functions == ["LIST"]
+
+
+def test_global_function_case_conflict_is_reported_with_global_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    global_config, project_config = _write_global_and_project(
+        tmp_path,
+        monkeypatch,
+        '[jarify]\nuppercase_functions = ["list"]\nlowercase_functions = ["list"]\n',
+        "[jarify]\nindent = 4\n",
+    )
+
+    with pytest.raises(ConfigError, match=f"^{re.escape(str(global_config))}: "):
+        load_config(start=project_config.parent)
