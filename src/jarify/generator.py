@@ -356,7 +356,9 @@ class JarifyGenerator(DuckDB.Generator):
             self._as_align_width = (
                 self._tree_as_align_column - prefix_width
                 if self._tree_as_align_column is not None
-                else self._compute_as_align_width(list(expressions_list))
+                else self._snap_to_alias_guide(
+                    self._compute_as_align_width(list(expressions_list)), prefix_width=prefix_width
+                )
             )
 
         try:
@@ -464,9 +466,26 @@ class JarifyGenerator(DuckDB.Generator):
 
         align_column = max(as_columns)
         min_column_alias = self._config.min_column_alias
-        if min_column_alias is None:
-            return align_column
-        return max(align_column, min_column_alias)
+        if min_column_alias is not None:
+            align_column = max(align_column, min_column_alias)
+        return self._snap_to_alias_guide(align_column)
+
+    def _snap_to_alias_guide(self, align_width: int | None, *, prefix_width: int = 0) -> int | None:
+        """Push an AS alignment target right so ``AS`` starts on a visual guide.
+
+        ``prefix_width + align_width`` is the 0-based index of the space before
+        ``AS``, so ``AS`` itself starts in 1-based editor column
+        ``prefix_width + align_width + 2``. With ``alias_visual_guide_interval``
+        set to ``n``, that column is rounded up to the next multiple of ``n``;
+        a column already on a guide stays put. Returns ``align_width``
+        unchanged when no interval is configured.
+        """
+        interval = self._config.alias_visual_guide_interval
+        if align_width is None or interval is None:
+            return align_width
+        as_column = prefix_width + align_width + 2
+        guide_column = -(-as_column // interval) * interval
+        return guide_column - 2 - prefix_width
 
     def _iter_query_aligned_selects(self, expression: exp.Expr) -> t.Iterator[exp.Select]:
         """Yield SELECTs that share query-wide alias alignment.
@@ -1435,7 +1454,11 @@ class JarifyGenerator(DuckDB.Generator):
             saved_align = self._as_align_width
             payload_expressions = list(expression.args.get(key) or [])
             if key in ("replace", "rename"):
-                self._as_align_width = self._compute_as_align_width(payload_expressions, prefix_width=self.pad + 4)
+                prefix_width = self.pad + 4
+                self._as_align_width = self._snap_to_alias_guide(
+                    self._compute_as_align_width(payload_expressions, prefix_width=prefix_width),
+                    prefix_width=prefix_width,
+                )
             try:
                 payload = self.expressions(expression, key=key, indent=False)
             finally:

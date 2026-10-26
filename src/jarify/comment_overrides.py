@@ -37,6 +37,8 @@ SETTING_ALIASES: dict[str, str] = {
     "max_line_length": "max_line_length",
     "min-column-alias": "min_column_alias",
     "min_column_alias": "min_column_alias",
+    "alias-visual-guide-interval": "alias_visual_guide_interval",
+    "alias_visual_guide_interval": "alias_visual_guide_interval",
 }
 
 _DIRECTIVE_RE = re.compile(r"jarify:\s*(.+)", re.IGNORECASE)
@@ -219,12 +221,12 @@ def _parse_setting(args: str) -> tuple[str | None, Any]:
         return None, None
     raw_name, raw_value = [part.strip() for part in args.split("=", 1)]
     name = normalize_setting_name(raw_name)
-    if name in {"max_line_length", "min_column_alias"}:
+    if name in {"max_line_length", "min_column_alias", "alias_visual_guide_interval"}:
         try:
             value = int(raw_value)
         except ValueError:
             return None, None
-        if name == "min_column_alias" and value <= 0:
+        if name in {"min_column_alias", "alias_visual_guide_interval"} and value <= 0:
             return None, None
         return name, value
     return name, raw_value

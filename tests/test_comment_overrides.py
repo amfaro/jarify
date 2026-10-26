@@ -53,6 +53,37 @@ class TestOverrideParsing:
         config = JarifyConfig(min_column_alias=72)
         assert overrides.config_for_line(config, 2).min_column_alias == 72
 
+    def test_set_alias_visual_guide_interval_tracks_by_line(self):
+        overrides = parse_comment_overrides(
+            "-- jarify: set alias-visual-guide-interval = 12\nSELECT 1 AS one, 22 AS two\n"
+            "-- jarify: reset alias-visual-guide-interval\nSELECT 3 AS three, 44 AS four\n"
+        )
+
+        config = JarifyConfig(alias_visual_guide_interval=16)
+        assert overrides.config_for_line(config, 2).alias_visual_guide_interval == 12
+        assert overrides.config_for_line(config, 4).alias_visual_guide_interval == 16
+
+    def test_set_alias_visual_guide_interval_accepts_snake_case_name(self):
+        overrides = parse_comment_overrides("-- jarify: set alias_visual_guide_interval = 12\nSELECT 1 AS one\n")
+
+        assert overrides.config_for_line(JarifyConfig(), 2).alias_visual_guide_interval == 12
+
+    def test_set_alias_visual_guide_interval_ignores_non_positive_values(self):
+        overrides = parse_comment_overrides(
+            "-- jarify: set alias-visual-guide-interval = 0\nSELECT 1 AS one, 2 AS two\n"
+            "-- jarify: set alias-visual-guide-interval = -4\nSELECT 3 AS three, 4 AS four\n"
+        )
+
+        config = JarifyConfig(alias_visual_guide_interval=16)
+        assert overrides.config_for_line(config, 2).alias_visual_guide_interval == 16
+        assert overrides.config_for_line(config, 4).alias_visual_guide_interval == 16
+
+    def test_set_alias_visual_guide_interval_ignores_invalid_text_value(self):
+        overrides = parse_comment_overrides("-- jarify: set alias-visual-guide-interval = nope\nSELECT 1 AS one\n")
+
+        config = JarifyConfig(alias_visual_guide_interval=16)
+        assert overrides.config_for_line(config, 2).alias_visual_guide_interval == 16
+
 
 class TestLintOverrides:
     def test_disable_line_suppresses_inline_violation(self):
@@ -241,3 +272,37 @@ class TestFormatOverrides:
         assert alias_lines[1].index(" AS ") == 24
         assert alias_lines[2].index(" AS ") < 24
         assert alias_lines[3].index(" AS ") < 24
+
+    def test_set_alias_visual_guide_interval_applies_to_following_statement(self):
+        sql = "-- jarify: set alias-visual-guide-interval = 12\nSELECT customer_name AS name, id AS customer_id FROM t"
+
+        formatted, _ = format_sql(sql)
+
+        alias_lines = [line for line in formatted.splitlines() if " AS " in line]
+        # AS starts in 1-based column 24, the first multiple of 12 at or after column 18.
+        assert [line.index(" AS ") + 2 for line in alias_lines] == [24, 24]
+
+    def test_reset_alias_visual_guide_interval_restores_base_config_behavior(self):
+        sql = (
+            "-- jarify: set alias-visual-guide-interval = 12\n"
+            "SELECT customer_name AS name, id AS customer_id FROM t;\n"
+            "-- jarify: reset alias-visual-guide-interval\n"
+            "SELECT customer_name AS name, id AS customer_id FROM t"
+        )
+
+        formatted, _ = format_sql(sql)
+
+        alias_lines = [line for line in formatted.splitlines() if " AS " in line]
+        assert [line.index(" AS ") + 2 for line in alias_lines] == [24, 24, 18, 18]
+
+    def test_alias_visual_guide_interval_and_min_column_alias_directives_compose(self):
+        sql = (
+            "-- jarify: set alias-visual-guide-interval = 12\n"
+            "-- jarify: set min-column-alias = 34\n"
+            "SELECT id AS order_id, status AS order_status FROM orders"
+        )
+
+        formatted, _ = format_sql(sql)
+
+        alias_lines = [line for line in formatted.splitlines() if " AS " in line]
+        assert [line.index(" AS ") + 2 for line in alias_lines] == [36, 36]

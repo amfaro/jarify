@@ -129,6 +129,8 @@ Global config is useful for personal preferences that should not be committed to
 indent = 4
 ```
 
+Two options tune where column aliases align. `min-column-alias` sets a floor for the alignment column. `alias_visual_guide_interval` (or `alias-visual-guide-interval`) moves `AS` to the first column, counted from 1, that is a multiple of the interval, so it sits on your editor's visual guides (DataGrip calls them *Visual guides*). With both set, the floor applies first. See [Column alias alignment](docs/sql-style-guide.md#column-alias-alignment) for examples.
+
 ## Style and lint rules
 
 Jarify enforces a single, opinionated default style with limited config for rule severity and personal preferences. See the **[SQL Style Guide](docs/sql-style-guide.md)** for the complete rule reference with bad/good examples for every formatting and lint rule.

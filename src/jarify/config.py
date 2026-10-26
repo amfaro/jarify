@@ -23,6 +23,7 @@ class JarifyConfig:
     indent: int = 2
     max_line_length: int = 120
     min_column_alias: int | None = None
+    alias_visual_guide_interval: int | None = None
 
     # --- keyword / identifier casing ---
     uppercase_keywords: bool = True
@@ -65,9 +66,11 @@ class JarifyConfig:
         if self.leading_commas:
             self.trailing_commas = False
 
-        # Non-positive alias columns are treated as unset.
+        # Non-positive alias columns and guide intervals are treated as unset.
         if self.min_column_alias is not None and self.min_column_alias <= 0:
             self.min_column_alias = None
+        if self.alias_visual_guide_interval is not None and self.alias_visual_guide_interval <= 0:
+            self.alias_visual_guide_interval = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> JarifyConfig:

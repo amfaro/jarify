@@ -32,6 +32,10 @@ max_line_length = 120
 # Longer expressions still push aliases farther right.
 # min_column_alias = 80
 
+# Visual-guide interval for SELECT alias alignment: AS starts in the
+# first column (counted from 1) that is a multiple of this interval.
+# alias_visual_guide_interval = 12
+
 # Comma placement: set trailing_commas = false and leading_commas = true
 # to use leading commas (SQL Server / dbt style)
 trailing_commas = true

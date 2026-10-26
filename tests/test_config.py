@@ -256,6 +256,38 @@ def test_load_config_reads_explicit_outer_join(tmp_path: Path) -> None:
     assert load_config(config_file).explicit_outer_join is True
 
 
+def test_alias_visual_guide_interval_defaults_to_unset() -> None:
+    assert JarifyConfig().alias_visual_guide_interval is None
+
+
+def test_alias_visual_guide_interval_accepts_snake_and_kebab_keys() -> None:
+    assert JarifyConfig.from_dict({"alias_visual_guide_interval": 12}).alias_visual_guide_interval == 12
+    assert JarifyConfig.from_dict({"alias-visual-guide-interval": 16}).alias_visual_guide_interval == 16
+
+
+def test_alias_visual_guide_interval_ignores_non_positive_values() -> None:
+    assert JarifyConfig(alias_visual_guide_interval=0).alias_visual_guide_interval is None
+    assert JarifyConfig(alias_visual_guide_interval=-12).alias_visual_guide_interval is None
+    assert JarifyConfig.from_dict({"alias-visual-guide-interval": 0}).alias_visual_guide_interval is None
+
+
+def test_alias_visual_guide_interval_loads_from_global_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    global_config = home / ".config" / "jarify" / "config.toml"
+    global_config.parent.mkdir(parents=True)
+    global_config.write_text("[jarify]\nalias_visual_guide_interval = 12\n")
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "jarify.toml").write_text("[jarify]\nmin-column-alias = 34\n")
+
+    config = load_config(start=project)
+
+    assert config.alias_visual_guide_interval == 12
+    assert config.min_column_alias == 34
+
+
 @pytest.mark.parametrize("command", ["fmt", "lint"])
 def test_stdin_filename_anchors_config(tmp_path: Path, command: str) -> None:
     """--stdin-filename parent dir is used to discover jarify.toml."""
