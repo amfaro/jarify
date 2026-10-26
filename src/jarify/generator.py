@@ -1489,11 +1489,43 @@ class JarifyGenerator(DuckDB.Generator):
         return isinstance(value, (exp.Binary, exp.Unary, exp.Predicate, exp.Interval))
 
     # ------------------------------------------------------------------
-    # Lambda: wrap body when the flat form exceeds max_line_length
+    # Lambda: DuckDB's `lambda x: body` syntax; wrap body when the flat form
+    # exceeds max_line_length
     # ------------------------------------------------------------------
 
+    # DuckDB functions that take a lambda argument. sqlglot parses `a -> b`
+    # inside any call as a lambda, but outside these functions DuckDB reads it
+    # as the JSON operator (`ifnull(doc -> 'key', …)`), so only arrows passed to
+    # these functions are rewritten to `lambda` syntax.
+    _LAMBDA_FUNCS = frozenset(
+        {
+            "list_transform",
+            "array_transform",
+            "list_apply",
+            "array_apply",
+            "apply",
+            "list_filter",
+            "array_filter",
+            "filter",
+            "list_reduce",
+            "array_reduce",
+            "reduce",
+        }
+    )
+
     def lambda_sql(self, expression: exp.Lambda, arrow_sep: str = "->", wrap: bool = True) -> str:
-        flat = super().lambda_sql(expression, arrow_sep=arrow_sep, wrap=wrap)
+        # DuckDB deprecated the arrow form (`x -> body`) in favour of
+        # `lambda x: body`. Its parameters take no parentheses:
+        # `lambda acc, x: acc + x`.
+        params = self.expressions(expression, flat=True)
+        if expression.args.get("colon") or self._is_lambda_function_arg(expression):
+            head = f"lambda {params}:"
+        else:
+            if wrap and len(params.split(",")) > 1:
+                params = f"({params})"
+            head = f"{params} {arrow_sep}"
+        body_sql = self.sql(expression, "this")
+        flat = f"{head} {body_sql}"
         if not self.pretty:
             return flat
         # Only wrap when the entire lambda string is a single line that exceeds
@@ -1503,14 +1535,24 @@ class JarifyGenerator(DuckDB.Generator):
         if "\n" in flat or not self.too_wide([flat]):
             return flat
         # Flat single-line lambda is too wide — move the body to its own line,
-        # indented one level below the arrow.
-        params = self.expressions(expression, flat=True)
-        if wrap and len(params.split(",")) > 1:
-            params = f"({params})"
-        body_sql = self.sql(expression, "this")
-        # Indent each body line so it sits beneath the arrow
-        indented_body = self.indent(body_sql)
-        return f"{params} {arrow_sep}\n{indented_body}"
+        # indented one level below the parameters.
+        return f"{head}\n{self.indent(body_sql)}"
+
+    def _is_lambda_function_arg(self, expression: exp.Lambda) -> bool:
+        # The lambda follows the list. An arrow anywhere else is JSON, e.g. the
+        # list in `list_transform(doc -> 'items', lambda x: …)`.
+        parent = expression.parent
+        if isinstance(parent, (exp.Transform, exp.ArrayFilter)):
+            return expression.arg_key == "expression"
+        if isinstance(parent, exp.Columns):
+            # COLUMNS(lambda c: …) selects the columns whose name matches.
+            return expression.arg_key == "this"
+        if isinstance(parent, exp.Anonymous) and parent.name.lower() in self._LAMBDA_FUNCS:
+            # In method-call syntax, `list.list_filter(lambda x: …)`, the list is
+            # the receiver, so the lambda is the first argument.
+            is_method_call = isinstance(parent.parent, exp.Dot) and parent.arg_key == "expression"
+            return expression.index == (0 if is_method_call else 1)
+        return False
 
     # ------------------------------------------------------------------
     # ArrayAgg → list(): DuckDB canonical aggregate name

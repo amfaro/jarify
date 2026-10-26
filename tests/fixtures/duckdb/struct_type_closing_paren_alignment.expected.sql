@@ -7,6 +7,6 @@ SELECT
       ,transaction_type text
       ,conversion struct(coverage_unit text, rates struct(sku_key text, value double, "from" text)[])
      )[]
-    ,x -> x.key
+    ,lambda x: x.key
   ) AS sku_sets
 ;
