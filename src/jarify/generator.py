@@ -1564,8 +1564,12 @@ class JarifyGenerator(DuckDB.Generator):
         arg_sqls = tuple(self.sql(arg) for arg in args if arg is not None and not isinstance(arg, bool))
         if self.pretty and self.too_wide(arg_sqls):
             if self.leading_comma:
+                # Only a comma-separated list gets leading commas. Space-separated
+                # parts, such as a window's PARTITION BY / ORDER BY / frame
+                # clauses, go one per line aligned with the first.
+                leader = "," if sep.strip() == "," else " "
                 parts = [f" {arg_sqls[0]}"]
-                parts.extend(f",{sql}" for sql in arg_sqls[1:])
+                parts.extend(f"{leader}{sql}" for sql in arg_sqls[1:])
                 return self.indent("\n" + "\n".join(parts) + "\n", skip_first=True, skip_last=True)
             return self.indent("\n" + f"{sep.strip()}\n".join(arg_sqls) + "\n", skip_first=True, skip_last=True)
         return sep.join(arg_sqls)
