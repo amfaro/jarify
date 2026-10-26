@@ -38,6 +38,25 @@ from sqlglot.dialects.duckdb import DuckDB
 if TYPE_CHECKING:
     from jarify.config import JarifyConfig
 
+# Lines inside a multi-line block comment start with a mark while the tree is
+# generated.  Enclosing blocks indent every line of their body, comment lines
+# included, which shifted those lines further right on every pass;
+# restore_comment_lines() drops the added indentation along with the marks.
+# On a line that starts with a space the mark replaces that space, so the
+# widths the layout measures stay the same.
+_COMMENT_SPACE_MARK = "\x00"
+_COMMENT_LINE_MARK = "\x01"
+_MARKED_COMMENT_LINE_RE = re.compile(f"\n[ \t]*([{_COMMENT_SPACE_MARK}{_COMMENT_LINE_MARK}])")
+
+
+def _mark_comment_lines(comment: str) -> str:
+    return re.sub(r"\n( ?)", lambda m: "\n" + (_COMMENT_SPACE_MARK if m.group(1) else _COMMENT_LINE_MARK), comment)
+
+
+def restore_comment_lines(sql: str) -> str:
+    """Put the lines of multi-line block comments back exactly as written."""
+    return _MARKED_COMMENT_LINE_RE.sub(lambda m: "\n " if m.group(1) == _COMMENT_SPACE_MARK else "\n", sql)
+
 
 def _jarify_struct_sql(self: JarifyGenerator, expression: exp.Struct) -> str:
     """Render struct literals as {key: val, ...}, wrapping to multiple lines when too wide.
@@ -174,7 +193,7 @@ class JarifyGenerator(DuckDB.Generator):
         if self.pretty:
             self._tree_as_align_column = self._compute_tree_as_align_column(expression)
         try:
-            return super().generate(expression, copy=copy)
+            return restore_comment_lines(super().generate(expression, copy=copy))
         finally:
             self._tree_as_align_column = saved_align
 
@@ -314,7 +333,10 @@ class JarifyGenerator(DuckDB.Generator):
         for c in comments:
             if not c or not c.strip():
                 continue
-            parts.append(f"/*{c}*/" if "\n" in c else f"-- {c.strip()}")
+            if "\n" in c:
+                parts.append(f"/*{_mark_comment_lines(c)}*/")
+            else:
+                parts.append(f"-- {c.strip()}")
         if not parts:
             return ""
         # A `--` comment runs to the end of its line, so each comment gets its

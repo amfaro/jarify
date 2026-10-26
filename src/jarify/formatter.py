@@ -12,7 +12,7 @@ from sqlglot.tokens import TokenType
 
 from jarify.comment_overrides import parse_comment_overrides
 from jarify.config import JarifyConfig
-from jarify.generator import JarifyGenerator
+from jarify.generator import JarifyGenerator, restore_comment_lines
 from jarify.parser import (
     _extract_ctas_body_placeholders,
     _extract_line_rust_fmt_placeholders,
@@ -375,7 +375,7 @@ def _format_order_by_clause(order_by_text: str, config: JarifyConfig, generator:
         if dummy_trees and dummy_trees[0] is not None:
             order_node = dummy_trees[0].args.get("order")
             if order_node is not None:
-                return generator.sql(order_node)
+                return restore_comment_lines(generator.sql(order_node))
     except ParseError:
         pass
     return order_by_text.strip()
