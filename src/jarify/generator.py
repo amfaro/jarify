@@ -732,10 +732,11 @@ class JarifyGenerator(DuckDB.Generator):
         return None
 
     def _compute_join_align_width(self, expression: exp.Select) -> int | None:
-        """Compute the start-alignment column for aliases in the FROM/JOIN block.
+        """Compute the column aliases end at in the FROM/JOIN block.
 
-        Returns `max(kw_len + 1 + ref_len) + 1` across all aliased entries so
-        that every alias STARTS at the same column regardless of its own length.
+        Returns `max(kw_len + 1 + ref_len + alias_len) + 1` across all aliased
+        entries so that every alias ENDS at the same column (right-aligned),
+        leaving at least one space before the longest entry's alias.
         Returns None when alignment should be skipped (any entry uses a
         subquery, or no entries have aliases).
         """
