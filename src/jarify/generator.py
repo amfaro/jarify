@@ -317,9 +317,11 @@ class JarifyGenerator(DuckDB.Generator):
             parts.append(f"/*{c}*/" if "\n" in c else f"-- {c.strip()}")
         if not parts:
             return ""
+        # A `--` comment runs to the end of its line, so each comment gets its
+        # own line: joining them with spaces would comment out the ones after.
         if leading:
             return "\n".join(parts)
-        return " " + " ".join(parts)
+        return " " + "\n".join(parts)
 
     def _compute_as_align_width(self, expressions_list: list, *, prefix_width: int = 0) -> int | None:
         """Compute the column width for AS alignment in a SELECT expression list.
@@ -518,6 +520,11 @@ class JarifyGenerator(DuckDB.Generator):
         return f"UNNEST({args}){suffix}"
 
     def cte_sql(self, expression: exp.CTE) -> str:
+        prefix, body = self._cte_sql_parts(expression)
+        return f"{prefix}\n{body}" if prefix else body
+
+    def _cte_sql_parts(self, expression: exp.CTE) -> tuple[str, str]:
+        """Return ``(comment_lines, definition)``; the comment lines go above the CTE."""
         # Pop comments to prevent double-rendering.  sqlglot attaches leading
         # comments to the TableAlias child, not the CTE node itself, so we
         # must pop from both.  Leading comments (own-line before the CTE name)
@@ -534,12 +541,14 @@ class JarifyGenerator(DuckDB.Generator):
         else:
             lead, trail = [], comments
 
-        trail_parts: list[str] = []
-        for c in trail:
-            text = c.strip()
-            if text:
-                trail_parts.append(f"/*{c}*/" if "\n" in c else f"-- {text}")
-        comment_suffix = (" " + " ".join(trail_parts)) if trail_parts else ""
+        trail = [c for c in trail if c.strip()]
+        if len(trail) > 1:
+            # Only one `--` comment fits after AS, since it ends the line, and
+            # sqlglot drops comments placed between AS and the opening paren.
+            # Several comments go above the CTE instead, one per line, where
+            # own-line comments above a CTE are kept.
+            lead, trail = [c for c in comments if c.strip()], []
+        comment_suffix = self._render_comments(trail)
 
         materialized = expression.args.get("materialized")
         if materialized is True:
@@ -551,10 +560,7 @@ class JarifyGenerator(DuckDB.Generator):
 
         body = f"{alias_sql} AS{materialized_str}{comment_suffix}\n{self.wrap(expression)}"
 
-        if lead:
-            prefix = "\n".join(f"-- {c.strip()}" for c in lead if c.strip())
-            return f"{prefix}\n{body}"
-        return body
+        return self._render_comments(lead, leading=True), body
 
     def with_sql(self, expression: exp.With) -> str:
         ctes = expression.expressions
@@ -563,18 +569,9 @@ class JarifyGenerator(DuckDB.Generator):
         recursive = "RECURSIVE " if self.CTE_RECURSIVE_KEYWORD_REQUIRED and expression.args.get("recursive") else ""
 
         def _entry(cte: exp.CTE, sep: str) -> str:
-            rendered = self.cte_sql(cte)
-            if not rendered.startswith("--"):
-                return sep + rendered
-            # Leading comment lines must appear before the separator
-            lines = rendered.split("\n")
-            comment_lines, body_lines = [], []
-            for line in lines:
-                if not body_lines and line.startswith("--"):
-                    comment_lines.append(line)
-                else:
-                    body_lines.append(line)
-            return "\n".join(comment_lines) + "\n" + sep + "\n".join(body_lines)
+            # Comment lines above a CTE must appear before the separator
+            prefix, body = self._cte_sql_parts(cte)
+            return f"{prefix}\n{sep}{body}" if prefix else sep + body
 
         parts = [_entry(ctes[0], f"WITH {recursive}")]
         for cte in ctes[1:]:

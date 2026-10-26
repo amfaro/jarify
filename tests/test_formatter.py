@@ -251,6 +251,79 @@ def test_own_line_comment_without_space_after_dashes_stays_on_its_own_line():
     assert "   a\n  -- ,b\n  ,c\n" in unspaced
 
 
+def _lines_continuing_after_line_comment(sql: str) -> list[str]:
+    """Return lines where something follows a ``--`` comment on the same line."""
+    return [line for line in sql.splitlines() if "-- " in line and "--" in line.split("-- ", 1)[1]]
+
+
+def test_several_comments_on_one_node_each_end_their_line():
+    sql = "SELECT a /* first */ /* second */ AS c, b FROM t GROUP BY a /* g1 */ /* g2 */;\n"
+    result, _ = format_sql(sql)
+    assert "   a AS c -- first\n  -- second\n  ,b\n" in result
+    assert "   a -- g1\n  -- g2\n;" in result
+    assert not _lines_continuing_after_line_comment(result)
+    assert format_sql(result)[0] == result
+
+
+def test_several_comments_on_a_cte_go_above_it_one_per_line():
+    sql = "WITH _a AS (SELECT 1 AS x)\n/* one */\n/* two */\n,_b AS (SELECT 2 AS y)\nSELECT x, y FROM _a, _b\n"
+    result, _ = format_sql(sql)
+    assert ")\n-- one\n-- two\n,_b AS\n(" in result
+    assert format_sql(result)[0] == result
+
+
+def test_pivot_order_by_keeps_cte_leading_comments_on_their_own_lines():
+    """The PIVOT ... ORDER BY workaround must classify leading comments too."""
+    sql = (
+        "WITH _d AS (SELECT a, grp, val FROM t)\n"
+        "-- first\n"
+        "-- second\n"
+        ",_e AS (SELECT a, grp, val FROM _d)\n"
+        "PIVOT _e ON grp USING first(val) ORDER BY a"
+    )
+    result, warnings = format_sql(sql)
+    assert not warnings
+    assert ")\n-- first\n-- second\n,_e AS\n(" in result
+    assert not _lines_continuing_after_line_comment(result)
+
+
+class TestCommentsAfterLastStatement:
+    """Comments after the last statement come out as written, after its ``;``.
+
+    Regression: they were joined onto one line, so a ``--`` comment commented
+    out the ``/*`` of a following block comment and its contents became SQL,
+    and a stray ``;`` was added after them.
+    """
+
+    def test_comments_after_semicolon_are_kept_as_written(self):
+        tail = "\n\n-- one\n\n-- two\n\n/*\nSELECT b\nFROM u\n*/\n"
+        result, _ = format_sql("SELECT a FROM t\n;" + tail)
+        assert result == "SELECT\n   a\nFROM t\n;" + tail
+
+    def test_block_comment_after_semicolon_is_unchanged(self):
+        formatted = "SELECT\n   a\nFROM t\n;\n\n\n/*\n  FROM t\n  LIMIT 1000\n  ;\n*/\n"
+        result, _ = format_sql("SELECT a FROM t\n;\n\n\n/*\n  FROM t\n  LIMIT 1000\n  ;\n*/\n")
+        assert result == formatted
+        assert format_sql(formatted)[0] == formatted
+
+    def test_comment_on_the_semicolon_line_stays_there(self):
+        result, _ = format_sql("SELECT a FROM t; -- note\n\n-- more\n")
+        assert result == "SELECT\n   a\nFROM t\n; -- note\n\n-- more\n"
+
+    def test_comments_after_statement_without_semicolon_follow_the_added_semicolon(self):
+        result, _ = format_sql("SELECT a FROM t -- note\n\n-- FROM t LIMIT 10\n")
+        assert result == "SELECT\n   a\nFROM t -- note\n;\n\n-- FROM t LIMIT 10\n"
+        assert format_sql(result)[0] == result
+
+    def test_block_comment_on_the_last_line_stays_with_the_statement(self):
+        result, _ = format_sql("SELECT a FROM t /* spans\nlines */\n-- after\n")
+        assert result == "SELECT\n   a\nFROM t /* spans\nlines */\n;\n-- after\n"
+
+    def test_comment_only_input_is_kept(self):
+        sql = "-- nothing to format yet\n\n/* SELECT 1 */\n"
+        assert format_sql(sql)[0] == sql
+
+
 def test_searched_case_puts_then_on_its_own_line_and_expands_connectors():
     sql = "SELECT CASE WHEN foo THEN bar WHEN baz AND baq THEN world ELSE NULL END AS abc FROM data"
     result, _ = format_sql(sql)
