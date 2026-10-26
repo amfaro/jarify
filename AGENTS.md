@@ -48,3 +48,5 @@ uv run pytest tests/test_fixtures.py --update-fixtures
 
 # 3. Review the generated .expected.sql, then commit both files
 ```
+
+Fixtures format with the default config. To test a config option, add `<name>.jarify.toml` beside the pair; it uses the same format as `jarify.toml`.

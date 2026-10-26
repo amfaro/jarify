@@ -61,6 +61,13 @@ RULE_CATALOG: list[RuleInfo] = [
         description="trailing comma placement (default: leading commas)",
     ),
     RuleInfo(
+        name="explicit-outer-join",
+        config_key="explicit_outer_join",
+        default="off",
+        auto_fix=True,
+        description="write LEFT/RIGHT OUTER JOIN, adding OUTER where missing (default: drop OUTER)",
+    ),
+    RuleInfo(
         name="no-implicit-cross-join",
         config_key="no_implicit_cross_join",
         default="warn",

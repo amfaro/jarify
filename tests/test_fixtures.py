@@ -3,6 +3,7 @@
 Each subdirectory under tests/fixtures/ can contain pairs of:
   <name>.input.sql   — raw SQL to format
   <name>.expected.sql — the expected formatted output
+  <name>.jarify.toml  — optional config for this pair (default: JarifyConfig())
 
 Running pytest --snapshot-update will regenerate all expected files.
 """
@@ -13,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from jarify.config import JarifyConfig
+from jarify.config import JarifyConfig, load_config
 from jarify.formatter import format_sql
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -34,6 +35,13 @@ def _is_sqlmesh_fixture(path: Path) -> bool:
     return path.relative_to(FIXTURES_DIR).parts[0] == "sqlmesh"
 
 
+def _fixture_config(input_path: Path) -> JarifyConfig:
+    """Load <name>.jarify.toml beside the input when present, else the default config."""
+    stem = input_path.name[: -len(".input.sql")]
+    config_path = input_path.parent / f"{stem}.jarify.toml"
+    return load_config(config_path) if config_path.is_file() else JarifyConfig()
+
+
 @pytest.mark.parametrize(
     "test_id,input_path,expected_path",
     [pytest.param(tid, inp, exp, id=tid) for tid, inp, exp in _collect_fixture_pairs()],
@@ -45,7 +53,7 @@ def test_format_fixture(
     update_snapshots: bool,
 ) -> None:
     """Format input SQL and compare to the expected snapshot."""
-    config = JarifyConfig()
+    config = _fixture_config(input_path)
     sql = input_path.read_text()
     result, warnings = format_sql(sql, config)
     if _is_sqlmesh_fixture(input_path):
@@ -68,12 +76,11 @@ def test_format_fixture(
 
 def test_format_idempotent(request: pytest.FixtureRequest) -> None:
     """Formatting an already-formatted SQL string should be a no-op."""
-    config = JarifyConfig()
-    for _, _input_path, expected_path in _collect_fixture_pairs():
+    for _, input_path, expected_path in _collect_fixture_pairs():
         if not expected_path.exists():
             continue
         already_formatted = expected_path.read_text().rstrip("\n") + "\n"
-        result, warnings = format_sql(already_formatted, config)
+        result, warnings = format_sql(already_formatted, _fixture_config(input_path))
         if _is_sqlmesh_fixture(expected_path):
             assert not warnings, f"SQLMesh fixture emitted format warnings: {[str(w) for w in warnings]}"
         assert result == already_formatted, (

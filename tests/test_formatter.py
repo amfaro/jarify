@@ -1,5 +1,7 @@
 """Tests for the SQL formatter."""
 
+import pytest
+
 from jarify.config import JarifyConfig
 from jarify.formatter import format_sql
 
@@ -583,6 +585,76 @@ class TestLeftOuterJoinNormalization:
     def test_full_outer_join_preserved(self):
         out, _ = format_sql("SELECT a FROM foo FULL OUTER JOIN bar ON foo.id = bar.id")
         assert "FULL" in out
+
+
+class TestExplicitOuterJoin:
+    """explicit_outer_join = true writes OUTER on LEFT/RIGHT joins instead of dropping it."""
+
+    CONFIG = JarifyConfig(explicit_outer_join=True)
+
+    @pytest.mark.parametrize(
+        ("join", "expected"),
+        [
+            ("LEFT JOIN bar ON foo.id = bar.id", "LEFT OUTER JOIN bar ON foo.id = bar.id"),
+            ("RIGHT JOIN bar ON foo.id = bar.id", "RIGHT OUTER JOIN bar ON foo.id = bar.id"),
+            ("LEFT OUTER JOIN bar ON foo.id = bar.id", "LEFT OUTER JOIN bar ON foo.id = bar.id"),
+            ("RIGHT OUTER JOIN bar ON foo.id = bar.id", "RIGHT OUTER JOIN bar ON foo.id = bar.id"),
+            ("LEFT JOIN bar USING (id)", "LEFT OUTER JOIN bar USING (id)"),
+            ("NATURAL LEFT JOIN bar", "NATURAL LEFT OUTER JOIN bar"),
+            (
+                "ASOF LEFT JOIN bar ON foo.id = bar.id AND foo.ts >= bar.ts",
+                "ASOF LEFT OUTER JOIN bar ON foo.id = bar.id AND foo.ts >= bar.ts",
+            ),
+            (
+                "ASOF RIGHT JOIN bar ON foo.id = bar.id AND foo.ts >= bar.ts",
+                "ASOF RIGHT OUTER JOIN bar ON foo.id = bar.id AND foo.ts >= bar.ts",
+            ),
+        ],
+    )
+    def test_left_and_right_joins_get_outer(self, join: str, expected: str):
+        out, _ = format_sql(f"SELECT a FROM foo {join}", self.CONFIG)
+        assert f"\n{expected}\n" in out
+
+    @pytest.mark.parametrize(
+        "join",
+        [
+            "INNER JOIN bar ON foo.id = bar.id",
+            "FULL OUTER JOIN bar ON foo.id = bar.id",
+            "FULL JOIN bar ON foo.id = bar.id",
+            "CROSS JOIN bar",
+            "SEMI JOIN bar ON foo.id = bar.id",
+            "ANTI JOIN bar ON foo.id = bar.id",
+            "POSITIONAL JOIN bar",
+            "NATURAL JOIN bar",
+            "ASOF JOIN bar ON foo.id = bar.id AND foo.ts >= bar.ts",
+        ],
+    )
+    def test_other_joins_unchanged(self, join: str):
+        default, _ = format_sql(f"SELECT a FROM foo {join}")
+        out, _ = format_sql(f"SELECT a FROM foo {join}", self.CONFIG)
+        assert out == default
+        assert f"\n{join}\n" in out
+
+    def test_bare_join_still_becomes_inner_join(self):
+        out, _ = format_sql("SELECT a FROM foo JOIN bar ON foo.id = bar.id", self.CONFIG)
+        assert "\nINNER JOIN bar ON foo.id = bar.id\n" in out
+
+    def test_alias_alignment_measures_outer_keyword(self):
+        sql = (
+            "SELECT a FROM orders AS o LEFT JOIN users AS u ON u.id = o.user_id"
+            " INNER JOIN addresses AS a ON a.id = o.aid"
+        )
+        out, _ = format_sql(sql, self.CONFIG)
+        assert (
+            "FROM orders           o\n"
+            "LEFT OUTER JOIN users u ON u.id = o.user_id\n"
+            "INNER JOIN addresses  a ON a.id = o.aid\n"
+        ) in out
+
+    def test_output_is_stable_on_second_pass(self):
+        out, _ = format_sql("SELECT a FROM foo AS f LEFT JOIN bar AS b ON f.id = b.id", self.CONFIG)
+        again, _ = format_sql(out, self.CONFIG)
+        assert again == out
 
 
 class TestJoinFormatting:

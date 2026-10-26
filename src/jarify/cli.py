@@ -40,6 +40,9 @@ leading_commas  = false
 # Normalize bare JOIN → INNER JOIN
 normalize_join = true
 
+# Write LEFT/RIGHT OUTER JOIN instead of dropping OUTER
+explicit_outer_join = false
+
 # Lint rule severity: "off" | "warn" | "error"
 no_select_star         = "warn"
 no_unused_cte          = "warn"
