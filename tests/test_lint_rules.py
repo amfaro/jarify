@@ -464,6 +464,12 @@ class TestPreferIfOverCase:
         rules = _lint(sql)
         assert "prefer-if-over-case" not in rules
 
+    def test_no_warn_when_branch_has_comments(self):
+        # fmt keeps a commented CASE (IF() would put the comment mid-line), so lint must not flag it.
+        sql = "SELECT CASE WHEN a > 1 -- threshold\n THEN 'big' ELSE 'small' END FROM t"
+        rules = _lint(sql)
+        assert "prefer-if-over-case" not in rules
+
     def test_off_disables_rule(self):
         sql = "SELECT CASE WHEN a > 1 THEN 'big' ELSE 'small' END FROM t"
         rules = _lint(sql, prefer_if_over_case="off")

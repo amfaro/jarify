@@ -625,15 +625,14 @@ class JarifyGenerator(DuckDB.Generator):
 
         op_sql = self._join_keyword(expression)
         this = expression.this
-        on_sql = self._inline_on_sql(expression)
 
         if self._join_alias_col is not None and isinstance(this, exp.Table):
             table_ref = self.table_parts(this)
             alias_str = self._table_alias_str(this)
             if alias_str:
                 pad = " " * max(1, self._join_alias_col - len(op_sql) - 1 - len(table_ref) - len(alias_str))
-                return self.seg(f"{op_sql} {table_ref}{pad}{alias_str}{on_sql}")
-            return self.seg(f"{op_sql} {table_ref}{on_sql}")
+                return self.seg(self._inline_on_sql(expression, f"{op_sql} {table_ref}{pad}{alias_str}"))
+            return self.seg(self._inline_on_sql(expression, f"{op_sql} {table_ref}"))
 
         if self._join_alias_col is not None and isinstance(this, exp.Unnest):
             alias_node = this.args.get("alias")
@@ -647,7 +646,7 @@ class JarifyGenerator(DuckDB.Generator):
                 # Measure by alias name only (end-alignment: alias name ends at
                 # _join_alias_col; column definitions extend past that column).
                 pad = " " * max(1, self._join_alias_col - len(op_sql) - 1 - len(unnest_ref) - len(alias_name))
-                return self.seg(f"{op_sql} {unnest_ref}{pad}{full_alias}{on_sql}")
+                return self.seg(self._inline_on_sql(expression, f"{op_sql} {unnest_ref}{pad}{full_alias}"))
 
         # No alignment path: render table ref, drop AS for simple tables
         if isinstance(this, exp.Table):
@@ -661,7 +660,7 @@ class JarifyGenerator(DuckDB.Generator):
         if exprs:
             this_sql = f"{this_sql},{self.seg(exprs)}"
 
-        return self.seg(f"{op_sql} {this_sql}{on_sql}")
+        return self.seg(self._inline_on_sql(expression, f"{op_sql} {this_sql}"))
 
     def from_sql(self, expression: exp.From) -> str:
         table = expression.this
@@ -670,8 +669,10 @@ class JarifyGenerator(DuckDB.Generator):
 
         if isinstance(table, exp.Subquery):
             # Render compactly; non-pretty seg() prepends a space, so strip it.
+            # A commented subquery can't go on one line (a -- comment would
+            # swallow the rest of it).
             compact = self._compact_sql(expression).strip()
-            if not self.too_wide([compact]):
+            if not self._has_comments(table) and not self.too_wide([compact]):
                 return self.seg(compact)
             return super().from_sql(expression)
 
@@ -707,22 +708,30 @@ class JarifyGenerator(DuckDB.Generator):
         alias_node = table.args.get("alias")
         return self.sql(alias_node) if alias_node else ""
 
-    def _inline_on_sql(self, expression: exp.Join) -> str:
-        """Render the ON or USING clause as a single inline string."""
+    def _inline_on_sql(self, expression: exp.Join, head: str) -> str:
+        """Append the ON or USING clause to the JOIN line *head*.
+
+        The ON condition stays inline on one line. A commented condition
+        cannot (a ``--`` comment would swallow the rest of the line), so it is
+        laid out like WHERE: AND/OR on their own lines, right-justified so the
+        conditions align after ``ON``.
+        """
         on_expr = expression.args.get("on")
         using = expression.args.get("using")
         if on_expr:
+            if self._has_comments(on_expr):
+                return "\n".join(self._aligned_condition_lines(f"{head} ON", on_expr))
             saved = self.pretty
             self.pretty = False
             try:
                 on_rendered = self.sql(on_expr)
             finally:
                 self.pretty = saved
-            return f" ON {on_rendered}"
+            return f"{head} ON {on_rendered}"
         if using:
             cols = ", ".join(self.sql(col) for col in using)
-            return f" USING ({cols})"
-        return ""
+            return f"{head} USING ({cols})"
+        return head
 
     def _entry_alias_str(self, table_expr: exp.Expr) -> str:
         """Return the rendered alias string for a FROM/JOIN entry (Table or Unnest)."""
@@ -828,15 +837,19 @@ class JarifyGenerator(DuckDB.Generator):
         if stack is not None:
             return super().connector_sql(expression, op, stack)
 
+        # Check for comments before flattening: rendering the terms pops a
+        # Paren's comments, so checking afterwards would miss them.
+        has_comments = self._has_comments(expression)
         terms: list[str] = []
         ops: list[str] = []
-        self._flatten_connector(expression, terms, ops)
+        op_comments: list[list[str]] = []
+        self._flatten_connector(expression, terms, ops, op_comments)
 
         if not terms:
             return super().connector_sql(expression, op)
 
         if self.pretty:
-            if not self._connector_force_expand and not self._has_comments(expression):
+            if not self._connector_force_expand and not has_comments:
                 compact_parts = [terms[0]]
                 for connector_op, term in zip(ops, terms[1:], strict=False):
                     compact_parts.append(f"{connector_op} {term}")
@@ -844,7 +857,10 @@ class JarifyGenerator(DuckDB.Generator):
                 if not self.too_wide([compact]):
                     return compact
             lines = [terms[0]]
-            for connector_op, term in zip(ops, terms[1:], strict=False):
+            for connector_op, comments, term in zip(ops, op_comments, terms[1:], strict=False):
+                # Comments sqlglot attached to the AND/OR itself go on their own
+                # line(s) before it, so they never comment out the connector.
+                lines.extend(self._own_line_comments(comments))
                 lines.append(f"{connector_op} {term}")
             return "\n".join(lines)
 
@@ -855,15 +871,56 @@ class JarifyGenerator(DuckDB.Generator):
         node: exp.Expr,
         terms: list[str],
         ops: list[str],
+        op_comments: list[list[str]] | None = None,
     ) -> None:
-        """Recursively flatten a nested AND/OR chain into a flat list."""
+        """Recursively flatten a nested AND/OR chain into a flat list.
+
+        When *op_comments* is given, it receives the comments attached to each
+        connector, parallel to *ops*.
+        """
         if isinstance(node, exp.Connector):
             op_name = "AND" if isinstance(node, exp.And) else "OR"
-            self._flatten_connector(node.left, terms, ops)
+            self._flatten_connector(node.left, terms, ops, op_comments)
             ops.append(op_name)
-            self._flatten_connector(node.right, terms, ops)
+            if op_comments is not None:
+                op_comments.append(node.comments or [])
+            self._flatten_connector(node.right, terms, ops, op_comments)
         else:
             terms.append(self.sql(node))
+
+    def _own_line_comments(self, comments: list[str]) -> list[str]:
+        """Render comments as lines that stand on their own, one per comment."""
+        rendered = self._render_comments(comments, leading=True)
+        return rendered.split("\n") if rendered else []
+
+    @staticmethod
+    def _is_comment_line(line: str) -> bool:
+        return line.lstrip().startswith(("--", "/*"))
+
+    def _prefix_lines(self, lines: list[str], prefixes: list[str]) -> list[str]:
+        """Prepend each line's prefix; an own-line comment takes the prefix of
+        the line it precedes, so it lines up with the AND/OR it documents."""
+        result: list[str] = []
+        for i, line in enumerate(lines):
+            anchor = i
+            while anchor < len(lines) - 1 and self._is_comment_line(lines[anchor]):
+                anchor += 1
+            result.append(f"{prefixes[anchor]}{line}")
+        return result
+
+    @staticmethod
+    def _code_part(line: str) -> str:
+        """Return *line* without its trailing ``--`` comment (ignoring ``--`` in quotes)."""
+        quote = ""
+        for i, char in enumerate(line):
+            if quote:
+                if char == quote:
+                    quote = ""
+            elif char in "'\"":
+                quote = char
+            elif line.startswith("--", i):
+                return line[:i]
+        return line
 
     # ------------------------------------------------------------------
     # Paren: keep inline when the content fits within max_line_length
@@ -927,15 +984,22 @@ class JarifyGenerator(DuckDB.Generator):
         if false_expr is not None:
             compact_args.append(self._compact_sql(false_expr))
 
+        # A commented argument can't be rendered compactly (a -- comment would
+        # swallow the rest of the line), so it forces the expanded form and
+        # keeps its normal multi-line rendering.
+        def _fits(arg: exp.Expr, compact: str) -> bool:
+            return not self._has_comments(arg) and not self.too_wide([compact])
+
         inline = f"if({', '.join(compact_args)})"
-        if not self.too_wide([inline]):
+        args = [a for a in (expression.this, true_expr, false_expr) if a is not None]
+        if not any(self._has_comments(a) for a in args) and not self.too_wide([inline]):
             return inline
 
-        branch_sqls = [compact_cond]
-        branch_sqls.append(compact_then if not self.too_wide([compact_then]) else self.sql(true_expr))
+        branch_sqls = [self.sql(expression.this) if self._has_comments(expression.this) else compact_cond]
+        branch_sqls.append(compact_then if _fits(true_expr, compact_then) else self.sql(true_expr))
         if false_expr is not None:
             compact_false = self._compact_sql(false_expr)
-            branch_sqls.append(compact_false if not self.too_wide([compact_false]) else self.sql(false_expr))
+            branch_sqls.append(compact_false if _fits(false_expr, compact_false) else self.sql(false_expr))
 
         # Too wide: expand the outer IF() with leading commas. Keep the
         # condition on one compact line, but allow branch expressions to bring
@@ -1010,17 +1074,17 @@ class JarifyGenerator(DuckDB.Generator):
             stmts.append("END")
             return stmts
 
-        def _searched_when_continuation(line: str) -> str:
-            if line.startswith("OR "):
-                return f"   {line}"
-            return f"  {line}"
+        def _searched_when_prefix(line: str) -> str:
+            return "   " if line.startswith("OR ") else "  "
 
         def _build_searched() -> list[str]:
             stmts = ["CASE"]
             for wp, tp in zip(when_parts, then_parts, strict=True):
                 wp_lines = wp.splitlines()
                 stmts.append(f" WHEN {wp_lines[0]}")
-                stmts.extend(_searched_when_continuation(line) for line in wp_lines[1:])
+                continuation = wp_lines[1:]
+                prefixes = [_searched_when_prefix(line) for line in continuation]
+                stmts.extend(self._prefix_lines(continuation, prefixes))
                 _append_multiline(stmts, "THEN", tp, prefix=" ", continuation_prefix="  ")
             if default_sql is not None:
                 _append_multiline(stmts, "ELSE", default_sql, prefix=" ", continuation_prefix="  ")
@@ -1057,7 +1121,8 @@ class JarifyGenerator(DuckDB.Generator):
         if not self.pretty or not isinstance(expression.this, exp.And):
             return self._inline_clause_sql("WHERE", expression)
 
-        conditions = self._flatten_and(expression.this)
+        operands = self._flatten_and(expression.this)
+        conditions = [cond for cond, _ in operands]
 
         # Max EQ LHS width across top-level AND operands only — nested EQs (inside
         # Paren, subqueries, etc.) must not influence padding of sibling conditions.
@@ -1066,7 +1131,10 @@ class JarifyGenerator(DuckDB.Generator):
         target = (max(eq_lhs_widths) + 1) if len(eq_lhs_widths) >= 2 else 0
 
         result: list[str] = []
-        for i, cond in enumerate(conditions):
+        for i, (cond, and_comments) in enumerate(operands):
+            # Comments attached to the AND before this operand stay on their
+            # own line(s), aligned with that AND.
+            result.extend(f"  {line}" for line in self._own_line_comments(and_comments))
             if target > 0 and isinstance(cond, exp.EQ):
                 lhs = self.sql(cond.this)
                 rhs = self.sql(cond.expression)
@@ -1091,11 +1159,17 @@ class JarifyGenerator(DuckDB.Generator):
 
         return self.seg("\n".join(result))
 
-    def _flatten_and(self, condition: exp.Expr) -> list[exp.Expr]:
-        """Return the flat list of operands from a nested AND chain."""
+    def _flatten_and(self, condition: exp.Expr, comments: list[str] | None = None) -> list[tuple[exp.Expr, list[str]]]:
+        """Return the flat list of operands from a nested AND chain.
+
+        Each operand is paired with the comments attached to the AND that
+        precedes it (sqlglot attaches a comment on its own line before ``AND``
+        to the And node). The first operand gets *comments*.
+        """
         if isinstance(condition, exp.And):
-            return self._flatten_and(condition.this) + self._flatten_and(condition.expression)
-        return [condition]
+            left = self._flatten_and(condition.this, comments)
+            return left + self._flatten_and(condition.expression, condition.comments or [])
+        return [(condition, comments or [])]
 
     def _has_comments(self, expression: exp.Expr | None) -> bool:
         """Return True when expression or any descendant carries SQL comments."""
@@ -1134,46 +1208,55 @@ class JarifyGenerator(DuckDB.Generator):
         # For a flat same-type connector chain (pure OR or pure AND, no mixing),
         # try compact first — mirrors paren_sql's inline-if-fits logic.
         # Mixed AND/OR chains and IN-subquery expressions keep their expanded form.
+        # Check for comments before flattening: rendering the terms pops a
+        # Paren's comments, so a second render would lose them.
         this = expression.this
-        if isinstance(this, exp.Connector):
+        if isinstance(this, exp.Connector) and not self._has_comments(this):
             terms_temp: list[str] = []
             ops_list: list[str] = []
             self._flatten_connector(this, terms_temp, ops_list)
-            if len(set(ops_list)) <= 1 and not self._has_comments(this):
+            if len(set(ops_list)) <= 1:
                 compact = self._compact_sql(this)
                 if not self.too_wide([f"{keyword} {compact}"]):
                     return self.seg(f"{keyword} {compact}")
 
+        return self.seg("\n".join(self._aligned_condition_lines(keyword, this)))
+
+    def _aligned_condition_lines(self, keyword: str, condition: exp.Expr) -> list[str]:
+        """Render *condition* after *keyword* with AND/OR right-justified.
+
+        The first line starts with the keyword; top-level AND/OR lines are
+        right-justified so condition content aligns one column after the
+        keyword's last line (e.g. column 6 for WHERE, column 7 for HAVING).
+        An own-line comment lines up with the AND/OR it precedes.
+        """
         # Force connector_sql to produce multi-line output (for post-processing
         # below) even if the compact form would fit within max_line_length.
         prev_force = self._connector_force_expand
         self._connector_force_expand = True
         try:
-            condition_sql = self.sql(expression, "this")
+            lines = self.sql(condition).split("\n")
         finally:
             self._connector_force_expand = prev_force
-        lines = condition_sql.split("\n")
 
-        keyword_width = len(keyword) + 1  # e.g. 6 for "WHERE "
-        result: list[str] = []
-        depth = 0
+        keyword_width = len(keyword.rsplit("\n", 1)[-1]) + 1  # e.g. 6 for "WHERE "
+        prefixes: list[str] = []
+        first_code = self._code_part(lines[0])
+        depth = first_code.count("(") - first_code.count(")")
 
-        for i, line in enumerate(lines):
-            if i == 0:
-                result.append(f"{keyword} {line}")
-            elif depth == 0 and line.startswith("AND "):
-                prefix = " " * max(0, keyword_width - len("AND "))
-                result.append(f"{prefix}{line}")
-            elif depth == 0 and line.startswith("OR "):
-                prefix = " " * max(0, keyword_width - len("OR "))
-                result.append(f"{prefix}{line}")
+        for line in lines[1:]:
+            if depth == 0 and line.startswith(("AND ", "OR ")):
+                connector_width = len(line.split(" ", 1)[0]) + 1
+                prefixes.append(" " * max(0, keyword_width - connector_width))
             else:
                 # Pass continuation lines through as-is; child methods (e.g.
                 # in_sql) are responsible for their own relative indentation.
-                result.append(line)
-            depth += line.count("(") - line.count(")")
+                prefixes.append("")
+            if not self._is_comment_line(line):
+                code = self._code_part(line)
+                depth += code.count("(") - code.count(")")
 
-        return self.seg("\n".join(result))
+        return [f"{keyword} {lines[0]}", *self._prefix_lines(lines[1:], prefixes)]
 
     # ------------------------------------------------------------------
     # IS NOT NULL: preserve original form instead of NOT x IS NULL
@@ -1202,7 +1285,9 @@ class JarifyGenerator(DuckDB.Generator):
         if self.pretty and query is not None:
             this = self.sql(expression, "this")
             compact = self._compact_sql(query.this)
-            if not self.too_wide([f"{this} IN ({compact})"]):
+            # A commented subquery can't go on one line (a -- comment would
+            # swallow the rest of it).
+            if not self._has_comments(query) and not self.too_wide([f"{this} IN ({compact})"]):
                 return f"{this} IN ({compact})"
             select_sql = self.sql(query.this)
             indented = self.indent(select_sql)
@@ -1258,7 +1343,10 @@ class JarifyGenerator(DuckDB.Generator):
     def not_sql(self, expression: exp.Not) -> str:
         inner = expression.this
         if isinstance(inner, exp.Is) and isinstance(inner.expression, exp.Null):
-            return f"{self.sql(inner.this)} IS NOT NULL"
+            # A trailing comment after NULL is attached to the Null node, which
+            # this shortcut never renders, so carry its comments over.
+            comments = [*(inner.comments or []), *(inner.expression.comments or [])]
+            return self.maybe_comment(f"{self.sql(inner.this)} IS NOT NULL", comments=comments)
         return f"NOT {self.sql(expression, 'this')}"
 
     # ------------------------------------------------------------------

@@ -322,7 +322,7 @@ WHERE type       = _property_type
 
 ### WHERE — `IN (subquery)` layout
 
-When the full `col IN (SELECT ...)` expression fits on one line within the configured max line length, it stays inline. When it would exceed the threshold, the `(` goes on its own line, the inner query is indented by one level, and `)` closes at the same column as `IN`.
+When the full `col IN (SELECT ...)` expression fits on one line within the configured max line length, it stays inline. When it would exceed the threshold, or the subquery contains a comment, the `(` goes on its own line, the inner query is indented by one level, and `)` closes at the same column as `IN`. (A `--` comment on the inline form would comment out the rest of the line; for the same reason a commented `FROM (subquery)` is never collapsed onto one line.)
 
 **Bad**
 ```sql
@@ -561,6 +561,23 @@ WHERE 1 = 1
   )
 ```
 
+The same holds for comments on the top-level branches of `WHERE`, `HAVING`, `QUALIFY`, `JOIN … ON` and `CASE WHEN` conditions. A trailing comment stays at the end of its branch's line. A comment on its own line before `AND` / `OR` stays on its own line, aligned with that `AND` / `OR`; a comment written just after the `AND` / `OR` moves to its own line above it.
+
+**Bad** (comments dropped, or `OR` commented out)
+```sql
+WHERE a IS NOT NULL
+   OR b IS NOT NULL
+   OR c > 0
+```
+
+**Good**
+```sql
+WHERE a IS NOT NULL -- has a
+   -- b only matters when a is missing
+   OR b IS NOT NULL
+   OR c > 0 -- fallback
+```
+
 ---
 
 ### Several comments on one expression — one per line
@@ -794,6 +811,19 @@ CROSS JOIN UNNEST(o.group_by_values) gbv(group_by_value)
 ```
 
 If any entry in the block is a subquery (multi-line), alignment is skipped for the entire block, but `ON` is still kept inline.
+
+An `ON` condition that carries comments can't stay on one line, because a `--` comment would swallow the rest of it. It is laid out like `WHERE` instead: the first condition stays on the `JOIN` line, and each `AND` / `OR` goes on its own line, right-justified so the conditions line up after `ON`. A single commented condition stays inline.
+
+```sql
+SELECT
+   x.a
+  ,y.b
+FROM some_table       x
+LEFT JOIN other_table y ON x.id = y.id -- match
+                        OR x.alt_id = y.id -- fallback
+INNER JOIN third      z ON z.id = x.id
+;
+```
 
 ---
 
@@ -1547,7 +1577,7 @@ WHERE x != y
 
 **Auto-fixed by `fmt`.** Rewrite single-branch `CASE WHEN … THEN … [ELSE …] END` expressions to DuckDB's `IF(condition, true_val, false_val)` function. The IF form is shorter and more idiomatic for simple conditionals.
 
-Applies only to *searched* CASE with exactly one WHEN branch. Multi-branch CASE and simple CASE (`CASE expr WHEN lit …`) are left unchanged. When the original `CASE` has no `ELSE`, jarify emits an explicit `NULL` third argument because DuckDB's `IF()` requires three arguments.
+Applies only to *searched* CASE with exactly one WHEN branch. Multi-branch CASE and simple CASE (`CASE expr WHEN lit …`) are left unchanged. A CASE with a comment inside its WHEN, THEN or ELSE expression is also left unchanged, because `IF()` keeps its arguments on one line where a `--` comment would swallow the rest of the call. When the original `CASE` has no `ELSE`, jarify emits an explicit `NULL` third argument because DuckDB's `IF()` requires three arguments.
 
 **Bad**
 ```sql
@@ -1568,7 +1598,9 @@ FROM t
 
 When a compact `if(cond, then, else)` call exceeds `max_line_length`, expand the outer
 `if()` call across multiple lines. Keep the condition compact on one line, but let an
-overlong `true` or `false` branch use its normal nested wrapping.
+overlong `true` or `false` branch use its normal nested wrapping. An `if()` whose
+arguments contain a comment is always expanded, and each commented argument keeps its
+normal multi-line rendering, so the comment ends its line.
 
 **Wide**
 ```sql

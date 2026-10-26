@@ -22,9 +22,19 @@ def _is_single_when(node: exp.Case) -> bool:
     return len(node.args.get("ifs", [])) == 1
 
 
+def _has_branch_comments(node: exp.Case) -> bool:
+    """Return True if a comment sits inside the WHEN, THEN or ELSE expressions.
+
+    IF() renders its arguments on one line, where a ``--`` comment would
+    swallow the rest of the call, so commented branches stay as CASE.
+    """
+    branches = [*node.args.get("ifs", []), node.args.get("default")]
+    return any(n.comments for branch in branches if branch is not None for n in branch.walk())
+
+
 def _is_rewritable(node: exp.Case) -> bool:
     """Return True when *node* should be rewritten to IF()."""
-    return not _is_simple_case(node) and _is_single_when(node)
+    return not _is_simple_case(node) and _is_single_when(node) and not _has_branch_comments(node)
 
 
 class PreferIfOverCaseRule(FormatterRule):
