@@ -1,14 +1,15 @@
 """SQLMesh-aware segmentation and runtime token masking helpers.
 
 These helpers intentionally do not parse SQLMesh.  They preserve SQLMesh-only
-wrappers and opaque Jinja blocks verbatim, then make inline runtime tokens look
-like ordinary SQL identifiers so sqlglot can format/lint the surrounding SQL.
+wrappers, top-level macro statements and opaque Jinja blocks verbatim, then make
+inline runtime tokens look like ordinary SQL identifiers so sqlglot can
+format/lint the surrounding SQL.
 """
 
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Literal
 
@@ -22,6 +23,8 @@ class SqlMeshSegment:
 
 
 _SQLMESH_AT_IDENTIFIER_RE = re.compile(r"@[A-Za-z_]\w*\b")
+_MACRO_CALL_RE = re.compile(r"@[A-Za-z_]\w*\s*\(")
+_LINE_END_RE = re.compile(r"[\r\n]")
 _HEADER_RE = re.compile(r"\b(MODEL|AUDIT)\s*\(", re.IGNORECASE)
 _LEADING_HEADER_RE = re.compile(r"(?:MODEL|AUDIT)\s*\(", re.IGNORECASE)
 _SQLMESH_MARKER_RE = re.compile(
@@ -191,15 +194,11 @@ def _append_line_segments(segments: list[SqlMeshSegment], sql: str) -> None:
         nonlocal sql_buf
         if not sql_buf:
             return
-        first_sql = next((idx for idx, sql_line in enumerate(sql_buf) if sql_line.strip()), None)
-        if first_sql is None:
-            _append_segment(segments, "opaque", "".join(sql_buf))
-            sql_buf = []
-            return
-        last_sql = max(idx for idx, sql_line in enumerate(sql_buf) if sql_line.strip())
-        _append_segment(segments, "opaque", "".join(sql_buf[:first_sql]))
-        _append_segment(segments, "sql", "".join(sql_buf[first_sql : last_sql + 1]))
-        _append_segment(segments, "opaque", "".join(sql_buf[last_sql + 1 :]))
+        for kind, text in _split_macro_statements("".join(sql_buf)):
+            if kind == "opaque":
+                _append_segment(segments, "opaque", text)
+            else:
+                _append_sql_lines(segments, text)
         sql_buf = []
 
     while i < len(lines):
@@ -241,6 +240,169 @@ def _append_line_segments(segments: list[SqlMeshSegment], sql: str) -> None:
         i += 1
 
     flush_sql()
+
+
+def _append_sql_lines(segments: list[SqlMeshSegment], sql: str) -> None:
+    """Append *sql* as a SQL segment, keeping its edge blank lines opaque."""
+    lines = sql.splitlines(keepends=True)
+    first_sql = next((idx for idx, line in enumerate(lines) if line.strip()), None)
+    if first_sql is None:
+        _append_segment(segments, "opaque", sql)
+        return
+    last_sql = max(idx for idx, line in enumerate(lines) if line.strip())
+    _append_segment(segments, "opaque", "".join(lines[:first_sql]))
+    _append_segment(segments, "sql", "".join(lines[first_sql : last_sql + 1]))
+    _append_segment(segments, "opaque", "".join(lines[last_sql + 1 :]))
+
+
+@dataclass(frozen=True)
+class _Statement:
+    """Offsets of one top-level statement in a SQL stretch."""
+
+    start: int  # end of the previous statement, so leading comments are included
+    code_start: int  # first character that is not whitespace or a comment
+    end: int  # just past the statement's ";", or the end of the text
+    is_macro: bool
+
+
+def _split_macro_statements(sql: str) -> list[tuple[Literal["sql", "opaque"], str]]:
+    """Split *sql* into SQL pieces and opaque top-level macro statements.
+
+    A macro statement is a statement whose only code is a SQLMesh macro call
+    followed by ``;``, such as ``@DEF(x, 1);`` or ``@ensure_sql_macro('n');``.
+    SQLMesh runs these as pre/post-statements; they are kept exactly as
+    written.  Each opaque piece starts on the line after the previous
+    statement (or at the start of *sql*), so the comments and blank lines
+    above the macro statement stay with it, and ends after the line holding
+    its ``;``.  When no statement follows, it runs to the end of *sql* so
+    trailing comments stay too.
+
+    Macro statements that share a line with other SQL are left in the SQL
+    piece and formatted as ordinary statements.
+    """
+    if "@" not in sql:
+        return [("sql", sql)]
+    statements = _split_statements(sql)
+    pieces: list[tuple[Literal["sql", "opaque"], str]] = []
+    pos = 0
+    for start, end in _macro_statement_spans(sql, statements):
+        if start > pos:
+            pieces.append(("sql", sql[pos:start]))
+        pieces.append(("opaque", sql[start:end]))
+        pos = end
+    if pos < len(sql):
+        pieces.append(("sql", sql[pos:]))
+    return pieces
+
+
+def _split_statements(sql: str) -> list[_Statement]:
+    statements: list[_Statement] = []
+    start = 0
+    while True:
+        code_start = _skip_leading_space_and_comments(sql, start)
+        if code_start >= len(sql):
+            return statements
+        end = _find_statement_end(sql, code_start)
+        statements.append(_Statement(start, code_start, end, _is_macro_statement(sql, code_start, end)))
+        start = end
+
+
+def _find_statement_end(sql: str, pos: int) -> int:
+    for i in _code_positions(sql, pos):
+        if sql[i] == ";":
+            return i + 1
+    return len(sql)
+
+
+def _is_macro_statement(sql: str, code_start: int, end: int) -> bool:
+    match = _MACRO_CALL_RE.match(sql, code_start)
+    if not match:
+        return False
+    call_end = _find_closing_paren(sql, match.end() - 1)
+    if call_end is None:
+        return False
+    semicolon = _skip_leading_space_and_comments(sql, call_end)
+    return semicolon == end - 1 and sql[semicolon] == ";"
+
+
+def _macro_statement_spans(sql: str, statements: list[_Statement]) -> list[tuple[int, int]]:
+    """Return the ``(start, end)`` offsets of the opaque macro-statement pieces.
+
+    Macro statements chained on one line form a single run.  A run is opaque
+    only when a line break separates it from the statements around it.
+    """
+    spans: list[tuple[int, int]] = []
+    i = 0
+    while i < len(statements):
+        if not statements[i].is_macro:
+            i += 1
+            continue
+        first = i
+        while (
+            i + 1 < len(statements)
+            and statements[i + 1].is_macro
+            and _line_break_end(sql, statements[i + 1].start, statements[i + 1].code_start) is None
+        ):
+            i += 1
+        last = i
+        i += 1
+
+        start = 0 if first == 0 else _line_break_end(sql, statements[first].start, statements[first].code_start)
+        if last == len(statements) - 1:
+            end: int | None = len(sql)
+        else:
+            end = _line_break_end(sql, statements[last].end, statements[last + 1].code_start)
+        if start is not None and end is not None:
+            spans.append((start, end))
+    return spans
+
+
+def _line_break_end(sql: str, start: int, stop: int) -> int | None:
+    """Return the offset just past the first line break in ``sql[start:stop]``.
+
+    Line breaks inside block comments do not count.  Returns None when the
+    range has no line break.
+    """
+    for i in _code_positions(sql, start):
+        if i >= stop:
+            return None
+        if sql[i] == "\n":
+            return i + 1
+    return None
+
+
+def _code_positions(sql: str, start: int) -> Iterator[int]:
+    """Yield offsets from *start* on that lie outside string literals and comments.
+
+    The line break that ends a ``--`` comment is yielded.
+    """
+    i = start
+    while i < len(sql):
+        if sql[i] in "'\"":
+            i = _skip_quoted(sql, i)
+        elif sql.startswith("--", i):
+            line_end = _LINE_END_RE.search(sql, i + 2)
+            i = line_end.start() if line_end else len(sql)
+        elif sql.startswith("/*", i):
+            close = sql.find("*/", i + 2)
+            i = close + 2 if close != -1 else len(sql)
+        else:
+            yield i
+            i += 1
+
+
+def _skip_quoted(sql: str, pos: int) -> int:
+    """Return the offset just past the quoted string or identifier at *pos*."""
+    quote = sql[pos]
+    i = pos + 1
+    while True:
+        close = sql.find(quote, i)
+        if close == -1:
+            return len(sql)
+        if sql.startswith(quote, close + 1):
+            i = close + 2
+            continue
+        return close + 1
 
 
 def _collect_jinja_statement_block(lines: list[str], start: int, first_tag: str) -> tuple[list[str], int]:
@@ -315,46 +477,17 @@ def _find_balanced_call_end(sql: str, call_start: int) -> int | None:
     match = _HEADER_RE.match(sql, call_start)
     if not match:
         return None
+    return _find_closing_paren(sql, match.end() - 1)
 
+
+def _find_closing_paren(sql: str, open_paren: int) -> int | None:
+    """Return the offset just past the ``)`` that closes the ``(`` at *open_paren*."""
     depth = 0
-    i = match.end() - 1
-    state = "code"
-    while i < len(sql):
-        ch = sql[i]
-        nxt = sql[i + 1] if i + 1 < len(sql) else ""
-
-        if state == "code":
-            if ch == "'":
-                state = "single"
-            elif ch == '"':
-                state = "double"
-            elif ch == "-" and nxt == "-":
-                state = "line_comment"
-                i += 1
-            elif ch == "/" and nxt == "*":
-                state = "block_comment"
-                i += 1
-            elif ch == "(":
-                depth += 1
-            elif ch == ")":
-                depth -= 1
-                if depth == 0:
-                    return i + 1
-        elif state == "single":
-            if ch == "'" and nxt == "'":
-                i += 1
-            elif ch == "'":
-                state = "code"
-        elif state == "double":
-            if ch == '"' and nxt == '"':
-                i += 1
-            elif ch == '"':
-                state = "code"
-        elif state == "line_comment" and ch in "\r\n":
-            state = "code"
-        elif state == "block_comment" and ch == "*" and nxt == "/":
-            state = "code"
-            i += 1
-        i += 1
-
+    for i in _code_positions(sql, open_paren):
+        if sql[i] == "(":
+            depth += 1
+        elif sql[i] == ")":
+            depth -= 1
+            if depth == 0:
+                return i + 1
     return None
