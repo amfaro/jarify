@@ -324,6 +324,43 @@ class TestCommentsAfterLastStatement:
         assert format_sql(sql)[0] == sql
 
 
+class TestBlockCommentLines:
+    """A multi-line block comment's lines stay exactly as written.
+
+    Regression: enclosing blocks indented the comment's own lines, so every
+    pass shifted them two more columns to the right.
+    """
+
+    def test_commented_out_columns_in_a_cte_body_keep_their_lines(self):
+        sql = (
+            "WITH _m AS\n(\n  SELECT\n     a\n    ,b\n"
+            "    /* add in for testing\n    ,c AS cc\n    */\n"
+            "  FROM t\n)\nFROM _m\n;\n"
+        )
+        result, _ = format_sql(sql)
+        assert "\n  /* add in for testing\n    ,c AS cc\n    */\n  FROM t\n" in result
+        assert format_sql(result)[0] == result
+
+    def test_commented_out_columns_between_columns_keep_their_lines(self):
+        sql = "SELECT\n   a\n  /* testing\n  ,b\n  */\n  ,d\nFROM t\n;\n"
+        result, _ = format_sql(sql)
+        assert "   a /* testing\n  ,b\n  */\n  ,d\n" in result
+        assert format_sql(result)[0] == result
+
+    def test_comment_lines_without_leading_space_are_kept(self):
+        sql = "WITH _m AS (\n  SELECT a\n  /* note\nflush left\n\t tabbed\n*/\n  FROM t\n)\nFROM _m;\n"
+        result, _ = format_sql(sql)
+        assert "/* note\nflush left\n\t tabbed\n*/\n  FROM t\n" in result
+        assert format_sql(result)[0] == result
+
+    def test_pivot_order_by_comment_lines_are_kept(self):
+        sql = "WITH _d AS (SELECT a, grp, val FROM t)\nPIVOT _d ON grp USING first(val) ORDER BY a /* o\n   p */"
+        result, warnings = format_sql(sql)
+        assert not warnings
+        assert "ORDER BY\n   a /* o\n   p */\n;" in result
+        assert format_sql(result)[0] == result
+
+
 def test_searched_case_puts_then_on_its_own_line_and_expands_connectors():
     sql = "SELECT CASE WHEN foo THEN bar WHEN baz AND baq THEN world ELSE NULL END AS abc FROM data"
     result, _ = format_sql(sql)
