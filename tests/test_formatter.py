@@ -1617,9 +1617,10 @@ class TestOperatorComments:
         out = self._format("SELECT a NOT /* c */ IN (1, 2) AS x, b NOT /* d */ LIKE 'y' AS y FROM t")
         assert "   a NOT /* c */ IN (1, 2) AS x\n  ,b NOT /* d */ LIKE 'y'  AS y\n" in out
 
-    def test_comment_on_an_operator_written_as_a_call_goes_after_its_right_operand(self):
+    def test_comment_on_the_tilde_operator_stays_after_it(self):
+        # `~` stays an operator (#396), so its comment stays after it.
         out = self._format("SELECT a FROM t WHERE a ~ /* c */ 'x'")
-        assert "  ,'x' -- c\n" in out
+        assert "WHERE a ~ /* c */ 'x'\n" in out
 
     @pytest.mark.parametrize(
         "condition", ["a NOT /* c */ IN UNNEST([1, 2])", "a NOT /* c */ BETWEEN SYMMETRIC 1 AND 2"]
@@ -1991,6 +1992,66 @@ class TestCtesInExpressionSubqueries:
     def test_simple_case_branches_after_a_multi_line_when_value_are_not_padded(self, when_value):
         out, _ = format_sql(f"SELECT CASE x WHEN {when_value} THEN 1 WHEN 2 THEN 3 END AS v FROM t")
         assert "\n    WHEN 2 THEN 3\n" in out
+
+
+class TestTildeOperator:
+    """`~` and `!~` stay operators instead of becoming regexp_full_match() (#396)."""
+
+    @pytest.mark.parametrize(
+        ("sql", "expected"),
+        [
+            ("SELECT a FROM t WHERE a ~ 'b'", "WHERE a ~ 'b'\n"),
+            ("SELECT a FROM t WHERE a !~ 'b'", "WHERE a !~ 'b'\n"),
+            ("SELECT a FROM t WHERE NOT (a ~ 'b')", "WHERE NOT (a ~ 'b')\n"),
+            ("SELECT regexp_full_match(a, 'b') AS m FROM t", "   regexp_full_match(a, 'b') AS m\n"),
+            ("SELECT a FROM t WHERE a ~ /* c */ 'b'", "WHERE a ~ /* c */ 'b'\n"),
+        ],
+    )
+    def test_operator_is_kept(self, sql, expected):
+        out, _ = format_sql(sql)
+        assert expected in out
+        assert format_sql(out)[0] == out
+
+
+class TestValuesTableColumns:
+    """A VALUES table keeps the column names its alias gives (#396)."""
+
+    def test_short_values_table_stays_on_one_line(self):
+        out, _ = format_sql("SELECT * FROM (VALUES (1, 'a'), (2, 'b')) v(id, name)")
+        assert out == "FROM (VALUES (1, 'a'), (2, 'b')) AS v(id, name)\n;\n"
+
+    def test_long_values_table_is_laid_out_like_a_subquery(self):
+        rows = ", ".join(f"({i}, 'a fairly long label number {i}')" for i in range(4))
+        out, _ = format_sql(f"SELECT v.id FROM (VALUES {rows}) v(id, name)")
+        assert "FROM (\n  VALUES\n     (0, 'a fairly long label number 0')\n    ,(1, " in out
+        assert "\n) AS v(id, name)\n" in out
+        assert format_sql(out)[0] == out
+
+    def test_values_without_column_names_still_becomes_values(self):
+        out, _ = format_sql("SELECT * FROM (VALUES (1, 'a')) v")
+        assert out == "VALUES\n   (1, 'a')\n;\n"
+
+
+class TestColumnNameLists:
+    """An INSERT's or a view's column-name list stays valid SQL (#396)."""
+
+    def test_short_insert_column_list_stays_on_the_line(self):
+        out, _ = format_sql("INSERT INTO t (a, b) VALUES (1, 2)")
+        assert out.startswith("INSERT INTO t (a, b)\nVALUES\n")
+
+    def test_long_insert_column_list_puts_one_name_per_line(self):
+        cols = ", ".join(f"some_rather_long_column_name_{i}" for i in range(6))
+        out, _ = format_sql(f"INSERT INTO t ({cols}) SELECT * FROM u")
+        assert "INSERT INTO t\n(\n   some_rather_long_column_name_0\n  ,some_rather_long_column_name_1\n" in out
+        assert format_sql(out)[0] == out
+
+    def test_commented_column_name_keeps_its_comment(self):
+        out, _ = format_sql("INSERT INTO t (a, -- first\n b) VALUES (1, 2)")
+        assert "(\n   a -- first\n  ,b\n)" in out
+
+    def test_view_column_list(self):
+        out, _ = format_sql("CREATE VIEW v (c, d) AS SELECT 1, 2")
+        assert out.startswith("CREATE VIEW v (c, d) AS\n")
 
 
 class TestGroupByPerLine:

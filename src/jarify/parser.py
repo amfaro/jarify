@@ -48,6 +48,24 @@ def _keeping_operator_comments(parse: typing.Callable[..., typing.Any]) -> typin
     return _parse
 
 
+def _marking_tilde(parse: typing.Callable[..., typing.Any]) -> typing.Callable[..., typing.Any]:
+    """Wrap the `~` RANGE_PARSERS entry so its node remembers it was written as `~`."""
+
+    def _parse(self: _JarifyDuckDBParser, this: _exp.Expr | None) -> _exp.Expr | None:
+        result = parse(self, this)
+        if isinstance(result, _exp.RegexpFullMatch):
+            result.meta[TILDE_OPERATOR_KEY] = True
+        return result
+
+    return _parse
+
+
+# Set on a RegexpFullMatch written as `a ~ b`. sqlglot reads that and a
+# regexp_full_match(a, b) call to the same node, but DuckDB versions differ in
+# whether `~` matches the whole string, so the generator writes `~` back.
+TILDE_OPERATOR_KEY = "jarify_tilde_operator"
+
+
 # The predicates RANGE_PARSERS builds that drop their operator's comments,
 # besides those built by sqlglot's binary_range_parser(), such as LIKE.
 _RANGE_OPERATOR_TOKENS = frozenset({TokenType.BETWEEN, TokenType.IN, TokenType.IS})
@@ -56,7 +74,7 @@ _RANGE_OPERATOR_TOKENS = frozenset({TokenType.BETWEEN, TokenType.IN, TokenType.I
 class _JarifyDuckDBParser(_DuckDB.Parser):
     RANGE_PARSERS: typing.ClassVar = {
         token_type: (
-            _keeping_operator_comments(parse)
+            _keeping_operator_comments(_marking_tilde(parse) if token_type == TokenType.TILDE else parse)
             if token_type in _RANGE_OPERATOR_TOKENS or getattr(parse, "__name__", "") == "_parse_binary_range"
             else parse
         )
@@ -257,14 +275,13 @@ class _JarifyDuckDBParser(_DuckDB.Parser):
         unwritten = []
         for word, token in words:
             comments = _unkept(result, token.comments)
-            if isinstance(predicate, _KEYWORD_PREDICATES):
+            if isinstance(predicate, _KEYWORD_PREDICATES) or predicate.meta.get(TILDE_OPERATOR_KEY):
                 self._keep_keyword(predicate, word, comments)
             else:
                 unwritten.extend(comments)
         if unwritten:
-            # jarify writes the other operators as calls, such as `~` as
-            # regexp_full_match(…), or as symbols: the comments go on the
-            # right operand.
+            # jarify writes the other operators as calls or as symbols: the
+            # comments go on the right operand.
             operand = predicate.args.get("expression") if isinstance(predicate, _exp.Expr) else None
             self._keep(operand if isinstance(operand, _exp.Expr) else result, unwritten, prepend=True)
         escape = _top_level_tokens(following, {TokenType.ESCAPE}) if isinstance(result, _exp.Escape) else []

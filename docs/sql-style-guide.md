@@ -1456,6 +1456,22 @@ WHERE user_id NOT IN (SELECT user_id FROM excluded_users)
 
 ---
 
+### Regular expression `~` — kept as an operator
+
+`a ~ 'pattern'` and `a !~ 'pattern'` stay operators. sqlglot reads `~` as `regexp_full_match(…)`, but DuckDB versions differ in whether `~` matches the whole string or any part of it, so rewriting it could change what a query returns. A `regexp_full_match(…)` or `regexp_matches(…)` call stays a call.
+
+**Bad** (on DuckDB 2.0, `'abc' ~ 'b'` is true and `regexp_full_match('abc', 'b')` is false)
+```sql
+WHERE regexp_full_match(description, 'Order Entry')
+```
+
+**Good**
+```sql
+WHERE description ~ 'Order Entry'
+```
+
+---
+
 ### `NULLS LAST` — suppressed when it matches DuckDB default
 
 DuckDB orders `ASC` columns `NULLS LAST` by default. When the explicit `NULLS LAST` matches that default it is dropped. `NULLS FIRST` (non-default) is always preserved.
@@ -2174,6 +2190,28 @@ CREATE OR REPLACE TABLE examples
 ;
 ```
 
+A list of column names, as in `INSERT INTO t (a, b)` or `CREATE VIEW v (a, b)`, stays on the statement's line when it fits. Otherwise it goes one name per line with leading commas, like a table's columns.
+
+**Bad** (the first name gets a comma, which DuckDB can't parse)
+```sql
+INSERT INTO t
+(
+
+  ,a
+  ,b
+)
+VALUES
+   (1, 2)
+```
+
+**Good**
+```sql
+INSERT INTO t (a, b)
+VALUES
+   (1, 2)
+;
+```
+
 ---
 
 ### `CREATE MACRO` layout
@@ -2204,6 +2242,20 @@ CREATE OR REPLACE MACRO get_programs_json
 ### `VALUES` CTE layout
 
 A `WITH` clause CTE whose body is a plain `VALUES` list is rendered as `VALUES` (not `FROM (VALUES ...) AS ...`). Rows use leading-comma style. Each non-last column is right-padded with spaces after its comma so that the next column aligns across all rows. CTE names that declare column aliases include a space before the column list.
+
+A `VALUES` table in `FROM` or `JOIN` whose alias names its columns, `FROM (VALUES …) v(id, name)`, keeps them; it isn't turned into a bare `VALUES`, whose columns would be `col0`, `col1`, …. It stays on one line when it fits, and otherwise is laid out like a subquery, the rows under `VALUES`:
+
+```sql
+SELECT
+   v.id
+FROM (
+  VALUES
+     (1, 'a fairly long label number one')
+    ,(2, 'a fairly long label number two')
+    ,(3, 'a fairly long label number three')
+) AS v(id, name)
+;
+```
 
 A row keeps its comments, as a `SELECT` list's column does: one after the row stays after it, and one on its own line between two rows stays on its own line above the next row. A comment on `VALUES` goes at the end of the `VALUES` line.
 

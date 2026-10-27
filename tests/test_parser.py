@@ -9,6 +9,7 @@ import sqlglot.expressions as exp
 from jarify.parser import (
     CTE_COMMENTS_AFTER_AS,
     FROM_FIRST_JOINS_KEY,
+    TILDE_OPERATOR_KEY,
     _extract_ctas_body_placeholders,
     _extract_line_rust_fmt_placeholders,
     _mask_ifnull,
@@ -128,6 +129,23 @@ class TestNestedJoins:
     def test_plain_joins_are_unchanged(self) -> None:
         select = parse_sql("SELECT t.a FROM t JOIN u ON u.id = t.id JOIN v ON v.id = u.id")[0]
         assert all(isinstance(join.this, exp.Table) for join in select.args["joins"])
+
+
+class TestTildeOperator:
+    """sqlglot reads `a ~ b` and regexp_full_match(a, b) to the same node; `~` is marked (#396)."""
+
+    def test_tilde_is_marked(self) -> None:
+        node = parse_sql("SELECT a ~ 'b'")[0].find(exp.RegexpFullMatch)
+        assert node.meta.get(TILDE_OPERATOR_KEY) is True
+
+    def test_negated_tilde_is_marked(self) -> None:
+        node = parse_sql("SELECT a !~ 'b'")[0].find(exp.RegexpFullMatch)
+        assert isinstance(node.parent, exp.Not)
+        assert node.meta.get(TILDE_OPERATOR_KEY) is True
+
+    def test_function_call_is_not_marked(self) -> None:
+        node = parse_sql("SELECT regexp_full_match(a, 'b')")[0].find(exp.RegexpFullMatch)
+        assert not node.meta.get(TILDE_OPERATOR_KEY)
 
 
 class TestReservedKeywordTypeCasts:
