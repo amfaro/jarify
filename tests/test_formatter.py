@@ -697,6 +697,40 @@ class TestFromFirst:
         assert _as_columns(out, "display_id", "display_name") == [12, 12]
 
 
+class TestFromFirstComments:
+    """A comment above a FROM-first query stays above it (#353).
+
+    Regression: the comment was deleted, and after a WITH clause a comment
+    above ``SELECT * FROM x`` was written twice.
+    """
+
+    def test_comment_above_first_statement_is_kept(self):
+        result, _ = format_sql("-- note about this query\nFROM t")
+        assert result == "-- note about this query\nFROM t\n;\n"
+        assert format_sql(result)[0] == result
+
+    def test_comment_above_later_statement_is_kept(self):
+        result, _ = format_sql("SELECT 1 AS x\n;\n\n-- note about the second query\nFROM t")
+        assert result.endswith(";\n\n-- note about the second query\nFROM t\n;\n")
+        assert format_sql(result)[0] == result
+
+    def test_comment_after_with_clause_is_kept_once(self):
+        expected = "WITH _x AS\n(\n  SELECT\n     1 AS a\n)\n-- note\nFROM _x\n;\n"
+        for main_query in ("FROM x", "SELECT * FROM x"):
+            result, _ = format_sql(f"WITH x AS (SELECT 1 AS a)\n-- note\n{main_query}")
+            assert result == expected
+            assert format_sql(result)[0] == result
+
+    def test_comment_above_from_first_query_with_select_list_stays_above_it(self):
+        result, _ = format_sql("-- note\nFROM t SELECT a")
+        assert result == "-- note\nSELECT\n   a\nFROM t\n;\n"
+
+    def test_comment_above_from_first_subquery_is_kept(self):
+        result, _ = format_sql("SELECT * FROM (\n-- note\nFROM t) AS s")
+        assert result == "FROM (\n  -- note\n  FROM t\n) AS s\n;\n"
+        assert format_sql(result)[0] == result
+
+
 class TestLeftOuterJoinNormalization:
     def test_left_outer_join_normalized(self):
         out, _ = format_sql("SELECT a FROM foo LEFT OUTER JOIN bar ON foo.id = bar.id")

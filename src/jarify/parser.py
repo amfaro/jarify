@@ -11,6 +11,7 @@ import sqlglot.expressions as _exp
 from sqlglot.dialects.duckdb import DuckDB as _DuckDB
 from sqlglot.errors import ParseError
 from sqlglot.expressions import Expression
+from sqlglot.tokens import TokenType
 
 DUCKDB_DIALECT = "duckdb"
 
@@ -36,6 +37,29 @@ class _JarifyDuckDBParser(_DuckDB.Parser):
     # own `transform` macro. Remove the special-case parser entry so bare
     # TRANSFORM(...) round-trips as an anonymous function call.
     FUNCTIONS: typing.ClassVar = {k: v for k, v in _DuckDB.Parser.FUNCTIONS.items() if k != "TRANSFORM"}
+
+    def _parse_select_query(self, *args: typing.Any, **kwargs: typing.Any) -> _exp.Expr | None:
+        # The FROM token of a FROM-first query (`FROM t`, `FROM t SELECT a`)
+        # holds the comments written above the query.  sqlglot hands them to
+        # the From clause, then drops that clause when it builds the query as
+        # `SELECT * FROM t`, deleting the comments; after `FROM t SELECT a` it
+        # keeps them on the From clause, which generates after the SELECT list.
+        # Put them on the query instead, where a comment above `SELECT` goes.
+        from_token = self._curr if self._curr and self._curr.token_type == TokenType.FROM else None
+        comments = list(from_token.comments) if from_token else []
+        query = super()._parse_select_query(*args, **kwargs)
+        if not comments:
+            return query
+
+        select = query
+        while isinstance(select, _exp.SetOperation):
+            select = select.this
+        if isinstance(select, _exp.Select):
+            from_ = select.args.get("from_")
+            if from_ is not None and from_.comments == comments:
+                from_.pop_comments()
+            select.add_comments(comments, prepend=True)
+        return query
 
 
 class _JarifyDuckDB(_DuckDB):

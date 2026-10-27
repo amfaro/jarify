@@ -1423,6 +1423,21 @@ ORDER BY
 ;
 ```
 
+A comment above a FROM-first query stays above it, as it does above a `SELECT` query. After a `WITH` clause it stays between the last CTE and the query. A FROM-first query with a select list, such as `FROM orders SELECT id`, is written `SELECT`-first, and the comment above it still goes above the whole query.
+
+**Bad** (the comment is deleted)
+```sql
+FROM orders
+;
+```
+
+**Good**
+```sql
+-- every order, including cancelled ones
+FROM orders
+;
+```
+
 Modified stars stay in `SELECT` form and expand their modifiers. `REPLACE` and `RENAME` keep jarify's alias alignment inside the modifier list.
 
 **Bad**

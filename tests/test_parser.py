@@ -152,6 +152,31 @@ class TestReservedKeywordTypeCasts:
         assert '""' not in result
 
 
+class TestFromFirstComments:
+    """Comments above a FROM-first query end up on the query (#353).
+
+    Regression: sqlglot dropped them when it built ``FROM t`` as
+    ``SELECT * FROM t``.
+    """
+
+    def test_comment_above_from_first_query_is_kept(self) -> None:
+        (tree,) = parse_sql("-- note\nFROM t")
+        assert tree.comments == [" note"]
+
+    def test_comment_above_a_later_from_first_query_is_kept(self) -> None:
+        _, tree = parse_sql("SELECT 1;\n-- note\nFROM t")
+        assert tree.comments == [" note"]
+
+    def test_comment_above_from_first_query_with_select_moves_to_the_query(self) -> None:
+        (tree,) = parse_sql("-- note\nFROM t\n-- picks a\nSELECT a")
+        assert tree.comments == [" note", " picks a"]
+        assert not tree.args["from_"].comments
+
+    def test_comment_above_from_first_set_operation_goes_on_its_first_query(self) -> None:
+        (tree,) = parse_sql("-- note\nFROM t UNION ALL FROM u")
+        assert tree.this.comments == [" note"]
+
+
 class TestRustFmtPlaceholderMasking:
     """_mask/_unmask_rust_fmt_placeholders must round-trip cleanly."""
 
