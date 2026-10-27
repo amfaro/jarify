@@ -873,6 +873,29 @@ INNER JOIN fact_transactions ft ON o.id = ft.offer_id
 
 ---
 
+### Lambdas — `lambda x: body`
+
+DuckDB deprecated the arrow lambda (`x -> body`) in favour of `lambda x: body`. Jarify writes the lambda argument of DuckDB's list functions (`list_transform`, `list_filter`, `list_reduce` and their `array_` and short aliases) in the `lambda` form, also in method-call syntax (`names.list_filter(lambda x: …)`), and the lambda in `COLUMNS(lambda c: …)`. It spells `LAMBDA x : body` the same way. Several parameters take no parentheses.
+
+Any other arrow is left as written, because DuckDB reads it as JSON extraction: `doc -> 'key'` in an `ifnull()`, in a list function's first argument, or in a call to a user-defined macro.
+
+**Bad**
+```sql
+SELECT list_transform(tags, t -> upper(t)) AS tags, list_reduce(amounts, (acc, x) -> acc + x) AS total, ifnull(doc -> 'label', 'none') AS label FROM t
+```
+
+**Good**
+```sql
+SELECT
+   list_transform(tags, lambda t: upper(t))     AS tags
+  ,list_reduce(amounts, lambda acc, x: acc + x) AS total
+  ,ifnull(doc -> 'label', 'none')               AS label
+FROM t
+;
+```
+
+---
+
 ### Struct literal — leading-comma style when multi-line
 
 When a positional struct literal `(val1, val2, ...)::my_struct` wraps across lines, the opening `(` appears on its own line and the fields use the same leading-comma style as `SELECT` lists.
