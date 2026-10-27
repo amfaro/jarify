@@ -23,10 +23,13 @@ Subclasses sqlglot's DuckDBGenerator to enforce jarify's opinionated rules:
   all other DuckDB built-in functions remain lowercase
 - FROM/JOIN block: AS omitted from table aliases; ON/USING inline; aliases
   column-aligned when the block contains only simple (single-line) table refs
+- A -- comment never swallows SQL: commented windows, calls and IN lists take
+  their multi-line form; any other comment followed by SQL becomes /* */
 """
 
 from __future__ import annotations
 
+import functools
 import re
 import typing as t
 from typing import TYPE_CHECKING, ClassVar
@@ -187,8 +190,41 @@ class JarifyGenerator(DuckDB.Generator):
         self._leading_comment_texts: frozenset[str] = frozenset()  # set by formatter before generate()
         self._trailing_sep_comment_texts: frozenset[str] = frozenset()  # set by formatter before generate()
         self._connector_force_expand: bool = False  # set True inside WHERE/HAVING to always break AND/OR
+        self._block_comment_texts: frozenset[str] = frozenset()  # comments generate() renders as /* */
 
     def generate(self, expression: exp.Expr, copy: bool = True) -> str:
+        """Generate SQL, never letting a -- comment swallow SQL after it.
+
+        Commented constructs that fit on one line get a multi-line layout where
+        jarify has one. A comment still followed by SQL on its line (e.g. inside
+        a binary expression: ``a /* note */ + 1``) is rendered as a block
+        comment instead, and the statement is generated again so alignment
+        accounts for the block comment's width.
+        """
+        # Comments that already contain /* or */ can't become block comments.
+        texts = {
+            c.strip()
+            for node in expression.walk()
+            for c in node.comments or []
+            if c.strip() and "\n" not in c and "/*" not in c and "*/" not in c
+        }
+        pristine = expression.copy() if texts else expression
+        sql = self._generate_once(expression, copy=copy)
+        blocked: set[str] = set()
+        for _ in range(3):
+            swallowing = self._swallowing_comment_texts(sql, texts - blocked)
+            if not swallowing:
+                break
+            blocked |= swallowing
+            saved = self._block_comment_texts
+            self._block_comment_texts = frozenset(blocked)
+            try:
+                sql = self._generate_once(pristine.copy(), copy=False)
+            finally:
+                self._block_comment_texts = saved
+        return sql
+
+    def _generate_once(self, expression: exp.Expr, copy: bool) -> str:
         saved_align = self._tree_as_align_column
         if self.pretty:
             self._tree_as_align_column = self._compute_tree_as_align_column(expression)
@@ -196,6 +232,46 @@ class JarifyGenerator(DuckDB.Generator):
             return restore_comment_lines(super().generate(expression, copy=copy))
         finally:
             self._tree_as_align_column = saved_align
+
+    @staticmethod
+    def _swallowing_comment_texts(sql: str, texts: set[str]) -> set[str]:
+        """Return the comment texts rendered as ``-- text`` with SQL after them on the same line.
+
+        Other comments after it don't count: only SQL that the comment would
+        swallow does.
+        """
+
+        def candidates(rest: str) -> list[str]:
+            """Known comment texts that the text after a ``--`` could be."""
+            rest = rest.removeprefix(" ")
+            return [x for x in texts if rest.startswith(x)]
+
+        @functools.cache
+        def only_comments(tail: str) -> bool:
+            """True when tail holds nothing but comments (or nothing at all)."""
+            tail = tail.lstrip()
+            if not tail:
+                return True
+            if tail.startswith("/*"):
+                end = tail.find("*/")
+                return end == -1 or only_comments(tail[end + 2 :])
+            if tail.startswith("--"):
+                rest = tail[2:].removeprefix(" ")
+                return any(only_comments(rest[len(x) :]) for x in candidates(rest)) or not candidates(rest)
+            return False
+
+        found: set[str] = set()
+        if not texts:
+            return found
+        for line in sql.split("\n"):
+            start = line.find("--")
+            while start != -1:
+                rest = line[start + 2 :].removeprefix(" ")
+                matches = candidates(rest)
+                if matches and not any(only_comments(rest[len(x) :]) for x in matches):
+                    found.update(matches)
+                start = line.find("--", start + 2)
+        return found
 
     # ------------------------------------------------------------------
     # Function name casing: aggregates/window functions → UPPER, rest → lower
@@ -316,8 +392,14 @@ class JarifyGenerator(DuckDB.Generator):
 
         result_sql = "\n".join(s.rstrip() for s in result_sqls)
         # dynamic=True means "wrap only if necessary" — stay inline when content fits.
-        if dynamic and not self.too_wide(result_sqls):
+        # Commented items never go inline: a -- comment would swallow the rest of the line.
+        commented = dynamic and any(isinstance(e, exp.Expr) and self._has_comments(e) for e in expressions_list)
+        if dynamic and not commented and not self.too_wide(result_sqls):
             return sep.join(s.lstrip(",").lstrip() for s in result_sqls)
+        if dynamic and commented and new_line:
+            # Put the items between their own ( and ) lines, like wrapped call
+            # arguments, so the last item's comment can't swallow the ")".
+            return self.indent("\n" + result_sql + "\n", skip_first=True, skip_last=True)
         return self.indent(result_sql, skip_first=skip_first, skip_last=skip_last) if indent else result_sql
 
     def _inline_comments(self, expression: exp.Expr) -> str:
@@ -335,6 +417,8 @@ class JarifyGenerator(DuckDB.Generator):
                 continue
             if "\n" in c:
                 parts.append(f"/*{_mark_comment_lines(c)}*/")
+            elif c.strip() in self._block_comment_texts:
+                parts.append(f"/* {c.strip()} */")
             else:
                 parts.append(f"-- {c.strip()}")
         if not parts:
@@ -1177,6 +1261,10 @@ class JarifyGenerator(DuckDB.Generator):
             return False
         return any(getattr(node, "comments", None) for node in expression.walk())
 
+    def _has_inner_comments(self, expression: exp.Expr) -> bool:
+        """Return True when a descendant of expression (not expression itself) carries comments."""
+        return any(node.comments for node in expression.walk() if node is not expression)
+
     def _compact_sql(self, expression: exp.Expr) -> str:
         """Render expression compactly without line breaks."""
         saved = self.pretty
@@ -1494,6 +1582,42 @@ class JarifyGenerator(DuckDB.Generator):
         )
 
     # ------------------------------------------------------------------
+    # Window: OVER (...) stays inline, but a commented window spec breaks
+    # into one clause per line so every -- comment ends its line.
+    # ------------------------------------------------------------------
+
+    def window_sql(self, expression: exp.Window) -> str:
+        this = expression.this
+        is_corr = isinstance(this, exp.Corr) or (isinstance(this, exp.Filter) and isinstance(this.this, exp.Corr))
+        partition_by = expression.args.get("partition_by") or []
+        order = expression.args.get("order")
+        spec = expression.args.get("spec")
+        commented = any(self._has_comments(part) for part in (*partition_by, order, spec) if part is not None)
+        if not self.pretty or is_corr or not commented:
+            return super().window_sql(expression)
+
+        keyword = "AS" if expression.arg_key == "windows" else self.sql(expression, "over") or "OVER"
+        # Body lines start one column in, like CASE: in a SELECT list that
+        # lines the closing paren up under the function name.
+        lines = [f"{self.sql(expression, 'this')} {keyword} ("]
+        if expression.args.get("alias"):
+            lines.append(f" {self.sql(expression, 'alias')}")
+        if expression.args.get("first") is not None:
+            lines.append(" FIRST" if expression.args["first"] else " LAST")
+        if partition_by:
+            lines.append(" PARTITION BY")
+            lines.extend(f" {line}" for line in self.expressions(expression, key="partition_by").split("\n"))
+        if order is not None:
+            # A comment on ORDER BY itself stays on its own line above it.
+            lines.extend(f" {line}" for line in self._render_comments(order.comments or [], leading=True).split("\n"))
+            lines.append(" ORDER BY")
+            lines.extend(f" {line}" for line in self.expressions(order).split("\n"))
+        if spec is not None:
+            lines.append(f" {self.sql(spec)}")
+        lines.append(" )")
+        return self.indent("\n".join(line for line in lines if line.strip()), skip_first=True, skip_last=True)
+
+    # ------------------------------------------------------------------
     # -> / ->>: render without surrounding spaces (value->>'key' not value ->> 'key').
     # sqlglot's default binary() always adds " op " padding; we bypass it here.
     # For static JSONPath expressions, also strip the $. prefix for simple
@@ -1549,9 +1673,15 @@ class JarifyGenerator(DuckDB.Generator):
         saved = self.pretty
         self.pretty = False
         try:
-            return _groupconcat_sql(self, expression.copy(), func_name="string_agg", within_group=False)
+            sql = _groupconcat_sql(self, expression.copy(), func_name="string_agg", within_group=False)
         finally:
             self.pretty = saved
+        if self.pretty and self._has_inner_comments(expression) and sql.endswith(")"):
+            # The compact form would let a -- comment swallow the closing
+            # paren, so put the arguments on their own line.
+            name, _, inner = sql[:-1].partition("(")
+            return f"{name}({self._wrapped_args([inner])})"
+        return sql
 
     # ------------------------------------------------------------------
     # coalesce: keep canonical lowercase function name.
@@ -1684,6 +1814,9 @@ class JarifyGenerator(DuckDB.Generator):
                 return self._add_arrayagg_null_filter(result, expression, expression.this)
         # Non-DISTINCT, compact mode, or DISTINCT that fits inline: emit list(<inner>)
         inner = self.sql(expression, "this")
+        if self.pretty and self._has_comments(expression.this):
+            # e.g. list(x ORDER BY y -- note): put the argument on its own line
+            inner = self._wrapped_args([inner])
         result = f"{func_name}({inner})"
         return self._add_arrayagg_null_filter(result, expression, expression.this)
 
@@ -1711,17 +1844,26 @@ class JarifyGenerator(DuckDB.Generator):
 
     def format_args(self, *args: t.Any, sep: str = ", ") -> str:
         arg_sqls = tuple(self.sql(arg) for arg in args if arg is not None and not isinstance(arg, bool))
-        if self.pretty and self.too_wide(arg_sqls):
-            if self.leading_comma:
-                # Only a comma-separated list gets leading commas. Space-separated
-                # parts, such as a window's PARTITION BY / ORDER BY / frame
-                # clauses, go one per line aligned with the first.
-                leader = "," if sep.strip() == "," else " "
-                parts = [f" {arg_sqls[0]}"]
-                parts.extend(f"{leader}{sql}" for sql in arg_sqls[1:])
-                return self.indent("\n" + "\n".join(parts) + "\n", skip_first=True, skip_last=True)
-            return self.indent("\n" + f"{sep.strip()}\n".join(arg_sqls) + "\n", skip_first=True, skip_last=True)
+        if self.pretty and (self.too_wide(arg_sqls) or self._has_commented_arg(args, sep)):
+            return self._wrapped_args(arg_sqls, sep=sep)
         return sep.join(arg_sqls)
+
+    def _has_commented_arg(self, args: t.Sequence[t.Any], sep: str) -> bool:
+        """A commented argument wraps the call one argument per line, so its
+        -- comment ends the line instead of swallowing the rest of the call."""
+        return sep.strip() == "," and any(isinstance(a, exp.Expr) and self._has_comments(a) for a in args)
+
+    def _wrapped_args(self, arg_sqls: t.Sequence[str], sep: str = ", ") -> str:
+        """Lay out call arguments one per line, between the call's parentheses."""
+        if self.leading_comma:
+            # Only a comma-separated list gets leading commas. Space-separated
+            # parts, such as a window's PARTITION BY / ORDER BY / frame
+            # clauses, go one per line aligned with the first.
+            leader = "," if sep.strip() == "," else " "
+            parts = [f" {arg_sqls[0]}"]
+            parts.extend(f"{leader}{sql}" for sql in arg_sqls[1:])
+            return self.indent("\n" + "\n".join(parts) + "\n", skip_first=True, skip_last=True)
+        return self.indent("\n" + f"{sep.strip()}\n".join(arg_sqls) + "\n", skip_first=True, skip_last=True)
 
     # ------------------------------------------------------------------
     # Data types — always lowercase (text, int, timestamp, …)
