@@ -730,6 +730,80 @@ WHERE a.allocation_per_year IS NOT NULL --eligible_for_allocation = 1
         assert "if(\n      a IS NOT NULL -- has a\n     ,1\n     ,2\n  ) AS x" in result
 
 
+class TestFirstConditionComments:
+    """An own-line comment before a condition stays on its own line (#354)."""
+
+    def test_comment_before_first_where_condition_goes_above_where(self):
+        sql = "SELECT a FROM t\nWHERE\n  -- only active rows\n  a = 1\n  AND b = 2\n"
+        result, _ = format_sql(sql)
+        assert result == "SELECT\n   a\nFROM t\n-- only active rows\nWHERE a = 1\n  AND b = 2\n;\n"
+        assert format_sql(result)[0] == result
+
+    def test_comment_before_single_where_condition_goes_above_where(self):
+        result, _ = format_sql("SELECT a FROM t\nWHERE\n  -- only active rows\n  a = 1\n")
+        assert "FROM t\n-- only active rows\nWHERE a = 1\n;" in result
+
+    def test_comment_goes_where_a_comment_on_the_where_line_goes(self):
+        before, _ = format_sql("SELECT a FROM t\nWHERE\n  -- note\n  a = 1 OR b = 2\n")
+        on_line, _ = format_sql("SELECT a FROM t\nWHERE -- note\n  a = 1 OR b = 2\n")
+        assert before == on_line
+
+    def test_comment_before_first_having_condition_goes_above_having(self):
+        sql = "SELECT a, COUNT(*) AS n FROM t GROUP BY ALL\nHAVING\n  -- big\n  COUNT(*) > 1\n  OR a IS NULL\n"
+        result, _ = format_sql(sql)
+        assert "GROUP BY ALL\n-- big\nHAVING COUNT(*) > 1 OR a IS NULL\n;" in result
+
+    def test_comment_before_first_qualify_condition_stays_below_qualify(self):
+        sql = "SELECT a FROM t\nQUALIFY\n  -- latest\n  ROW_NUMBER() OVER (ORDER BY b) = 1\n"
+        result, _ = format_sql(sql)
+        assert "QUALIFY\n  -- latest\n  ROW_NUMBER() OVER (ORDER BY b) = 1\n;" in result
+
+    def test_comment_before_first_join_on_condition_goes_above_join(self):
+        sql = "SELECT a FROM t\nINNER JOIN u ON\n  -- match\n  u.id = t.id\n  AND u.k = 1\n"
+        result, _ = format_sql(sql)
+        assert "FROM t\n-- match\nINNER JOIN u ON u.id = t.id AND u.k = 1\n;" in result
+
+    @pytest.mark.parametrize(
+        "condition",
+        ["CAST(a AS int) = 1", "a::int = 1", "a IS NOT NULL", "a IN (1, 2)", "a BETWEEN 1 AND 2", "EXISTS (SELECT 1)"],
+    )
+    def test_comment_before_any_first_condition_leaves_it_whole(self, condition):
+        result, _ = format_sql(f"SELECT a FROM t\nWHERE\n  -- note\n  {condition}\n")
+        assert "FROM t\n-- note\nWHERE " in result
+        assert "/*" not in result
+
+    def test_comment_after_connector_on_its_own_line_moves_above_it(self):
+        sql = "SELECT a FROM t\nWHERE a > 1 AND\n  -- why b\n  b > 2 OR\n  -- why c\n  c = 3\n"
+        result, _ = format_sql(sql)
+        assert "WHERE a > 1\n  -- why b\n  AND b > 2\n   -- why c\n   OR c = 3\n;" in result
+
+    def test_comment_before_first_branch_in_parens_stays_after_the_paren(self):
+        sql = "SELECT a FROM t\nWHERE a > 1 AND (\n  -- either\n  b = 1 OR c = 2)\n"
+        result, _ = format_sql(sql)
+        assert "  AND (\n    -- either\n    b = 1\n    OR c = 2\n  )\n" in result
+
+    def test_comment_survives_a_query_rendered_twice_for_alias_alignment(self):
+        sql = "SELECT (SELECT MAX(x) FROM u WHERE\n  -- latest\n  u.id = t.id) AS m, b AS c FROM t\n"
+        result, _ = format_sql(sql)
+        assert result.count("-- latest") == 1
+        assert "    -- latest\n    WHERE u.id = t.id\n" in result
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            # FILTER (WHERE …) stays on the aggregate's line, so the comment can't go above it.
+            "SELECT ANY_VALUE(a) FILTER (WHERE\n  -- note\n  b = 1) AS x, c AS y FROM t\n",
+            # sqlglot moves a SELECT item's own comments onto its alias when it parses the output.
+            "SELECT a AND\n  -- note\n  b AS x, y AS z FROM t\n",
+        ],
+    )
+    def test_comment_that_cannot_move_stays_put_and_stable(self, sql):
+        result, _ = format_sql(sql)
+        assert result.count("note") == 1
+        assert "FILTER(-- note" not in result
+        assert format_sql(result)[0] == result
+
+
 class TestFromFirst:
     def test_select_star_becomes_from_first(self):
         from jarify.formatter import format_sql
