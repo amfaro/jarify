@@ -663,7 +663,7 @@ def parse_sql(sql: str, dialect: str = DUCKDB_DIALECT) -> list[Expression]:
     """
     preprocessed = _quote_reserved_cast_types(sql)
     trees = sqlglot.parse(preprocessed, read=_read_dialect(dialect), error_level=sqlglot.ErrorLevel.RAISE)
-    return _hoist_from_table_joins(trees)
+    return _wrap_nested_joins(_hoist_from_table_joins(trees))
 
 
 # Set in a query's meta when its joins were moved off a FROM-first query's
@@ -695,6 +695,29 @@ def _hoist_from_table_joins(trees: list[Expression]) -> list[Expression]:
     return trees
 
 
+def _wrap_nested_joins(trees: list[Expression]) -> list[Expression]:
+    """Parenthesize a nested join written without parentheses.
+
+    In ``t JOIN u JOIN v ON v.id = u.id ON u.id = t.id`` sqlglot puts
+    ``JOIN v`` in the ``joins`` arg of the joined table ``u``, which the
+    generator doesn't render, so the join was dropped. The parenthesized form,
+    ``t JOIN (u JOIN v ON v.id = u.id) ON u.id = t.id``, means the same and
+    parses to the same table wrapped in a subquery node, so it's rewritten to
+    that.
+    """
+    for tree in trees:
+        if tree is None:
+            continue
+        nested = [
+            join
+            for join in tree.find_all(_exp.Join)
+            if isinstance(join.this, _exp.Table) and join.this.args.get("joins")
+        ]
+        for join in nested:
+            join.set("this", _exp.Subquery(this=join.this))
+    return trees
+
+
 def parse_sql_lenient(sql: str, dialect: str = DUCKDB_DIALECT) -> tuple[list[Expression], list[ParseError]]:
     """Parse SQL leniently, collecting errors instead of raising."""
     preprocessed = _quote_reserved_cast_types(sql)
@@ -712,4 +735,4 @@ def parse_sql_lenient(sql: str, dialect: str = DUCKDB_DIALECT) -> tuple[list[Exp
             sqlglot.parse(preprocessed, read=read, error_level=sqlglot.ErrorLevel.RAISE)
         except ParseError as e:
             errors.append(e)
-    return _hoist_from_table_joins(trees), errors
+    return _wrap_nested_joins(_hoist_from_table_joins(trees)), errors

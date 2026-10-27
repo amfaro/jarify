@@ -1132,6 +1132,29 @@ class JarifyGenerator(DuckDB.Generator):
 
         return self.seg(self._inline_on_sql(expression, f"{op_sql} {this_sql}"))
 
+    def table_sql(self, expression: exp.Table, sep: str = " AS ") -> str:
+        joins = expression.args.get("joins")
+        if not (self.pretty and joins):
+            return super().table_sql(expression, sep)
+        # The first table of a parenthesized join, `(u JOIN v ON …)`. Lay
+        # the group out like a FROM clause: the table on its own line, each
+        # join on its own line under it, and their aliases aligned.
+        first = expression.copy()
+        first.set("joins", None)
+        saved_align = self._join_alias_col
+        self._join_alias_col = self._join_block_align_width(first, joins, -1)
+        try:
+            table_ref = self.table_parts(first)
+            alias_str = self._table_alias_str(first, comment=False)
+            if alias_str and self._join_alias_col is not None:
+                pad = " " * max(1, self._join_alias_col - len(table_ref) - self._table_alias_width(first))
+                head = f"{table_ref}{pad}{alias_str}"
+            else:
+                head = f"{table_ref} {alias_str}" if alias_str else table_ref
+            return head + self._table_comments_sql(first) + "".join(self.sql(join) for join in joins)
+        finally:
+            self._join_alias_col = saved_align
+
     def from_sql(self, expression: exp.From) -> str:
         table = expression.this
         if not self.pretty:
@@ -1262,16 +1285,23 @@ class JarifyGenerator(DuckDB.Generator):
         subquery, or no entries have aliases).
         """
         from_expr = expression.args.get("from_")
-        joins = expression.args.get("joins") or []
         if not from_expr:
             return None
+        return self._join_block_align_width(from_expr.this, expression.args.get("joins") or [], len("FROM"))
 
+    def _join_block_align_width(self, first: exp.Expr, joins: list[exp.Join], first_kw_len: int) -> int | None:
+        """Compute the alias column for a first table and its joins.
+
+        *first_kw_len* is the width of the keyword before the first table
+        (``FROM``), or ``-1`` when it starts its line, as the first table of a
+        parenthesized join does.
+        """
         entries: list[tuple[int, str, exp.Expr]] = []
 
-        from_ref = self._table_ref_only_sql(from_expr.this)
+        from_ref = self._table_ref_only_sql(first)
         if from_ref is None:
             return None
-        entries.append((len("FROM"), from_ref, from_expr.this))
+        entries.append((first_kw_len, from_ref, first))
 
         for join in joins:
             # Normalize the keyword before measuring its length so the alignment

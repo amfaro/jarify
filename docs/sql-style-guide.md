@@ -1214,6 +1214,25 @@ LEFT JOIN addresses addr ON addr.id = o.aid
 CROSS JOIN regions -- every region
 ```
 
+A nested join is written as a parenthesized group, which means the same as the form without parentheses. The group is laid out like a `FROM` clause: its first table on its own line, then one join per line, with aliases aligned.
+
+**Bad** (written without parentheses, each `ON` far from its join)
+```sql
+SELECT tt.a FROM tbl tt LEFT JOIN users uu JOIN visits vv ON vv.uid = uu.id ON uu.id = tt.uid
+```
+
+**Good**
+```sql
+SELECT
+   tt.a
+FROM tbl tt
+LEFT JOIN (
+  users             uu
+  INNER JOIN visits vv ON vv.uid = uu.id
+) ON uu.id = tt.uid
+;
+```
+
 ---
 
 ### Bare `JOIN` → `INNER JOIN`

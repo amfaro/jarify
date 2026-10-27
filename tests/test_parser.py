@@ -108,6 +108,26 @@ class TestFromFirstJoins:
         assert trees[0].args["joins"]
 
 
+class TestNestedJoins:
+    """sqlglot attaches a nested join to the joined table; parse_sql parenthesizes it (#386)."""
+
+    @pytest.mark.parametrize("parse", [lambda sql: parse_sql(sql), lambda sql: parse_sql_lenient(sql)[0]])
+    def test_nested_join_becomes_a_parenthesized_group(self, parse) -> None:
+        select = parse("SELECT t.a FROM t JOIN u JOIN v ON v.id = u.id ON u.id = t.id")[0]
+        (join,) = select.args["joins"]
+        assert isinstance(join.this, exp.Subquery)
+        assert [inner.this.name for inner in join.this.this.args["joins"]] == ["v"]
+
+    def test_parenthesized_join_parses_the_same(self) -> None:
+        nested = parse_sql("SELECT t.a FROM t JOIN u JOIN v ON v.id = u.id ON u.id = t.id")[0]
+        wrapped = parse_sql("SELECT t.a FROM t JOIN (u JOIN v ON v.id = u.id) ON u.id = t.id")[0]
+        assert nested == wrapped
+
+    def test_plain_joins_are_unchanged(self) -> None:
+        select = parse_sql("SELECT t.a FROM t JOIN u ON u.id = t.id JOIN v ON v.id = u.id")[0]
+        assert all(isinstance(join.this, exp.Table) for join in select.args["joins"])
+
+
 class TestReservedKeywordTypeCasts:
     """::reserved_keyword[] cast type names must parse and round-trip correctly."""
 
@@ -232,7 +252,8 @@ class TestKeywordComments:
         (tree,) = parse_sql("SELECT a FROM t JOIN u JOIN v ON /* inner */ v.id = u.id ON /* outer */ u.id = t.id")
         join = tree.args["joins"][0]
         assert join.comments == [" outer "]
-        assert join.this.args["joins"][0].comments == [" inner "]
+        # parse_sql parenthesizes the nested join (#386).
+        assert join.this.this.args["joins"][0].comments == [" inner "]
 
     def test_case_keeps_when_then_and_else_comments(self) -> None:
         sql = "SELECT CASE /* case */ WHEN /* w */ a THEN /* t */ CASE WHEN b THEN /* inner */ 1 END ELSE /* e */ 2 END"
