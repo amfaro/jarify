@@ -6,6 +6,7 @@ import sys
 import pytest
 
 from jarify.parser import (
+    FROM_FIRST_JOINS_KEY,
     _extract_ctas_body_placeholders,
     _extract_line_rust_fmt_placeholders,
     _mask_rust_fmt_placeholders,
@@ -50,6 +51,43 @@ def test_parse_lenient_emits_nothing_to_stderr():
     finally:
         sys.stderr = old_stderr
     assert captured.getvalue() == "", f"Unexpected stderr output: {captured.getvalue()!r}"
+
+
+class TestFromFirstJoins:
+    """sqlglot attaches a FROM-first query's joins to its FROM table; parse_sql moves them to the query."""
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "FROM t p SEMI JOIN d dd ON dd.x = p.x INNER JOIN e ee ON ee.y = p.y",
+            "FROM t SEMI JOIN d ON d.x = t.x",
+            "FROM t p, d dd",
+            "FROM t p LEFT JOIN d dd ON dd.x = p.x SELECT p.a",
+        ],
+    )
+    def test_joins_move_to_the_query(self, sql: str) -> None:
+        select = parse_sql(sql)[0]
+        assert not select.args["from_"].this.args.get("joins")
+        assert select.args["joins"]
+        assert select.meta.get(FROM_FIRST_JOINS_KEY) is True
+
+    def test_joins_keep_their_order(self) -> None:
+        select = parse_sql("FROM t p SEMI JOIN d dd ON dd.x = p.x INNER JOIN e ee ON ee.y = p.y")[0]
+        assert [join.this.alias for join in select.args["joins"]] == ["dd", "ee"]
+
+    def test_cte_body_joins_move(self) -> None:
+        tree = parse_sql("WITH _c AS (FROM t p SEMI JOIN d dd ON dd.x = p.x) SELECT * FROM _c")[0]
+        body = tree.args["with_"].expressions[0].this
+        assert body.args["joins"] and body.meta.get(FROM_FIRST_JOINS_KEY) is True
+
+    def test_select_form_is_not_marked(self) -> None:
+        select = parse_sql("SELECT * FROM t p SEMI JOIN d dd ON dd.x = p.x")[0]
+        assert select.args["joins"]
+        assert not select.meta.get(FROM_FIRST_JOINS_KEY)
+
+    def test_lenient_parse_moves_joins_too(self) -> None:
+        trees, _ = parse_sql_lenient("FROM t p SEMI JOIN d dd ON dd.x = p.x")
+        assert trees[0].args["joins"]
 
 
 class TestReservedKeywordTypeCasts:

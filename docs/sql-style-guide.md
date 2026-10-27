@@ -1263,7 +1263,14 @@ FROM data
 
 ### `SELECT *` — rewritten as FROM-first
 
-Plain, unmodified `SELECT *` is rewritten to DuckDB's FROM-first syntax, omitting the `SELECT` clause entirely. Applies only when there are no JOINs.
+Plain, unmodified `SELECT *` is rewritten to DuckDB's FROM-first syntax, omitting the `SELECT` clause entirely. Applies only when there are no JOINs. A query already written FROM-first keeps that form with its joins, one per line like any other join, while `SELECT * FROM t JOIN u` keeps its `SELECT`:
+
+```sql
+FROM rpt.points_with_monetary_value p
+SEMI JOIN common.dates              d ON d.the_date = p.the_date
+SEMI JOIN _clients                  c USING (parent_client_id)
+;
+```
 
 **Bad**
 ```sql

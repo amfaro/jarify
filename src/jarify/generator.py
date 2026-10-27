@@ -40,7 +40,7 @@ import sqlglot.expressions as exp
 from sqlglot.dialects.dialect import groupconcat_sql as _groupconcat_sql
 from sqlglot.dialects.duckdb import DuckDB
 
-from jarify.parser import _IFNULL_SENTINEL
+from jarify.parser import _IFNULL_SENTINEL, FROM_FIRST_JOINS_KEY
 
 if TYPE_CHECKING:
     from jarify.config import JarifyConfig
@@ -1544,9 +1544,10 @@ class JarifyGenerator(DuckDB.Generator):
 
             # FROM-first is safe when there are no explicit joins. Comma joins
             # (kind=None, no on/using) are fine — sqlglot round-trips them
-            # correctly. Explicit joins (INNER, LEFT, SEMI, etc.) are excluded
-            # because sqlglot re-parses `FROM t JOIN u` differently from
-            # `SELECT * FROM t JOIN u`, breaking idempotency.
+            # correctly. A query written FROM-first with explicit joins
+            # (INNER, LEFT, SEMI, etc.) stays FROM-first: parse_sql moves its
+            # joins to the query and marks it, so it re-parses the same way.
+            # `SELECT * FROM t JOIN u` keeps its SELECT.
             joins = expression.args.get("joins") or []
             only_comma_joins = all(
                 not j.args.get("kind")
@@ -1561,7 +1562,7 @@ class JarifyGenerator(DuckDB.Generator):
                 and self._config.prefer_from_first
                 and plain_star
                 and not expression.args.get("distinct")
-                and only_comma_joins
+                and (only_comma_joins or expression.meta.get(FROM_FIRST_JOINS_KEY))
             ):
                 expr_copy = expression.copy()
                 expr_copy.set("expressions", [])
