@@ -1612,6 +1612,11 @@ class JarifyGenerator(DuckDB.Generator):
                 expr_copy = expression.copy()
                 expr_copy.set("expressions", [])
                 sql = super().select_sql(expr_copy)
+                if expression.comments and not expr_copy.comments:
+                    # After a WITH clause sqlglot writes the comments above the
+                    # query and pops them from the copy; pop them here too, or
+                    # sql() writes them a second time above the WITH.
+                    expression.pop_comments()
                 # Strip the bare "SELECT" line (no columns → "SELECT\nFROM ...")
                 # Uses multiline ^ so indented "  SELECT" inside CTEs is never matched.
                 return re.sub(r"(?m)^SELECT\n", "", sql)
