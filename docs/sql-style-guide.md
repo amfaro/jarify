@@ -938,6 +938,8 @@ INNER JOIN bar ON foo.id = bar.id
 ;
 ```
 
+Set `normalize_join = false` to keep a bare `JOIN` as written.
+
 ---
 
 ### `LEFT OUTER JOIN` → `LEFT JOIN`
@@ -1510,6 +1512,9 @@ Supported directives:
 - `-- jarify: set max_line_length = 140` / `-- jarify: reset max_line_length` — override line length for following statements until reset
 - `-- jarify: set min-column-alias = 80` / `-- jarify: reset min-column-alias` — set or clear a minimum visible column-alias alignment floor for following statements
 - `-- jarify: set alias-visual-guide-interval = 12` / `-- jarify: reset alias-visual-guide-interval` — set or clear the visual-guide interval for column-alias alignment for following statements
+- `-- jarify: set <option> = true` / `false`, e.g. `-- jarify: set prefer-from-first = false` / `-- jarify: reset prefer-from-first` — turn an on/off option such as `explicit-outer-join` or `normalize-join` on or off for following statements
+
+A `set` lasts until the next `set` or `reset` of the same option. A `set` that names an unknown option, or gives a value the option can't take, is ignored.
 
 Rules use their lint names such as `no-select-star`, `cte-naming`, or `prefer-if-over-case`. The wildcard `all` matches every rule — handy for silencing files edited in a non-DuckDB IDE. `enable all` closes every open `disable` region.
 

@@ -84,6 +84,43 @@ class TestOverrideParsing:
         config = JarifyConfig(alias_visual_guide_interval=16)
         assert overrides.config_for_line(config, 2).alias_visual_guide_interval == 16
 
+    def test_set_boolean_option_parses_true_and_false(self):
+        overrides = parse_comment_overrides(
+            "-- jarify: set prefer-from-first = FALSE\nSELECT * FROM t\n"
+            "-- jarify: set explicit_outer_join = True\nSELECT a FROM t LEFT JOIN u ON u.id = t.id\n"
+        )
+
+        config = overrides.config_for_line(JarifyConfig(), 4)
+        assert config.prefer_from_first is False
+        assert config.explicit_outer_join is True
+
+    def test_set_boolean_option_ignores_other_values(self):
+        overrides = parse_comment_overrides("-- jarify: set prefer-from-first = no\nSELECT * FROM t\n")
+
+        assert overrides.config_for_line(JarifyConfig(), 2).prefer_from_first is True
+
+    def test_set_ignores_unknown_and_list_options(self):
+        overrides = parse_comment_overrides(
+            "-- jarify: set no_such_option = 1\n-- jarify: set uppercase_functions = list\nSELECT 1\n"
+        )
+
+        assert overrides.config_for_line(JarifyConfig(), 3) == JarifyConfig()
+
+    def test_set_parses_integer_options(self):
+        overrides = parse_comment_overrides("-- jarify: set indent = 4\nSELECT 1\n")
+
+        assert overrides.config_for_line(JarifyConfig(), 2).indent == 4
+
+    def test_second_set_ends_the_first_range(self):
+        overrides = parse_comment_overrides(
+            "-- jarify: set explicit-outer-join = true\nSELECT 1\n;\n"
+            "-- jarify: set explicit-outer-join = false\nSELECT 2\n"
+        )
+
+        config = JarifyConfig()
+        assert overrides.config_for_line(config, 2).explicit_outer_join is True
+        assert overrides.config_for_line(config, 5).explicit_outer_join is False
+
 
 class TestLintOverrides:
     def test_disable_line_suppresses_inline_violation(self):
@@ -306,3 +343,37 @@ class TestFormatOverrides:
 
         alias_lines = [line for line in formatted.splitlines() if " AS " in line]
         assert [line.index(" AS ") + 2 for line in alias_lines] == [36, 36]
+
+    def test_set_boolean_option_turns_it_off_until_reset(self):
+        sql = (
+            "-- jarify: set prefer-from-first = false\n"
+            "SELECT * FROM t;\n"
+            "-- jarify: reset prefer-from-first\n"
+            "SELECT * FROM u"
+        )
+
+        formatted, _ = format_sql(sql)
+
+        assert "SELECT\n   *\nFROM t\n;" in formatted
+        assert "\nFROM u\n;" in formatted
+        assert "*\nFROM u" not in formatted
+
+    def test_set_explicit_outer_join_per_statement(self):
+        sql = (
+            "-- jarify: set explicit-outer-join = true\n"
+            "SELECT a FROM t LEFT JOIN u ON u.id = t.id;\n"
+            "-- jarify: set explicit-outer-join = false\n"
+            "SELECT a FROM t LEFT OUTER JOIN u ON u.id = t.id"
+        )
+
+        formatted, _ = format_sql(sql)
+
+        first, second = formatted.split("\n;\n", 1)
+        assert "LEFT OUTER JOIN u" in first
+        assert "LEFT JOIN u" in second
+
+    def test_set_unknown_option_does_not_fail(self):
+        formatted, warnings = format_sql("-- jarify: set no_such_option = 1\nSELECT a FROM t")
+
+        assert not warnings
+        assert "SELECT\n   a\nFROM t\n;" in formatted

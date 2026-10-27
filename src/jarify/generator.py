@@ -729,8 +729,11 @@ class JarifyGenerator(DuckDB.Generator):
     # ------------------------------------------------------------------
 
     def _normalize_bare_join(self, expression: exp.Join) -> exp.Join:
-        """Write a bare JOIN that has an ON or USING condition as INNER JOIN."""
+        """Write a bare JOIN that has an ON or USING condition as INNER JOIN,
+        unless normalize_join is off."""
         has_condition = expression.args.get("on") or expression.args.get("using")
+        if not self._config.normalize_join:
+            return expression
         if expression.side or expression.kind or expression.method or not has_condition:
             return expression
         normalized = expression.copy()
