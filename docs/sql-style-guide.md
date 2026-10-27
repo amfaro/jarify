@@ -847,6 +847,32 @@ FROM t
 
 ---
 
+### String literals — line breaks kept as written
+
+A line break inside a string literal is part of its value. Jarify never re-indents the lines after it, wherever the literal is: in a column, a function argument, a `CASE` branch or a join condition.
+
+**Bad** (each pass indents `two` further, changing the string)
+```sql
+SELECT
+   'a' || if(x = 1, 'one
+  two', 'b') AS v
+FROM t
+;
+```
+
+**Good**
+```sql
+SELECT
+   'a' || if(x = 1, 'one
+two', 'b') AS v
+FROM t
+;
+```
+
+A `SELECT` written on one line, such as a short scalar subquery in a `CASE` branch, has no alias alignment of its own: `(SELECT MAX(v) AS m FROM u)`, not `(SELECT MAX(v)      AS m FROM u)`.
+
+---
+
 ### Block comments — lines kept as written
 
 Jarify places a multi-line `/* … */` comment like any other comment but never re-indents the lines inside it: they stay exactly as written, so commented-out SQL keeps its layout and formatting the file again changes nothing.
@@ -1059,6 +1085,8 @@ The interval applies wherever jarify aligns column aliases:
 - the query-wide column shared by the outer `SELECT` and its CTEs, nested CTEs included
 - `SELECT` lists that align on their own, such as the branches of a top-level `UNION`
 - multi-line expressions, which align by their closing line (`END AS …`)
+
+A column whose last line is inside a string literal, such as `'line one<newline>line two' AS note`, aligns on its own with one space before `AS`, since the literal's lines are written as they are (see [String literals](#string-literals--line-breaks-kept-as-written)).
 - the `REPLACE` and `RENAME` lists of a star
 
 Table aliases in `FROM` and `JOIN` keep their own alignment.

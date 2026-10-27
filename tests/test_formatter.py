@@ -1557,6 +1557,55 @@ class TestOrderByAll:
         assert "ORDER BY\n" not in out
 
 
+class TestStringLiteralLineBreaks:
+    """A string literal's line breaks are part of its value and never re-indented (#384)."""
+
+    @pytest.mark.parametrize(
+        ("sql", "literal"),
+        [
+            ("SELECT 'a' || if(x = 1, 'one\ntwo', 'b') AS v FROM t", "'one\ntwo'"),
+            ("SELECT CASE WHEN x = 1 THEN 'a\nb' WHEN x = 2 THEN 'c' END AS v FROM t", "'a\nb'"),
+            ("SELECT t.a FROM t INNER JOIN u ON u.s = 'x\ny' AND u.id = t.id", "'x\ny'"),
+            ("SELECT string_agg(a, '\n') AS s FROM t GROUP BY ALL", "'\n'"),
+            ("SELECT k AS kk, (SELECT max(v) FROM u WHERE u.s = 'p\nq') AS w FROM t", "'p\nq'"),
+        ],
+    )
+    def test_literal_in_a_compact_expression_keeps_its_lines(self, sql, literal):
+        once, _ = format_sql(sql)
+        assert literal in once
+        assert format_sql(once)[0] == once
+
+    def test_column_ending_in_a_literal_aligns_on_its_own(self):
+        out, _ = format_sql("SELECT 'ab\ncdefghijklmnop' AS s, b AS bb, ccc AS c FROM t")
+        assert "   'ab\ncdefghijklmnop' AS s\n  ,b   AS bb\n  ,ccc AS c\n" in out
+        assert format_sql(out)[0] == out
+
+    def test_unaliased_literal_does_not_widen_the_alignment(self):
+        out, _ = format_sql("SELECT 'x\ny', bbb AS b, c AS cc FROM t")
+        assert "  ,bbb AS b\n  ,c   AS cc\n" in out
+
+    def test_case_with_a_literal_in_a_branch_still_aligns_by_its_end(self):
+        out, _ = format_sql(
+            "SELECT CASE WHEN x = 1 THEN 'a\nb' WHEN x = 2 THEN 'c' END AS v, bbbbbbbbbbbbbbbbbbbb AS b FROM t"
+        )
+        assert "   END                  AS v\n  ,bbbbbbbbbbbbbbbbbbbb AS b\n" in out
+
+
+class TestCompactSubqueryAlias:
+    """A SELECT rendered on one line doesn't take the enclosing list's alias padding (#384)."""
+
+    def test_compact_scalar_subquery_alias_is_not_padded(self):
+        sql = "SELECT k AS kk, CASE WHEN y = 1 THEN (SELECT max(v) AS m FROM u) WHEN y = 2 THEN 2 END AS w FROM t"
+        out, _ = format_sql(sql, JarifyConfig(min_column_alias=34))
+        assert "     THEN (SELECT MAX(v) AS m FROM u)\n" in out
+        assert format_sql(out, JarifyConfig(min_column_alias=34))[0] == out
+
+    def test_multi_line_subquery_still_aligns_its_own_list(self):
+        sql = "SELECT k AS kk, (SELECT max(v) AS m FROM u) AS w FROM t"
+        out, _ = format_sql(sql, JarifyConfig(min_column_alias=34))
+        assert "       MAX(v)                      AS m\n" in out
+
+
 class TestInListWrapping:
     LONG = (
         "('NLD', 'DEU', 'POL', 'ISR', 'FRA', 'GBR', 'ITA', 'ESP', 'AUT', 'BEL', 'SWE', "
