@@ -308,6 +308,7 @@ class JarifyGenerator(DuckDB.Generator):
         self._connector_force_expand: bool = False  # set True inside WHERE/HAVING to always break AND/OR
         self._block_comment_texts: frozenset[str] = frozenset()  # comments generate() renders as /* */
         self._statement: exp.Expr | None = None  # the tree super().generate() is rendering
+        self._pretty_statement: bool = False  # True while a pretty statement renders, even where pretty is off
 
     def preprocess(self, expression: exp.Expr) -> exp.Expr:
         expression = super().preprocess(expression)
@@ -322,6 +323,16 @@ class JarifyGenerator(DuckDB.Generator):
             # string literals, which aren't lines of the layout.
             sql = _anchor_cases(sql)
         return sql
+
+    def _replace_line_breaks(self, string: str) -> str:
+        # generate() turns a pretty statement's sentinels back into line
+        # breaks once the layout is done, so indenting can't change a string
+        # literal.  Parts rendered compactly switch pretty off, which would
+        # leave their literals' line breaks to be indented, so protect them
+        # too.
+        if self._pretty_statement:
+            return string.replace("\n", self.SENTINEL_LINE_BREAK)
+        return super()._replace_line_breaks(string)
 
     def generate(self, expression: exp.Expr, copy: bool = True) -> str:
         """Generate SQL, never letting a -- comment swallow SQL after it.
@@ -359,14 +370,17 @@ class JarifyGenerator(DuckDB.Generator):
         if not self.pretty:
             return restore_comment_lines(super().generate(expression, copy=copy))
         saved_align, saved_prefixes = self._tree_as_align_column, self._alias_prefixes
+        saved_pretty_statement = self._pretty_statement
         if copy:
             expression = expression.copy()
         try:
+            self._pretty_statement = True
             self._alias_prefixes = self._measure_alias_prefixes(expression)
             self._tree_as_align_column = self._compute_tree_as_align_column(expression)
             return restore_comment_lines(super().generate(expression, copy=False))
         finally:
             self._tree_as_align_column, self._alias_prefixes = saved_align, saved_prefixes
+            self._pretty_statement = saved_pretty_statement
 
     def _measure_alias_prefixes(self, expression: exp.Expr) -> dict[int, int]:
         """Return the column each aligned list's text starts in, by list number.
@@ -819,6 +833,8 @@ class JarifyGenerator(DuckDB.Generator):
             if isinstance(e, exp.Alias):
                 alias_count += 1
                 col_sql = self.sql(e.this)
+                if self._ends_in_literal_lines(col_sql):
+                    continue  # aligns on its own, see alias_sql
                 if "\n" in col_sql:
                     last_line = col_sql.splitlines()[-1]
                     # Subtract 1: cancels the +1 compensation in alias_sql so that
@@ -835,7 +851,7 @@ class JarifyGenerator(DuckDB.Generator):
                 # Measure without comments, as expressions() renders the column:
                 # a comment after it or on its own line shouldn't move the AS.
                 col_sql = self.sql(e, comment=False)
-                if "\n" not in col_sql:
+                if "\n" not in col_sql and not self._ends_in_literal_lines(col_sql):
                     col_widths.append(len(col_sql))
 
         return col_widths, alias_count
@@ -850,7 +866,10 @@ class JarifyGenerator(DuckDB.Generator):
         if not alias_name:
             return this_sql
         align_width = self._as_align_width
-        if align_width is not None and isinstance(expression.parent, (exp.Select, exp.Star)):
+        # A SELECT rendered compactly, such as a short scalar subquery, aligns
+        # nothing; the width set for an enclosing list doesn't apply to it.
+        aligned = self.pretty and not self._ends_in_literal_lines(this_sql)
+        if align_width is not None and aligned and isinstance(expression.parent, (exp.Select, exp.Star)):
             if "\n" in this_sql:
                 lines = this_sql.splitlines()
                 # For multi-line expressions the last line (e.g. ``)``, ``END``)
@@ -866,6 +885,15 @@ class JarifyGenerator(DuckDB.Generator):
             padding = " " * max(0, align_width - len(this_sql))
             return f"{this_sql}{padding} AS {alias_name}"
         return f"{this_sql} AS {alias_name}"
+
+    def _ends_in_literal_lines(self, sql: str) -> bool:
+        """Whether the last line of *sql* ends inside a string literal's lines.
+
+        A literal's lines after its first are written as they are, starting at
+        column 0, so an `AS` after one can't line up with other aliases, and
+        the column aligns on its own.
+        """
+        return self.SENTINEL_LINE_BREAK in sql.rsplit("\n", 1)[-1]
 
     # ------------------------------------------------------------------
     # CTE formatting: paren on its own line, comma-prefix separator
