@@ -1261,6 +1261,42 @@ FROM data
 ;
 ```
 
+A CASE passed as a function argument is laid out as in a SELECT list. The call puts each argument on its own line, even when the call would fit on one, and the CASE's lines keep their SELECT-list columns: in a searched CASE, `WHEN`, `THEN` and `ELSE` start two columns past the `C` of `CASE` and `END` sits under it; in a simple CASE, `WHEN` and `ELSE` start one column past the `C` and `END` sits under the comma.
+
+**Bad**
+```sql
+SELECT
+   if(x, CASE WHEN a THEN 1 WHEN b THEN 2 ELSE 3 END, 0) AS k
+  ,format('{}: {}', y, CASE z WHEN 1 THEN 'one' ELSE 'other' END) AS m
+FROM t
+```
+
+**Good**
+```sql
+SELECT
+   if(
+      x
+     ,CASE
+        WHEN a
+        THEN 1
+        WHEN b
+        THEN 2
+        ELSE 3
+      END
+     ,0
+  ) AS k
+  ,format(
+     '{}: {}'
+    ,y
+    ,CASE z
+      WHEN 1 THEN 'one'
+      ELSE 'other'
+    END
+  ) AS m
+FROM t
+;
+```
+
 ---
 
 ### `SELECT *` — rewritten as FROM-first
@@ -1832,7 +1868,9 @@ When a compact `if(cond, then, else)` call exceeds `max_line_length`, expand the
 `if()` call across multiple lines. Keep the condition compact on one line, but let an
 overlong `true` or `false` branch use its normal nested wrapping. An `if()` whose
 arguments contain a comment is always expanded, and each commented argument keeps its
-normal multi-line rendering, so the comment ends its line.
+normal multi-line rendering, so the comment ends its line. An `if()` whose arguments
+contain a `CASE` is always expanded too, and that argument keeps its multi-line layout
+(see [`CASE` — always multi-line](#case--always-multi-line)).
 
 **Wide**
 ```sql

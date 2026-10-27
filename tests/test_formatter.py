@@ -1187,3 +1187,78 @@ class TestPreferIfOverCaseNesting:
         assert "-- why" in out
         assert "if(" not in out
         assert format_sql(out)[0] == out
+
+
+def _case_layout(sql: str) -> list[tuple[int, str]]:
+    """Return each line of the first CASE in sql as (column offset from CASE, leading text).
+
+    The END line keeps only ``END``, so what follows it (an alias, a comma,
+    a closing paren) doesn't matter.
+    """
+    lines = sql.splitlines()
+    start = next(i for i, line in enumerate(lines) if "CASE" in line)
+    column = lines[start].index("CASE")
+    layout = [(0, lines[start][column:])]
+    for line in lines[start + 1 :]:
+        text = line.strip()
+        offset = len(line) - len(line.lstrip()) - column
+        if text.startswith("END"):
+            layout.append((offset, "END"))
+            return layout
+        layout.append((offset, text))
+    raise AssertionError(f"no END in:\n{sql}")
+
+
+class TestCaseInFunctionArgs:
+    SEARCHED = "CASE WHEN a THEN 1 WHEN b THEN 2 ELSE 3 END"
+    SIMPLE = "CASE k WHEN 1 THEN 'one' WHEN 2 THEN 'two' ELSE 'other' END"
+
+    @pytest.mark.parametrize("case", [SEARCHED, SIMPLE], ids=["searched", "simple"])
+    @pytest.mark.parametrize(
+        "call",
+        ["if(x, {case}, 0)", "if({case}, 1, 0)", "format('{}', x, {case})", "format({case}, x)", "SUM({case})"],
+    )
+    def test_case_argument_is_laid_out_as_in_a_select_list(self, call, case):
+        expected = _case_layout(format_sql(f"SELECT {case} AS c FROM t")[0])
+        out, _ = format_sql(f"SELECT {call.replace('{case}', case)} AS c FROM t")
+        assert _case_layout(out) == expected
+        assert format_sql(out)[0] == out
+
+    def test_case_in_wrapped_if_lines_up_under_case(self):
+        sql = (
+            "SELECT if(p.entry_type_id = 3, CASE WHEN regexp_full_match(p.description, '^B2S.*$') "
+            "THEN 'b2s_order' WHEN regexp_full_match(p.description, '^.*special.*$') THEN 'special_order' "
+            "ELSE 'unknown' END, 'nomination') AS kind FROM p"
+        )
+        out, _ = format_sql(sql)
+        assert "     ,CASE\n        WHEN regexp_full_match(p.description, '^B2S.*$')\n" in out
+        assert "        ELSE 'unknown'\n      END\n     ,'nomination'\n" in out
+
+    def test_case_makes_a_one_line_if_wrap(self):
+        out, _ = format_sql("SELECT if(x, CASE WHEN a THEN 1 WHEN b THEN 2 ELSE 3 END, 0) AS k FROM t")
+        assert out == (
+            "SELECT\n"
+            "   if(\n"
+            "      x\n"
+            "     ,CASE\n"
+            "        WHEN a\n"
+            "        THEN 1\n"
+            "        WHEN b\n"
+            "        THEN 2\n"
+            "        ELSE 3\n"
+            "      END\n"
+            "     ,0\n"
+            "  ) AS k\n"
+            "FROM t\n"
+            ";\n"
+        )
+
+    def test_other_arguments_keep_their_wrapped_if_layout(self):
+        # Only a CASE moves; a parenthesised argument still closes under its "(".
+        sql = (
+            "SELECT if(condition_that_makes_the_call_too_wide, (very_long_value_a_xxxxxxxxxxxxxxxxx, "
+            "very_long_value_b_xxxxxxxxxxxxxxxxxxxxxxxx, very_long_value_c_xxxxxxxxxxxxx)::some_type, fallback) AS r"
+        )
+        out, _ = format_sql(sql)
+        assert "\n     ,(\n         very_long_value_a_xxxxxxxxxxxxxxxxx\n" in out
+        assert "\n      )::some_type\n" in out
