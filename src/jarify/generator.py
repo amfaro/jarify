@@ -316,6 +316,10 @@ class JarifyGenerator(DuckDB.Generator):
         return expression
 
     def sql(self, expression: str | exp.Expr | None, key: str | None = None, comment: bool = True) -> str:
+        if self.pretty and isinstance(expression, exp.Table) and expression.args.get("joins"):
+            # table_sql writes the comments of a parenthesized join group's
+            # first table on that table's line, not after the whole group.
+            comment = False
         sql = super().sql(expression, key, comment)
         if key is None and expression is not None and expression is self._statement:
             # The whole statement is rendered, so every CASE's column is known.
