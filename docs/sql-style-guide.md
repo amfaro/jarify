@@ -1792,7 +1792,7 @@ WHERE x != y
 
 **Auto-fixed by `fmt`.** Rewrite single-branch `CASE WHEN … THEN … [ELSE …] END` expressions to DuckDB's `IF(condition, true_val, false_val)` function. The IF form is shorter and more idiomatic for simple conditionals.
 
-Applies only to *searched* CASE with exactly one WHEN branch. Multi-branch CASE and simple CASE (`CASE expr WHEN lit …`) are left unchanged. A CASE with a comment inside its WHEN, THEN or ELSE expression is also left unchanged, because `IF()` keeps its arguments on one line where a `--` comment would swallow the rest of the call. When the original `CASE` has no `ELSE`, jarify emits an explicit `NULL` third argument because DuckDB's `IF()` requires three arguments.
+Applies only to *searched* CASE with exactly one WHEN branch. Multi-branch CASE and simple CASE (`CASE expr WHEN lit …`) are left unchanged. A CASE with a comment inside its WHEN, THEN or ELSE expression is also left unchanged, because `IF()` keeps its arguments on one line where a `--` comment would swallow the rest of the call. So is a CASE with a comment attached to the CASE itself, such as one written on the line above a CASE nested in another CASE's ELSE, because an `if()` call can't keep a comment of its own. When the original `CASE` has no `ELSE`, jarify emits an explicit `NULL` third argument because DuckDB's `IF()` requires three arguments.
 
 **Bad**
 ```sql
@@ -1807,6 +1807,23 @@ FROM t
 SELECT
    if(a > 1, 'big', 'small') AS size
   ,if(b IS NULL, 0, NULL)    AS b_or_zero
+FROM t
+;
+```
+
+A CASE nested in another one is rewritten in the same pass, whether it sits in the THEN or ELSE of a CASE that becomes `if()` or in a branch of a multi-branch CASE that stays a CASE:
+
+**Bad**
+```sql
+SELECT
+   CASE WHEN a > 1 THEN 'big' ELSE CASE WHEN b IS NULL THEN 'none' ELSE 'small' END END AS size
+FROM t
+```
+
+**Good**
+```sql
+SELECT
+   if(a > 1, 'big', if(b IS NULL, 'none', 'small')) AS size
 FROM t
 ;
 ```
