@@ -829,6 +829,8 @@ When a query contains two or more column aliases anywhere in its query-wide `SEL
 
 You can also set a minimum visible alias column with `min-column-alias`. Jarify then uses the greater of the configured minimum and the naturally computed alignment column. Longer expressions still win; the setting is a floor, not a fixed hard stop.
 
+The floor is the same visible column in every context. `min-column-alias = N` pads expressions through column N, so `AS` starts in column N + 2 at the earliest. That holds whether the list is indented as the outer `SELECT`, a CTE body, a subquery, a macro body, a branch of a `UNION` or the `REPLACE` or `RENAME` list of a star.
+
 Project config example:
 
 ```toml

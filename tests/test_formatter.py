@@ -80,6 +80,69 @@ def test_min_column_alias_does_not_shrink_longer_alignment():
     assert _alias_positions(result, "one", "two") == _alias_positions(baseline, "one", "two")
 
 
+# Each context from #359 with its column aliases. Their lists start at different
+# indents, but min-column-alias names one visible column for all of them.
+_NESTED_ALIAS_CONTEXTS = [
+    pytest.param(
+        "WITH _a AS (SELECT x AS a, y AS b FROM t) SELECT a AS c, b AS d FROM _a",
+        ("a", "b", "c", "d"),
+        id="main-query",
+    ),
+    pytest.param(
+        "WITH _a AS (SELECT * REPLACE (0 AS x, 'a' AS y) FROM t) SELECT x AS c, y AS d FROM _a",
+        ("x", "y", "c", "d"),
+        id="replace-list-in-cte",
+    ),
+    pytest.param(
+        "SELECT a AS c, (SELECT max(x) AS m, min(x) AS n FROM u) AS s FROM t",
+        ("c", "m", "n", "s"),
+        id="scalar-subquery",
+    ),
+    pytest.param(
+        "SELECT a AS c, b AS d FROM t JOIN (SELECT id AS i, v AS w FROM u) s ON s.i = t.id",
+        ("c", "d", "i", "w"),
+        id="bare-join-subquery",
+    ),
+    pytest.param(
+        "CREATE OR REPLACE MACRO m(p) AS TABLE "
+        "(WITH _a AS (SELECT x AS a, y AS b FROM t) SELECT a AS c, b AS d FROM _a)",
+        ("a", "b", "c", "d"),
+        id="macro-body",
+    ),
+    pytest.param(
+        "WITH _a AS (SELECT 1 AS x), _p AS (WITH _c AS (SELECT user_id, strptime(h, '%Y')::date AS hired_on FROM t) "
+        "FROM _c) SELECT x AS e, x AS f FROM _a",
+        ("x", "hired_on", "e", "f"),
+        id="nested-with-in-from-first-cte",
+    ),
+    pytest.param(
+        "WITH _a AS (SELECT x AS a, y AS b FROM t) SELECT a AS c, b AS d FROM _a UNION ALL SELECT a, b FROM _a",
+        ("a", "b", "c", "d"),
+        id="union-main-query",
+    ),
+]
+
+
+@pytest.mark.parametrize("sql,aliases", _NESTED_ALIAS_CONTEXTS)
+@pytest.mark.parametrize("interval", [None, 12])
+def test_min_column_alias_is_the_same_visible_column_in_every_context(sql, aliases, interval):
+    # min-column-alias = 34 pads text through column 34, so AS starts in column 36,
+    # which is also on the column-12 visual guide.
+    config = JarifyConfig(min_column_alias=34, alias_visual_guide_interval=interval)
+    result, _ = format_sql(sql, config)
+
+    assert _as_columns(result, *aliases) == [36] * len(aliases)
+    assert format_sql(result, config)[0] == result
+
+
+def test_measuring_alias_columns_keeps_generated_table_alias_names():
+    # Jarify renders a statement more than once to measure where its alias lists start;
+    # those renders mustn't use up the generated names for unnamed table aliases.
+    result, _ = format_sql("SELECT a AS x, b AS y FROM (VALUES (1, 2)) AS (a, b)")
+
+    assert "AS _t0(a, b)" in result
+
+
 def test_as_alignment_spans_ctes_and_outer_select():
     sql = (
         "WITH a AS (SELECT x AS first, yy AS second FROM t), "
