@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.15.0] - 2026-10-27
+### Bug Fixes
+
+- recognize own-line comments written without a space ([#341](https://github.com/amfaro/jarify/pull/341)) ([#341](https://github.com/amfaro/jarify/pull/341))
+- keep parentheses when writing a cast as `::` ([#342](https://github.com/amfaro/jarify/pull/342)) ([#342](https://github.com/amfaro/jarify/pull/342))
+- don't put commas between wrapped window clauses ([#343](https://github.com/amfaro/jarify/pull/343)) ([#343](https://github.com/amfaro/jarify/pull/343))
+- write lambdas as `lambda x: body` ([#344](https://github.com/amfaro/jarify/pull/344)) ([#344](https://github.com/amfaro/jarify/pull/344))
+- keep comments after the last statement intact ([#337](https://github.com/amfaro/jarify/pull/337)) ([#337](https://github.com/amfaro/jarify/pull/337))
+- keep block comment lines as written ([#338](https://github.com/amfaro/jarify/pull/338)) ([#338](https://github.com/amfaro/jarify/pull/338))
+- keep comments inside WHERE and HAVING conditions ([#339](https://github.com/amfaro/jarify/pull/339)) ([#339](https://github.com/amfaro/jarify/pull/339))
+- keep comments from swallowing one-line constructs ([#340](https://github.com/amfaro/jarify/pull/340)) ([#340](https://github.com/amfaro/jarify/pull/340))
+- align table aliases after a bare JOIN ([#346](https://github.com/amfaro/jarify/pull/346)) ([#346](https://github.com/amfaro/jarify/pull/346))
+- ignore comments when aligning aliases ([#347](https://github.com/amfaro/jarify/pull/347)) ([#347](https://github.com/amfaro/jarify/pull/347))
+- keep macro statements as written ([#348](https://github.com/amfaro/jarify/pull/348)) ([#348](https://github.com/amfaro/jarify/pull/348))
+- keep the joins of a FROM-first query ([#376](https://github.com/amfaro/jarify/pull/376)) ([#376](https://github.com/amfaro/jarify/pull/376))
+- make set directives handle on/off options, and read normalize_join ([#364](https://github.com/amfaro/jarify/pull/364)) ([#364](https://github.com/amfaro/jarify/pull/364))
+- rewrite CASE nested in a CASE that prefer-if-over-case rewrites ([#365](https://github.com/amfaro/jarify/pull/365)) ([#365](https://github.com/amfaro/jarify/pull/365))
+- lay out a CASE function argument as in a SELECT list ([#366](https://github.com/amfaro/jarify/pull/366)) ([#366](https://github.com/amfaro/jarify/pull/366))
+- wrap long IN value lists one value per line ([#368](https://github.com/amfaro/jarify/pull/368)) ([#368](https://github.com/amfaro/jarify/pull/368))
+- wrap long window and aggregate ORDER BY lists ([#369](https://github.com/amfaro/jarify/pull/369)) ([#369](https://github.com/amfaro/jarify/pull/369))
+- keep the comment above a FROM-first query ([#370](https://github.com/amfaro/jarify/pull/370)) ([#370](https://github.com/amfaro/jarify/pull/370))
+- keep a comment at the end of a CTE body in the body ([#371](https://github.com/amfaro/jarify/pull/371)) ([#371](https://github.com/amfaro/jarify/pull/371))
+- keep an own-line block comment on its own line ([#372](https://github.com/amfaro/jarify/pull/372)) ([#372](https://github.com/amfaro/jarify/pull/372))
+- keep a comment before the first condition on its own line ([#373](https://github.com/amfaro/jarify/pull/373)) ([#373](https://github.com/amfaro/jarify/pull/373))
+- keep comments after a join's table and before a CTE's paren ([#374](https://github.com/amfaro/jarify/pull/374)) ([#374](https://github.com/amfaro/jarify/pull/374))
+- measure column-alias prefixes from the rendered statement ([#367](https://github.com/amfaro/jarify/pull/367)) ([#367](https://github.com/amfaro/jarify/pull/367))
+- keep NOT IN, indent IN lists after OR, wrap STRING_AGG ORDER BY ([#381](https://github.com/amfaro/jarify/pull/381)) ([#381](https://github.com/amfaro/jarify/pull/381))
+- lay out a multi-branch CASE in every position ([#383](https://github.com/amfaro/jarify/pull/383)) ([#383](https://github.com/amfaro/jarify/pull/383))
+- keep comments after NOT, QUALIFY, ON and THEN ([#385](https://github.com/amfaro/jarify/pull/385)) ([#385](https://github.com/amfaro/jarify/pull/385))
+- keep string literal line breaks in compact parts ([#387](https://github.com/amfaro/jarify/pull/387)) ([#387](https://github.com/amfaro/jarify/pull/387))
+- keep a nested join, written as a parenthesized group ([#390](https://github.com/amfaro/jarify/pull/390)) ([#390](https://github.com/amfaro/jarify/pull/390))
+- lay out WITH subqueries everywhere and keep own-line column comments ([#391](https://github.com/amfaro/jarify/pull/391)) ([#391](https://github.com/amfaro/jarify/pull/391))
+- write a join group's first-table comment once ([#393](https://github.com/amfaro/jarify/pull/393)) ([#393](https://github.com/amfaro/jarify/pull/393))
+- keep comments on operators, WINDOW, DISTINCT ON, structs and VALUES ([#395](https://github.com/amfaro/jarify/pull/395)) ([#395](https://github.com/amfaro/jarify/pull/395))
+- keep ~, VALUES column names and INSERT column lists valid ([#398](https://github.com/amfaro/jarify/pull/398)) ([#398](https://github.com/amfaro/jarify/pull/398))
+- let prepare-release update an existing release PR ([#400](https://github.com/amfaro/jarify/pull/400)) ([#400](https://github.com/amfaro/jarify/pull/400))
+- keep column comments in place and lay out ARRAY and CASE-branch subqueries ([#401](https://github.com/amfaro/jarify/pull/401)) ([#401](https://github.com/amfaro/jarify/pull/401))
+
+### Documentation
+
+- describe table aliases as right-aligned ([#352](https://github.com/amfaro/jarify/pull/352)) ([#352](https://github.com/amfaro/jarify/pull/352))
+
+### Features
+
+- add option to keep OUTER in left and right joins ([#349](https://github.com/amfaro/jarify/pull/349)) ([#349](https://github.com/amfaro/jarify/pull/349))
+- align column aliases to a visual-guide interval ([#350](https://github.com/amfaro/jarify/pull/350)) ([#350](https://github.com/amfaro/jarify/pull/350))
+- allow overriding function name case ([#351](https://github.com/amfaro/jarify/pull/351)) ([#351](https://github.com/amfaro/jarify/pull/351))
+
 ## [0.14.0] - 2026-05-08
 ### Features
 
