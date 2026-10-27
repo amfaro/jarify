@@ -244,6 +244,13 @@ WHERE 1 = 1
     assert "OR t.threshold_value >= r.threshold" in result
 
 
+def test_own_line_comment_without_space_after_dashes_stays_on_its_own_line():
+    spaced, _ = format_sql("SELECT\n   a\n  -- ,b\n  ,c\nFROM t\n")
+    unspaced, _ = format_sql("SELECT\n   a\n  --,b\n  ,c\nFROM t\n")
+    assert unspaced == spaced
+    assert "   a\n  -- ,b\n  ,c\n" in unspaced
+
+
 def test_searched_case_puts_then_on_its_own_line_and_expands_connectors():
     sql = "SELECT CASE WHEN foo THEN bar WHEN baz AND baq THEN world ELSE NULL END AS abc FROM data"
     result, _ = format_sql(sql)
