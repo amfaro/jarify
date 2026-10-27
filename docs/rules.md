@@ -19,6 +19,7 @@ examples see [`sql-style-guide.md`](sql-style-guide.md).
 |------|-----------|---------|---------|-------------|
 | `keyword-case` | `uppercase_keywords` | on | yes | uppercase SQL keywords; lowercase type and scalar function names |
 | `trailing-commas` | `trailing_commas` | off | yes | trailing comma placement (default: leading commas) |
+| `explicit-outer-join` | `explicit_outer_join` | off | yes | write LEFT/RIGHT OUTER JOIN, adding OUTER where missing (default: drop OUTER) |
 | `no-implicit-cross-join` | `no_implicit_cross_join` | warn | yes | rewrite implicit cross joins to explicit CROSS JOIN |
 | `explicit-cross-join-needs-condition` | `explicit_cross_join_needs_condition` | warn | no | flag explicit CROSS JOINs without ON/USING clauses |
 | `cross-join-with-where-condition` | `cross_join_with_where_condition` | error | no | flag CROSS JOINs with WHERE clauses connecting multiple tables (should be INNER JOIN) |

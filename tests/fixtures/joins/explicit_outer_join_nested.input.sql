@@ -1,0 +1,1 @@
+WITH _shipments AS (SELECT s.order_id, s.status FROM shipments AS s LEFT JOIN carriers AS c USING (carrier_id) RIGHT JOIN regions AS r ON r.id = c.region_id) SELECT o.id, sh.status, t.tag FROM (SELECT orders.id FROM orders LEFT JOIN holds ON holds.order_id = orders.id) AS o LEFT JOIN _shipments AS sh ON sh.order_id = o.id LEFT OUTER JOIN unnest(['a', 'b']) AS t(tag) ON true

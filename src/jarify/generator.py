@@ -4,6 +4,7 @@ Subclasses sqlglot's DuckDBGenerator to enforce jarify's opinionated rules:
 - Configurable indentation width
 - Leading-comma style: ,col aligned with content at pad+1
 - Bare JOIN → INNER JOIN normalization
+- LEFT/RIGHT OUTER JOIN → LEFT/RIGHT JOIN (or the reverse with explicit_outer_join)
 - AND/OR conditions always on separate lines in pretty mode
 - WHERE/HAVING/ON: first condition inline with keyword, AND/OR right-justified
   so all condition content aligns at the same column; = operators in WHERE
@@ -688,6 +689,7 @@ class JarifyGenerator(DuckDB.Generator):
 
     # ------------------------------------------------------------------
     # JOIN normalization: bare JOIN → INNER JOIN; LEFT/RIGHT OUTER → LEFT/RIGHT
+    # (or LEFT/RIGHT → LEFT/RIGHT OUTER with explicit_outer_join)
     # ------------------------------------------------------------------
 
     def _normalize_bare_join(self, expression: exp.Join) -> exp.Join:
@@ -697,6 +699,21 @@ class JarifyGenerator(DuckDB.Generator):
             return expression
         normalized = expression.copy()
         normalized.set("kind", "INNER")
+        return normalized
+
+    def _normalize_outer_keyword(self, expression: exp.Join) -> exp.Join:
+        """Drop OUTER from LEFT/RIGHT joins, or add it when explicit_outer_join is set.
+
+        Covers ASOF and NATURAL variants (ASOF LEFT JOIN, NATURAL LEFT JOIN).
+        FULL joins keep whatever the input wrote.
+        """
+        if expression.side not in ("LEFT", "RIGHT") or expression.kind not in ("", "OUTER"):
+            return expression
+        kind = "OUTER" if self._config.explicit_outer_join else ""
+        if expression.kind == kind:
+            return expression
+        normalized = expression.copy()
+        normalized.set("kind", kind or None)
         return normalized
 
     def join_sql(self, expression: exp.Join) -> str:
@@ -709,10 +726,8 @@ class JarifyGenerator(DuckDB.Generator):
                 # Comma join (no condition) — delegate to DuckDB's renderer,
                 # which emits comma-separated syntax instead of a bare JOIN keyword
                 return super().join_sql(expression)
-        elif expression.side in ("LEFT", "RIGHT") and expression.kind == "OUTER":
-            # DROP redundant OUTER: LEFT OUTER JOIN → LEFT JOIN
-            expression = expression.copy()
-            expression.set("kind", None)
+        else:
+            expression = self._normalize_outer_keyword(expression)
 
         if not self.pretty:
             return super().join_sql(expression)
@@ -885,15 +900,11 @@ class JarifyGenerator(DuckDB.Generator):
         for join in joins:
             # Normalize the keyword before measuring its length so the alignment
             # width matches what join_sql actually renders.  For example,
-            # LEFT OUTER JOIN (15 chars) is rendered as LEFT JOIN (9 chars), and
-            # a bare JOIN (4 chars) as INNER JOIN (10 chars), so we must use the
+            # LEFT OUTER JOIN (15 chars) is rendered as LEFT JOIN (9 chars), or
+            # LEFT JOIN as LEFT OUTER JOIN when explicit_outer_join is set, and a
+            # bare JOIN (4 chars) as INNER JOIN (10 chars), so we must use the
             # post-normalization keyword here.
-            if join.side in ("LEFT", "RIGHT") and join.kind == "OUTER":
-                normalized = join.copy()
-                normalized.set("kind", None)
-                kw = self._join_keyword(normalized)
-            else:
-                kw = self._join_keyword(self._normalize_bare_join(join))
+            kw = self._join_keyword(self._normalize_outer_keyword(self._normalize_bare_join(join)))
             ref = self._table_ref_only_sql(join.this)
             if ref is None:
                 return None

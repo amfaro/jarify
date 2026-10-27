@@ -33,6 +33,7 @@ class JarifyConfig:
 
     # --- formatting rules ---
     normalize_join: bool = True  # bare JOIN → INNER JOIN
+    explicit_outer_join: bool = False  # LEFT/RIGHT JOIN → LEFT/RIGHT OUTER JOIN (default drops OUTER)
     require_alias_as: bool = True  # always require AS keyword for aliases
     one_column_per_line: bool = True  # each SELECT column on its own line
     prefer_from_first: bool = True  # SELECT * FROM t → FROM t (DuckDB FROM-first syntax)

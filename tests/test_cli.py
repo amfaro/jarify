@@ -91,3 +91,23 @@ def test_init_mentions_min_column_alias(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert "min_column_alias" in starter
+
+
+def test_init_mentions_explicit_outer_join(tmp_path: Path) -> None:
+    with CliRunner().isolated_filesystem(temp_dir=tmp_path):
+        result = CliRunner().invoke(main, ["init"], catch_exceptions=False)
+        starter = Path("jarify.toml").read_text()
+
+    assert result.exit_code == 0
+    assert "explicit_outer_join = false" in starter
+
+
+def test_fmt_explicit_outer_join_from_config(tmp_path: Path) -> None:
+    config_file = tmp_path / "jarify.toml"
+    config_file.write_text("[jarify]\nexplicit_outer_join = true\n")
+    sql = "SELECT a FROM foo LEFT JOIN bar ON foo.id = bar.id"
+
+    result = CliRunner().invoke(main, ["fmt", "--config", str(config_file), "-"], input=sql, catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert "\nLEFT OUTER JOIN bar ON foo.id = bar.id\n" in result.output

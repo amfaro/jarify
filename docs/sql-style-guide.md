@@ -865,6 +865,34 @@ LEFT JOIN bar ON foo.id = bar.id
 ;
 ```
 
+Some projects want every outer join to say `OUTER`, so it stands apart from `INNER JOIN`, which they keep for joins that filter rows. Set `explicit-outer-join` to reverse the rule: `fmt` keeps `OUTER` on `LEFT` and `RIGHT` joins and adds it where it is missing. The same applies to `ASOF` and `NATURAL` joins (`ASOF LEFT OUTER JOIN`). `FULL` joins keep whichever form they were written in, and `INNER`, `CROSS`, `SEMI`, `ANTI` and `POSITIONAL` joins are unchanged. Table aliases stay aligned to the longer keyword.
+
+Project config example:
+
+```toml
+[jarify]
+explicit-outer-join = true
+```
+
+Like the other join keyword rules, this applies during `jarify fmt` only: `jarify lint` doesn't report a `LEFT JOIN`, so use `jarify fmt --check` to catch one.
+
+**Bad** (with `explicit-outer-join = true`)
+```sql
+SELECT o.id, c.name, s.status FROM orders AS o JOIN customers AS c ON c.id = o.customer_id LEFT JOIN shipments AS s ON s.order_id = o.id
+```
+
+**Good** (with `explicit-outer-join = true`)
+```sql
+SELECT
+   o.id
+  ,c.name
+  ,s.status
+FROM orders               o
+INNER JOIN customers      c ON c.id = o.customer_id
+LEFT OUTER JOIN shipments s ON s.order_id = o.id
+;
+```
+
 ---
 
 ### `IS NOT NULL` preserved

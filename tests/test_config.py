@@ -240,6 +240,22 @@ def test_min_column_alias_ignores_non_positive_values() -> None:
     assert JarifyConfig.from_dict({"min-column-alias": 0}).min_column_alias is None
 
 
+def test_explicit_outer_join_defaults_off() -> None:
+    assert JarifyConfig().explicit_outer_join is False
+
+
+@pytest.mark.parametrize("key", ["explicit_outer_join", "explicit-outer-join"])
+def test_explicit_outer_join_accepts_snake_and_kebab_keys(key: str) -> None:
+    assert JarifyConfig.from_dict({key: True}).explicit_outer_join is True
+
+
+def test_load_config_reads_explicit_outer_join(tmp_path: Path) -> None:
+    config_file = tmp_path / "jarify.toml"
+    config_file.write_text("[jarify]\nexplicit-outer-join = true\n")
+
+    assert load_config(config_file).explicit_outer_join is True
+
+
 @pytest.mark.parametrize("command", ["fmt", "lint"])
 def test_stdin_filename_anchors_config(tmp_path: Path, command: str) -> None:
     """--stdin-filename parent dir is used to discover jarify.toml."""
