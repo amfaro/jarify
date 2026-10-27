@@ -11,6 +11,8 @@ from jarify.parser import (
     FROM_FIRST_JOINS_KEY,
     _extract_ctas_body_placeholders,
     _extract_line_rust_fmt_placeholders,
+    _mask_ifnull,
+    _mask_numeric,
     _mask_rust_fmt_placeholders,
     _quote_reserved_cast_types,
     _reinsert_line_rust_fmt_placeholders,
@@ -283,6 +285,80 @@ class TestKeywordComments:
     def test_set_operation_keeps_comments_on_all_and_by_name(self) -> None:
         (tree,) = parse_sql("FROM t UNION /* u */ ALL /* a */ BY NAME -- n\nFROM u")
         assert tree.comments == [" u ", " a ", " n"]
+
+    def test_predicate_keeps_comments_on_its_operator_words(self) -> None:
+        (tree,) = parse_sql("SELECT a FROM t WHERE a NOT /* n */ IN /* i */ (1, 2)")
+        in_ = tree.find(exp.In)
+        assert keyword_comments(in_, "NOT") == [" n "]
+        assert keyword_comments(in_, "IN") == [" i "]
+
+    def test_is_keeps_comments_on_is_and_not(self) -> None:
+        (tree,) = parse_sql("SELECT a FROM t WHERE a IS /* is */ NOT -- not\nTRUE")
+        is_ = tree.find(exp.Is)
+        assert keyword_comments(is_, "IS") == [" is "]
+        assert keyword_comments(is_, "NOT") == [" not"]
+
+    def test_between_keeps_comments_on_between_and_its_and(self) -> None:
+        (tree,) = parse_sql("SELECT a FROM t WHERE a BETWEEN /* low */ 1 AND /* high */ 2")
+        between = tree.find(exp.Between)
+        assert keyword_comments(between, "BETWEEN") == [" low "]
+        assert keyword_comments(between, "AND") == [" high "]
+
+    def test_window_clause_keeps_comments_on_window(self) -> None:
+        (tree,) = parse_sql("SELECT a FROM t\n-- above\nWINDOW /* after */ w AS (ORDER BY a)")
+        assert keyword_comments(tree.args["windows"][0], "WINDOW") == [" above", " after "]
+
+    def test_filter_keeps_comments_on_filter_its_paren_and_where(self) -> None:
+        (tree,) = parse_sql("SELECT count(*) FILTER /* f */ ( -- p\nWHERE /* w */ a)")
+        assert keyword_comments(tree.find(exp.Filter), "WHERE") == [" f ", " p", " w "]
+
+    def test_window_keeps_comments_before_its_spec(self) -> None:
+        (tree,) = parse_sql("SELECT count(*) FILTER (WHERE a) /* f */ OVER /* o */ (PARTITION BY b)")
+        assert tree.find(exp.Window).comments == [" f ", " o "]
+
+    def test_comment_after_an_opening_paren_goes_on_the_first_item(self) -> None:
+        (tree,) = parse_sql("SELECT coalesce( -- c\na, b, c), x IN ( /* d */ 1, 2)")
+        assert tree.find(exp.Coalesce).this.comments == [" c"]
+        assert tree.find(exp.In).expressions[0].comments == [" d "]
+
+    def test_distinct_on_keeps_comments_on_distinct_and_on(self) -> None:
+        (tree,) = parse_sql("SELECT DISTINCT /* d */ ON /* o */ (a) a FROM t")
+        assert keyword_comments(tree.args["distinct"].args["on"], "ON") == [" d ", " o "]
+
+    def test_struct_entries_keep_their_comments(self) -> None:
+        (tree,) = parse_sql("SELECT {'a' /* key */: 1, -- entry\n'b': 2} -- struct\n, c")
+        struct = tree.find(exp.Struct)
+        first = struct.expressions[0]
+        assert first.this.comments == [" key "]
+        assert first.comments == [" entry"]
+        # Not on the first entry, which sqlglot built from the struct's comments.
+        assert struct.comments == [" struct"]
+
+    def test_values_rows_keep_their_comments(self) -> None:
+        sql = "SELECT * FROM (VALUES -- v\n(1), -- after\n-- before\n(2)\n-- above\n, (3)) AS t(a)"
+        (tree,) = parse_sql(sql)
+        values = tree.find(exp.Values)
+        assert keyword_comments(values, "VALUES") == [" v"]
+        rows = values.expressions
+        assert rows[0].comments == [" after"]
+        assert rows[1].comments == [" before"]
+        assert rows[2].comments == [" above"]
+
+
+class TestMaskingSkipsCommentsAndStrings:
+    """Masking ifnull, numeric and reserved-word casts leaves comments and literals alone (#388)."""
+
+    def test_ifnull_is_masked_only_in_code(self) -> None:
+        sql = "SELECT ifnull(a, 0), 'IFNULL', \"IFNULL\" -- IFNULL\n/* ifnull */ FROM t"
+        assert _mask_ifnull(sql) == "SELECT _ifnl_(a, 0), 'IFNULL', \"IFNULL\" -- IFNULL\n/* ifnull */ FROM t"
+
+    def test_numeric_is_masked_only_in_code(self) -> None:
+        sql = "SELECT a::NUMERIC, 'NUMERIC' -- NUMERIC\nFROM t"
+        assert _mask_numeric(sql) == "SELECT a::_numer_, 'NUMERIC' -- NUMERIC\nFROM t"
+
+    def test_reserved_cast_is_quoted_only_in_code(self) -> None:
+        sql = "SELECT []::filter[], '::filter' -- ::filter[]\nFROM t"
+        assert _quote_reserved_cast_types(sql) == "SELECT []::\"filter\"[], '::filter' -- ::filter[]\nFROM t"
 
 
 class TestRustFmtPlaceholderMasking:

@@ -185,7 +185,7 @@ GROUP BY
 
 Rule: `prefer-ifnull-over-coalesce`
 
-Use `ifnull(x, y)` for the two-argument null-fallback case. `coalesce(...)` stays in place when there are three or more arguments.
+Use `ifnull(x, y)` for the two-argument null-fallback case. `coalesce(...)` stays in place when there are three or more arguments. Only calls are rewritten: `IFNULL` written in a comment or a string literal keeps its text, as do `NUMERIC` and other words jarify rewrites in code.
 
 **Bad**
 ```sql
@@ -263,6 +263,19 @@ SELECT
    a
   ,b
   ,c
+FROM t
+;
+```
+
+A comment on its own line between two items lines up with the commas, and one above the first item lines up with its text. This holds in every leading-comma list: a `SELECT` list, wrapped function arguments, an `IN (…)` list, a struct literal and `VALUES` rows.
+
+**Good**
+```sql
+SELECT
+   -- the key first
+   a
+  -- b is optional
+  ,b
 FROM t
 ;
 ```
@@ -849,7 +862,7 @@ WHERE a = 1
   AND b = 2
 ```
 
-A comment on the keyword itself goes above the line too: one written on or above the `WHERE`, `HAVING` or `QUALIFY` line goes above that clause, and one written before or after a join's `ON` or `USING` goes above the join. So does one after `UNION ALL`, above the `UNION ALL` line. A comment after `NOT` stays after it, as a `/* */` block comment, since the condition follows on its line. Where jarify writes `NOT` after the operand, as in `a NOT IN (…)` or `a IS NOT NULL`, the comment goes at the end of the condition.
+A comment on the keyword itself goes above the line too: one written on or above the `WHERE`, `HAVING`, `QUALIFY` or `WINDOW` line goes above that clause, and one written before or after a join's `ON` or `USING` goes above the join. So does one after `UNION ALL`, above the `UNION ALL` line. A comment after `NOT` stays after it, as a `/* */` block comment, since the condition follows on its line. Where jarify writes `NOT` after the operand, as in `a NOT IN (…)` or `a IS NOT NULL`, the comment goes at the end of the condition.
 
 **Bad** (the comments are dropped)
 ```sql
@@ -874,6 +887,30 @@ WHERE NOT /* archived */ a
 -- latest first
 QUALIFY
   ROW_NUMBER() OVER (PARTITION BY a ORDER BY b DESC) = 1
+;
+```
+
+A comment written on a word of a predicate's operator stays after that word, as a `/* */` block comment: after `NOT` or `IN` in `a NOT IN (…)`, after `LIKE`, `GLOB` or `SIMILAR TO`, after `BETWEEN` or its `AND`, after `IS` or `NOT` in `a IS NOT NULL`, and after `ESCAPE`. A comment on the words of another operator, such as `@>`, goes after its right operand.
+
+**Bad** (the comments are dropped)
+```sql
+SELECT
+   a
+FROM t
+WHERE a NOT IN (1, 2)
+  AND b BETWEEN 1 AND 10
+  AND c IS NOT NULL
+;
+```
+
+**Good**
+```sql
+SELECT
+   a
+FROM t
+WHERE a NOT /* legacy codes */ IN (1, 2)
+  AND b BETWEEN /* inclusive */ 1 AND 10
+  AND c IS NOT /* set by the loader */ NULL
 ;
 ```
 
@@ -1383,18 +1420,20 @@ LEFT OUTER JOIN shipments s ON s.order_id = o.id
 
 ---
 
-### `IS NOT NULL` preserved
+### `IS NOT NULL`, `IS NOT true` preserved
 
-`IS NOT NULL` is kept as-is and never rewritten to `NOT x IS NULL`.
+`IS NOT NULL`, `IS NOT true` and `IS NOT false` are kept as-is and never rewritten to `NOT x IS NULL` or `NOT x IS true`. A `NOT` written in front, as in `NOT x IS NULL`, moves after `IS`: DuckDB reads both forms the same way. A `NOT` in front of parentheses, as in `NOT (x IS true)`, stays where it is.
 
 **Bad** (what some formatters emit)
 ```sql
 WHERE NOT end_date IS NULL
+  AND NOT is_active IS TRUE
 ```
 
 **Good**
 ```sql
 WHERE end_date IS NOT NULL
+  AND is_active IS NOT true
 ```
 
 ---
@@ -1636,7 +1675,7 @@ GROUP BY ALL
 Window specs, function calls, `IN (…)` lists and list literals stay on one line when they fit. A `--` comment inside one would comment out the rest of that line, so a construct that carries a comment takes its multi-line form instead, and each `--` comment ends its line:
 
 - A window spec puts `PARTITION BY`, `ORDER BY` and the frame on their own lines, one key per line in leading-comma style, and the closing `)` lines up under the function name. A comment on `ORDER BY` itself stays on its own line above it.
-- A function call, `IN (…)` list or list literal puts one argument per line, like any wrapped call. An aggregate's `ORDER BY` stays with its argument on that argument's line.
+- A function call, `IN (…)` list, list literal or struct literal puts one argument per line, like any wrapped call. An aggregate's `ORDER BY` stays with its argument on that argument's line. A comment written after the opening `(`, `[` or `{` goes after the first argument, or after the call when it has none, as in `ROW_NUMBER()`; one on a struct entry's `:` goes after its value. A comment on its own line above a list or struct literal stays above it.
 
 **Bad** (the `)` and alias are commented out)
 ```sql
@@ -1662,12 +1701,58 @@ FROM t
 ;
 ```
 
-A comment that has no line end to sit at, such as one inside an arithmetic expression or before an alias, a `::` cast or `DESC`, is written as a `/* */` block comment:
+A struct literal keeps each entry's comments with it, including entries commented out on their own lines:
+
+**Bad** (the comments are dropped)
+```sql
+SELECT
+   {'attribute': attribute, 'seq': seq, 'value': mapped_value} AS custom_field
+FROM t
+;
+```
+
+**Good**
+```sql
+SELECT
+   {
+     'attribute': attribute -- the field's name
+    ,'seq': seq
+    -- ,'provided_value': provided_value
+    ,'value': mapped_value
+  } AS custom_field
+FROM t
+;
+```
+
+A comment in an aggregate's `FILTER (WHERE …)`, written on `FILTER`, its `(` or `WHERE`, goes after `WHERE`. One written before `OVER`, on `OVER` or after its `(` goes after the whole call, as one after the call itself does. One on `DISTINCT ON` stays after `ON`. The ones that SQL follows on their line are written as `/* */` block comments.
+
+**Good**
+```sql
+SELECT DISTINCT ON /* the latest row per user */ (user_id)
+   user_id
+  ,COUNT(*) FILTER(WHERE /* paid only */ amount > 0) OVER (PARTITION BY user_id) AS paid_orders -- per user
+FROM t
+;
+```
+
+A comment that has no line end to sit at, such as one inside an arithmetic expression, a lambda's body or a `USING (…)` list, or before an alias, a `::` cast or `DESC`, is written as a `/* */` block comment:
 
 ```sql
 SELECT
    a /* note */ + 1 AS c
   ,b /* raw */::int AS d
+FROM t
+;
+```
+
+A cast value that needs parentheses and carries a comment puts its parentheses on lines of their own, as a commented parenthesized expression does:
+
+```sql
+SELECT
+   (
+    a /* note */ + b
+  )::int AS c
+  ,d
 FROM t
 ;
 ```
@@ -2064,7 +2149,7 @@ FROM @read_parquet(@source_db, @source_schema, 'orders')
 
 ### `CREATE TABLE` layout
 
-The opening parenthesis goes on its own line. Column names are padded to align all type tokens, and types are padded to align all constraint tokens when any column carries constraints. A blank line separates column definitions from table-level constraints (`PRIMARY KEY`, `UNIQUE`, `CHECK`, etc.).
+The opening parenthesis goes on its own line. Column names are padded to align all type tokens, and types are padded to align all constraint tokens when any column carries constraints. A blank line separates column definitions from table-level constraints (`PRIMARY KEY`, `UNIQUE`, `CHECK`, etc.). A comment after a column definition stays after it, as in a `SELECT` list.
 
 **Bad**
 ```sql
@@ -2120,6 +2205,8 @@ CREATE OR REPLACE MACRO get_programs_json
 
 A `WITH` clause CTE whose body is a plain `VALUES` list is rendered as `VALUES` (not `FROM (VALUES ...) AS ...`). Rows use leading-comma style. Each non-last column is right-padded with spaces after its comma so that the next column aligns across all rows. CTE names that declare column aliases include a space before the column list.
 
+A row keeps its comments, as a `SELECT` list's column does: one after the row stays after it, and one on its own line between two rows stays on its own line above the next row. A comment on `VALUES` goes at the end of the `VALUES` line.
+
 **Bad**
 ```sql
 WITH _lookup (code, label) AS (VALUES ('a', 'active'), ('i', 'inactive'))
@@ -2138,6 +2225,22 @@ SELECT
    code
   ,label
 FROM _lookup
+;
+```
+
+**Good** (with comments)
+```sql
+WITH _overrides (country_code, currency_code) AS
+(
+  VALUES -- currencies the source gets wrong
+     ('MDG', 'MGA') -- madagascar
+    -- added in 2024
+    ,('ZWE', 'ZWG')
+)
+SELECT
+   country_code
+  ,currency_code
+FROM _overrides
 ;
 ```
 
@@ -2328,7 +2431,7 @@ QUALIFY
 
 ### `prefer-group-by-all`
 
-**Auto-fixed by `fmt`.** Rewrites explicit `GROUP BY col1, col2, ...` to `GROUP BY ALL` when every standalone non-aggregate `SELECT` expression is listed. Mixed aggregate/non-aggregate expressions stay explicit because DuckDB can reject `GROUP BY ALL` for that shape.
+**Auto-fixed by `fmt`.** Rewrites explicit `GROUP BY col1, col2, ...` to `GROUP BY ALL` when every standalone non-aggregate `SELECT` expression is listed. Mixed aggregate/non-aggregate expressions stay explicit because DuckDB can reject `GROUP BY ALL` for that shape. A list that carries a comment stays explicit too, and isn't flagged: `GROUP BY ALL` would delete the comment, even one with the same text as a comment in the `SELECT` list.
 
 **Bad**
 ```sql

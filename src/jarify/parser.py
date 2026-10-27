@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import bisect
+import collections
 import functools
+import itertools
 import re
 import typing
 
 import sqlglot
 import sqlglot.expressions as _exp
 from sqlglot.dialects.duckdb import DuckDB as _DuckDB
-from sqlglot.errors import ParseError
+from sqlglot.errors import ParseError, TokenError
 from sqlglot.expressions import Expression
 from sqlglot.tokens import TokenType
 
@@ -27,7 +30,38 @@ DUCKDB_DIALECT = "duckdb"
 # bare types stay bare and round-trip cleanly.
 
 
+def _keeping_operator_comments(parse: typing.Callable[..., typing.Any]) -> typing.Callable[..., typing.Any]:
+    """Wrap a RANGE_PARSERS entry so the comments on its operator's words are kept.
+
+    sqlglot drops the comments on `NOT` before the operator and on the
+    operator itself (`IN`, `LIKE`, `BETWEEN`, `IS`, …), on the words after
+    `IS` and on `BETWEEN`'s `AND`.
+    """
+
+    def _parse(self: _JarifyDuckDBParser, this: _exp.Expr | None) -> _exp.Expr | None:
+        operator = self._index - 1
+        result = parse(self, this)
+        if result is not None:
+            self._keep_operator_comments(result, operator)
+        return result
+
+    return _parse
+
+
+# The predicates RANGE_PARSERS builds that drop their operator's comments,
+# besides those built by sqlglot's binary_range_parser(), such as LIKE.
+_RANGE_OPERATOR_TOKENS = frozenset({TokenType.BETWEEN, TokenType.IN, TokenType.IS})
+
+
 class _JarifyDuckDBParser(_DuckDB.Parser):
+    RANGE_PARSERS: typing.ClassVar = {
+        token_type: (
+            _keeping_operator_comments(parse)
+            if token_type in _RANGE_OPERATOR_TOKENS or getattr(parse, "__name__", "") == "_parse_binary_range"
+            else parse
+        )
+        for token_type, parse in _DuckDB.Parser.RANGE_PARSERS.items()
+    }
     TYPE_CONVERTERS: typing.ClassVar = {
         k: v for k, v in _DuckDB.Parser.TYPE_CONVERTERS.items() if k != _exp.DType.DECIMAL
     }
@@ -41,6 +75,38 @@ class _JarifyDuckDBParser(_DuckDB.Parser):
         **_DuckDB.Parser.UNARY_PARSERS,
         TokenType.NOT: lambda self: self._parse_not(),
     }
+
+    # Comments the overrides below attach to nodes, as (node, keyword or
+    # None, comment).  See parse().
+    _recovered: list[tuple[_exp.Expr, str | None, str]] | None = None
+
+    def parse(self, raw_tokens: list[typing.Any], sql: str) -> list[_exp.Expr | None]:
+        # A comment the overrides recover may have been kept by sqlglot after
+        # all: a caller can hold on to a token's comments while a nested parse
+        # reads past it, as `( -- note` does before its condition.  Then the
+        # recovered copy is dropped, and the comment stays where sqlglot put it.
+        self._recovered = []
+        try:
+            trees = super().parse(raw_tokens, sql)
+            _drop_duplicate_comments(trees, self._recovered)
+        finally:
+            self._recovered = None
+        return trees
+
+    def _keep(self, node: _exp.Expr, comments: list[str], *, prepend: bool = False) -> None:
+        """Attach *comments*, which sqlglot dropped, to *node*."""
+        comments = [comment for comment in comments if comment.strip()]
+        if comments:
+            node.add_comments(comments, prepend=prepend)
+            if self._recovered is not None:
+                self._recovered.extend((node, None, comment) for comment in comments)
+
+    def _keep_keyword(self, node: _exp.Expr, keyword: str, comments: list[str]) -> None:
+        """Keep *comments*, which sqlglot dropped, for the generator to write at *keyword* of *node*."""
+        comments = [comment for comment in comments if comment.strip()]
+        _set_keyword_comments(node, keyword, comments)
+        if self._recovered is not None:
+            self._recovered.extend((node, keyword, comment) for comment in comments)
 
     # sqlglot drops the comments on the keywords below: it reads a keyword's
     # comments only until it reads the next token, and for these it never
@@ -116,11 +182,253 @@ class _JarifyDuckDBParser(_DuckDB.Parser):
         return result
 
     def _parse_window(self, this: _exp.Expr | None, alias: bool = False) -> _exp.Expr | None:
+        start = self._index
         result = super()._parse_window(this, alias=alias)
         # An aggregate's `FILTER (…)` drops the comments on its closing paren.
         if isinstance(result, _exp.Filter) and self._prev.token_type == TokenType.R_PAREN:
             self._add_comments(result)
+        if result is not None and self._index > start:
+            self._keep_window_comments(result, start)
         return result
+
+    def _keep_window_comments(self, result: _exp.Expr, start: int) -> None:
+        """Keep the comments sqlglot drops in a call's `FILTER (WHERE …)` and `OVER (…)`.
+
+        Those on `FILTER`, its `(` and `WHERE` go after `WHERE`, kept on the
+        Filter node. Those on the `)` that closes the FILTER before `OVER`,
+        on `OVER` (or a named window's `AS`) and on its `(` go on the window,
+        which writes them after itself.
+        """
+        tokens = self._tokens
+        index = start
+        window_tokens = []
+        node: _exp.Expr | None = result
+        while isinstance(node, (_exp.Window, _exp.IgnoreNulls, _exp.RespectNulls, _exp.WithinGroup)):
+            node = node.this
+        if isinstance(node, _exp.Filter) and tokens[index].token_type == TokenType.FILTER:
+            where = node.expression
+            comments = [*tokens[index].comments, *tokens[index + 1].comments]
+            if isinstance(where, _exp.Where):
+                comments.extend(where.pop_comments())
+            self._keep_keyword(node, "WHERE", _unkept(result, comments))
+            closing = _closing_paren(tokens, index + 1, self._index)
+            if closing is None:
+                return
+            window_tokens.append(tokens[closing])
+            index = closing + 1
+        if not isinstance(result, _exp.Window) or index >= self._index:
+            return
+        # The `)` closing a FILTER, then `OVER` or `AS`, then `(`.
+        if tokens[index].token_type in (*self.WINDOW_BEFORE_PAREN_TOKENS, TokenType.ALIAS):
+            window_tokens.append(tokens[index])
+            index += 1
+        if index < self._index and tokens[index].token_type == TokenType.L_PAREN:
+            window_tokens.append(tokens[index])
+        self._keep(result, _unkept(result, [c for token in window_tokens for c in token.comments]))
+
+    def _keep_operator_comments(self, result: _exp.Expr, operator: int) -> None:
+        """Keep the comments on the words of the predicate operator at token *operator*.
+
+        Each word's comments are kept for that word on the predicate, which
+        writes them after the word: a `NOT` before the operator, the operator
+        itself, the words after `IS` (`NOT`, `DISTINCT`, `FROM`) and
+        `BETWEEN`'s `SYMMETRIC` and `AND`. Those on `ESCAPE` go on the Escape
+        node.
+        """
+        tokens = self._tokens
+        following = tokens[operator + 1 : self._index]
+        operator_token = tokens[operator]
+        words = [(operator_token.text.upper().split()[-1], operator_token)]
+        if operator > 0 and tokens[operator - 1].token_type == TokenType.NOT:
+            words.insert(0, ("NOT", tokens[operator - 1]))
+        if operator_token.token_type == TokenType.IS:
+            for token in following:
+                if token.text.upper() not in _IS_WORDS:
+                    break
+                words.append((token.text.upper(), token))
+        elif operator_token.token_type == TokenType.BETWEEN:
+            if following and following[0].text.upper() in _BETWEEN_FLAGS:
+                words.append((following[0].text.upper(), following[0]))
+            and_ = _top_level_tokens(following, {TokenType.AND})
+            if and_:
+                words.append(("AND", and_[0]))
+
+        predicate = result.this if isinstance(result, (_exp.Escape, _exp.Not)) else result
+        unwritten = []
+        for word, token in words:
+            comments = _unkept(result, token.comments)
+            if isinstance(predicate, _KEYWORD_PREDICATES):
+                self._keep_keyword(predicate, word, comments)
+            else:
+                unwritten.extend(comments)
+        if unwritten:
+            # jarify writes the other operators as calls, such as `~` as
+            # regexp_full_match(…), or as symbols: the comments go on the
+            # right operand.
+            operand = predicate.args.get("expression") if isinstance(predicate, _exp.Expr) else None
+            self._keep(operand if isinstance(operand, _exp.Expr) else result, unwritten, prepend=True)
+        escape = _top_level_tokens(following, {TokenType.ESCAPE}) if isinstance(result, _exp.Escape) else []
+        if escape:
+            self._keep_keyword(result, "ESCAPE", _unkept(result, escape[-1].comments))
+
+    def _parse_using_identifiers(self) -> list[_exp.Expr]:
+        # sqlglot keeps a USING column's identifier and drops the column node,
+        # with the comments written after it.  Carry them over.
+        def _parse_column_as_identifier() -> _exp.Expr | None:
+            this = self._parse_column()
+            if isinstance(this, _exp.Column):
+                identifier = this.this
+                if this.comments and isinstance(identifier, _exp.Expr):
+                    identifier.add_comments(this.comments)
+                return identifier
+            return this
+
+        return self._parse_wrapped_csv(_parse_column_as_identifier, optional=True)
+
+    def _parse_csv(
+        self, parse_method: typing.Callable[[], typing.Any], sep: TokenType = TokenType.COMMA
+    ) -> list[typing.Any]:
+        # The comments written after an opening bracket, before the first item
+        # (`coalesce( -- note`, `IN ( -- note`, `{ -- note`), are dropped when
+        # the item is parsed.  They go on the first item.
+        opening = self._index - 1 if self._prev_comments and self._prev.token_type in _OPENING_BRACKETS else None
+        items = super()._parse_csv(parse_method, sep=sep)
+        if opening is not None and items:
+            self._keep_after_opening(opening, items[0])
+        return items
+
+    def _keep_after_opening(self, opening: int, item: typing.Any) -> None:
+        """Put the comments written after the opening bracket at token *opening* on *item*, its first item."""
+        if not isinstance(item, _exp.Expr) or self._tokens[opening].token_type not in _OPENING_BRACKETS:
+            return
+        self._keep(item, _unkept(item, self._split_comments(opening)[1]), prepend=True)
+
+    def _parse_function_call(self, *args: typing.Any, **kwargs: typing.Any) -> _exp.Expr | None:
+        paren = self._index + 1 if self._next.token_type == TokenType.L_PAREN else None
+        result = super()._parse_function_call(*args, **kwargs)
+        # A call parsed by its own parser, such as CAST, drops the comments
+        # after its `(`; they go on its first argument.  (_parse_csv keeps
+        # those of the other calls.)
+        if result is not None and paren is not None and self._tokens[paren].comments:
+            call = result
+            while isinstance(call, (_exp.Window, _exp.Filter, _exp.IgnoreNulls, _exp.RespectNulls)):
+                call = call.this
+            # The first argument's first operand: `a` in `CAST(a + b AS int)`.
+            first = call.this if isinstance(call, _exp.Expr) else None
+            while isinstance(first, _exp.Binary) and isinstance(first.this, _exp.Expr):
+                first = first.this
+            # A call without arguments, such as ROW_NUMBER(), writes them after itself.
+            self._keep(
+                first if isinstance(first, _exp.Expr) else result,
+                _unkept(result, self._split_comments(paren)[1]),
+                prepend=True,
+            )
+        return result
+
+    def _parse_value(self, values: bool = True) -> _exp.Tuple | None:
+        # A comment on its own line before a VALUES row's `(` goes on the row.
+        # Those on `DISTINCT ON` and before its `(` are kept on its list for
+        # the generator to write after ON.  sqlglot drops them.
+        opening = self._index if self._curr.token_type == TokenType.L_PAREN else None
+        distinct_on = (
+            not values
+            and self._index >= 2
+            and self._prev.token_type == TokenType.ON
+            and self._tokens[self._index - 2].token_type in self.DISTINCT_TOKENS
+        )
+        keywords = [*self._tokens[self._index - 2].comments, *self._prev.comments] if distinct_on else []
+        row = super()._parse_value(values=values)
+        if row is not None:
+            before = _unkept(row, self._split_comments(opening)[0] if opening is not None else [])
+            if distinct_on:
+                self._keep_keyword(row, "ON", _unkept(row, keywords) + before)
+            else:
+                self._keep(row, before, prepend=True)
+        return row
+
+    def _parse_derived_table_values(self, allow_value_synonym: bool = False) -> _exp.Values | None:
+        start = self._index
+        values = super()._parse_derived_table_values(allow_value_synonym=allow_value_synonym)
+        if not isinstance(values, _exp.Values):
+            return values
+        tokens = self._tokens
+        # The comments on `VALUES` (and on the `(` of `(VALUES …)`) go after
+        # VALUES.
+        keyword = tokens[start : start + (2 if tokens[start].token_type == TokenType.L_PAREN else 1)]
+        self._keep_keyword(values, "VALUES", _unkept(values, [c for token in keyword for c in token.comments]))
+        # A comment on its own line before the comma between two rows goes on
+        # the row after the comma, where it is written above that row.
+        # sqlglot puts it on the row before.
+        rows = values.expressions
+        commas = _top_level_indices(tokens, start + len(keyword), self._index, {TokenType.COMMA})
+        for comma, (row, next_row) in zip(commas, itertools.pairwise(rows), strict=False):
+            before = {id(c) for c in self._split_comments(comma)[0]}
+            moved = [c for c in row.comments or [] if id(c) in before]
+            if moved:
+                row.comments = [c for c in row.comments if id(c) not in before]
+                next_row.add_comments(moved, prepend=True)
+        return values
+
+    def _parse_bracket(self, this: _exp.Expr | None = None) -> _exp.Expr | None:
+        # A comment on its own line before a list or struct literal's opening
+        # bracket goes on the literal, as one before a `(` goes on its
+        # parentheses.  sqlglot drops it.
+        opening = self._index if this is None and self._curr.token_type in _OPENING_BRACKETS else None
+        result = super()._parse_bracket(this)
+        if opening is not None and result is not None:
+            literal = result
+            while isinstance(literal, _exp.Bracket) and isinstance(literal.this, _exp.Expr):
+                literal = literal.this  # `[1, 2][1]` subscripts the literal
+            self._keep(literal, _unkept(result, self._split_comments(opening)[0]), prepend=True)
+        return result
+
+    def _parse_slice(self, this: _exp.Expr | None) -> _exp.Expr | None:
+        # The comments on a struct entry's or a slice's `:` go on the value
+        # after it.  sqlglot drops them.
+        colon = self._index if self._curr.token_type == TokenType.COLON else None
+        result = super()._parse_slice(this)
+        if colon is not None and isinstance(result, _exp.Slice) and isinstance(result.expression, _exp.Expr):
+            self._keep(result.expression, _unkept(result, self._tokens[colon].comments), prepend=True)
+        return result
+
+    def _kv_to_prop_eq(self, expressions: list[_exp.Expr], parse_map: bool = False) -> list[_exp.Expr]:
+        # Struct entries are rebuilt as `key := value` nodes, which drops the
+        # comments on the entry (such as one after its comma) and on its key.
+        # Carry them over.  Keep the comments sqlglot is holding for the
+        # struct, too: the first rebuilt entry would take them.
+        keys = [e.args.get("alias") if isinstance(e, _exp.Alias) else e.this for e in expressions]
+        key_comments = [list(key.comments or []) if isinstance(key, _exp.Expr) else [] for key in keys]
+        held, self._prev_comments = self._prev_comments, []
+        try:
+            entries = super()._kv_to_prop_eq(expressions, parse_map=parse_map)
+        finally:
+            self._prev_comments = held
+        for old, new, key, comments in zip(expressions, entries, keys, key_comments, strict=True):
+            if new is not old and old.comments:
+                new.add_comments(old.comments)
+            new_key = new.this if isinstance(new, _exp.PropertyEQ) else None
+            if isinstance(new_key, _exp.Expr) and new_key is not key and comments:
+                new_key.add_comments(_unkept(new, comments))
+        return entries
+
+    def _replace_lambda(self, node: _exp.Expr | None, expressions: list[_exp.Expr]) -> _exp.Expr | None:
+        # sqlglot rewrites a column naming a lambda parameter (`x.key` in
+        # `lambda x: x.key`) to its identifiers, dropping the column node with
+        # its comments.  Move them to the last identifier, which is kept.
+        if node is not None:
+            names = {e.name for e in expressions}
+            for column in node.find_all(_exp.Column):
+                if column.comments and column.parts and column.parts[0].name in names:
+                    column.parts[-1].add_comments(column.pop_comments())
+        return super()._replace_lambda(node, expressions)
+
+    def _parse_window_clause(self) -> list[_exp.Expr] | None:
+        # sqlglot drops the comments on WINDOW; they go above it.
+        comments = self._curr.comments if self._curr.token_type == TokenType.WINDOW else []
+        windows = super()._parse_window_clause()
+        if windows:
+            self._keep_keyword(windows[0], "WINDOW", _unkept(windows[0], comments))
+        return windows
 
     def parse_set_operation(self, this: _exp.Expr | None, consume_pipe: bool = False) -> _exp.Expr | None:
         start = self._index
@@ -228,8 +536,13 @@ CTE_COMMENTS_AFTER_AS = "jarify_comments_after_as"
 # writes at that keyword: {keyword: comments}.  On a Not node, "NOT" holds
 # those written after NOT; on a CASE branch (an If node), "WHEN" and "THEN";
 # on a Case node, "ELSE"; on a Subquery, ")" holds those written on their own
-# line before its closing paren.  They are not in the node's comments, which
-# the generator writes after the node.
+# line before its closing paren.  On a predicate (`IN`, `BETWEEN`, `LIKE`,
+# `IS`, …), each word of its operator holds the comments written on it, and
+# "AND" those on BETWEEN's AND; on an Escape, "ESCAPE".  On a Filter, "WHERE"
+# holds those on FILTER, its "(" and WHERE; on the first window of a WINDOW
+# clause, "WINDOW"; on a Values node, "VALUES"; on DISTINCT ON's list, "ON"
+# those on DISTINCT and ON.  They are not in the node's comments, which the
+# generator writes after the node.
 KEYWORD_COMMENTS = "jarify_keyword_comments"
 
 
@@ -247,24 +560,102 @@ def all_keyword_comments(node: _exp.Expr) -> list[str]:
 _SET_OPERATION_MODIFIERS = frozenset({"ALL", "DISTINCT", "BY", "NAME", "STRICT", "CORRESPONDING"})
 
 
+# Words after IS, and BETWEEN's flags, whose comments a predicate keeps.
+_IS_WORDS = frozenset({"NOT", "DISTINCT", "FROM"})
+_BETWEEN_FLAGS = frozenset({"SYMMETRIC", "ASYMMETRIC"})
+
+_OPENING_BRACKETS = frozenset({TokenType.L_PAREN, TokenType.L_BRACKET, TokenType.L_BRACE})
+
+# The predicates jarify writes with their operator, which keep its comments
+# by word.
+_KEYWORD_PREDICATES = (
+    _exp.In,
+    _exp.Between,
+    _exp.Is,
+    _exp.Like,
+    _exp.ILike,
+    _exp.Glob,
+    _exp.SimilarTo,
+    _exp.NullSafeEQ,
+    _exp.NullSafeNEQ,
+)
+
+
 def _set_keyword_comments(node: _exp.Expr, keyword: str, comments: list[str]) -> None:
     comments = [comment for comment in comments if comment.strip()]
     if comments:
-        node.meta.setdefault(KEYWORD_COMMENTS, {})[keyword] = comments
+        node.meta.setdefault(KEYWORD_COMMENTS, {}).setdefault(keyword, []).extend(comments)
+
+
+def _unkept(node: _exp.Expr, comments: list[str]) -> list[str]:
+    """Return the *comments* that *node* and its descendants don't hold yet.
+
+    Comments are told apart by identity: each is the string the tokenizer
+    read, so one written twice with the same text is still two comments.
+    """
+    if not comments:
+        return []
+    held = {id(c) for n in node.walk() for c in [*(n.comments or []), *all_keyword_comments(n)]}
+    return [c for c in comments if id(c) not in held]
+
+
+def _drop_duplicate_comments(trees: list[_exp.Expr | None], recovered: list[tuple[_exp.Expr, str | None, str]]) -> None:
+    """Remove each *recovered* comment from its node when the trees hold it elsewhere too."""
+    if not recovered:
+        return
+    counts: collections.Counter[int] = collections.Counter(
+        id(c)
+        for tree in trees
+        if tree is not None
+        for node in tree.walk()
+        for c in [*(node.comments or []), *all_keyword_comments(node)]
+    )
+    for node, keyword, comment in recovered:
+        if counts[id(comment)] < 2:
+            continue
+        held = keyword_comments(node, keyword) if keyword is not None else node.comments or []
+        index = next((i for i, c in enumerate(held) if c is comment), None)
+        if index is not None:
+            del held[index]
+            counts[id(comment)] -= 1
+
+
+def _top_level_indices(tokens: list[typing.Any], start: int, end: int, types: set[TokenType]) -> list[int]:
+    """Return the indices of the tokens of *types* in ``tokens[start:end]`` outside parens and nested CASEs.
+
+    The search stops at a closing paren or END that has no opening one in the range.
+    """
+    found = []
+    depth = 0
+    for index in range(start, end):
+        token_type = tokens[index].token_type
+        if token_type in (TokenType.L_PAREN, TokenType.CASE):
+            depth += 1
+        elif token_type in (TokenType.R_PAREN, TokenType.END):
+            depth -= 1
+            if depth < 0:
+                break
+        elif depth == 0 and token_type in types:
+            found.append(index)
+    return found
 
 
 def _top_level_tokens(tokens: list[typing.Any], types: set[TokenType]) -> list[typing.Any]:
     """Return the tokens of *types* in *tokens* that are outside parens and nested CASEs."""
-    found = []
+    return [tokens[index] for index in _top_level_indices(tokens, 0, len(tokens), types)]
+
+
+def _closing_paren(tokens: list[typing.Any], opening: int, end: int) -> int | None:
+    """Return the index of the ``)`` that closes the ``(`` at *opening*, before *end*."""
     depth = 0
-    for token in tokens:
-        if token.token_type in (TokenType.L_PAREN, TokenType.CASE):
+    for index in range(opening, end):
+        if tokens[index].token_type == TokenType.L_PAREN:
             depth += 1
-        elif token.token_type in (TokenType.R_PAREN, TokenType.END):
+        elif tokens[index].token_type == TokenType.R_PAREN:
             depth -= 1
-        elif depth == 0 and token.token_type in types:
-            found.append(token)
-    return found
+            if depth == 0:
+                return index
+    return None
 
 
 def _comments_before_cte_body(tokens: list[typing.Any]) -> list[str]:
@@ -542,6 +933,61 @@ def _reinsert_line_rust_fmt_placeholders(
 
 
 # ---------------------------------------------------------------------------
+# Rewriting code only
+# ---------------------------------------------------------------------------
+# The pre-processing below rewrites words in the SQL text before it's parsed.
+# A comment's or a string literal's text must stay as written, so it rewrites
+# only the text of the tokens outside literals.
+
+_LITERAL_TOKEN_TYPES = frozenset(
+    {
+        TokenType.STRING,
+        TokenType.IDENTIFIER,  # a quoted identifier
+        TokenType.BIT_STRING,
+        TokenType.HEX_STRING,
+        TokenType.BYTE_STRING,
+        TokenType.NATIONAL_RAW_STRING,
+        TokenType.NATIONAL_STRING,
+        TokenType.RAW_STRING,
+        TokenType.HEREDOC_STRING,
+        TokenType.UNICODE_STRING,
+    }
+)
+
+
+def _sub_in_code(pattern: re.Pattern[str], repl: str | typing.Callable[[re.Match[str]], str], sql: str) -> str:
+    """Substitute *pattern* in *sql*, except in comments, string literals and quoted identifiers.
+
+    A match counts when it lies within a run of tokens that aren't literals,
+    with nothing between them: comments and whitespace are between tokens.
+    When the SQL can't be tokenized, every match is substituted.
+    """
+    if not pattern.search(sql):
+        return sql
+    try:
+        tokens = _JarifyDuckDB().tokenize(sql)
+    except TokenError:
+        return pattern.sub(repl, sql)
+    runs: list[list[int]] = []  # [start, end) of each run of adjacent code tokens
+    for token in tokens:
+        if token.token_type in _LITERAL_TOKEN_TYPES:
+            continue
+        if runs and runs[-1][1] == token.start:
+            runs[-1][1] = token.end + 1
+        else:
+            runs.append([token.start, token.end + 1])
+    starts = [start for start, _ in runs]
+
+    def _replace(match: re.Match[str]) -> str:
+        run = bisect.bisect_right(starts, match.start()) - 1
+        if run < 0 or match.end() > runs[run][1]:
+            return match.group(0)
+        return repl(match) if callable(repl) else match.expand(repl)
+
+    return pattern.sub(_replace, sql)
+
+
+# ---------------------------------------------------------------------------
 # ifnull preservation
 # ---------------------------------------------------------------------------
 # sqlglot's DuckDB dialect maps IFNULL to exp.Coalesce at parse time, losing
@@ -557,7 +1003,7 @@ _IFNULL_RE = re.compile(r"\bifnull\b", re.IGNORECASE)
 
 def _mask_ifnull(sql: str) -> str:
     """Replace ifnull with a sentinel so sqlglot doesn't normalize it to coalesce."""
-    return _IFNULL_RE.sub(_IFNULL_SENTINEL, sql)
+    return _sub_in_code(_IFNULL_RE, _IFNULL_SENTINEL, sql)
 
 
 def _unmask_ifnull(sql: str) -> str:
@@ -580,7 +1026,7 @@ _NUMERIC_RE = re.compile(r"\bnumeric\b", re.IGNORECASE)
 
 def _mask_numeric(sql: str) -> str:
     """Replace numeric with a sentinel so sqlglot doesn't normalise it to decimal."""
-    return _NUMERIC_RE.sub(_NUMERIC_SENTINEL, sql)
+    return _sub_in_code(_NUMERIC_RE, _NUMERIC_SENTINEL, sql)
 
 
 def _unmask_numeric(sql: str) -> str:
@@ -641,7 +1087,7 @@ def _quote_reserved_cast_types(sql: str) -> str:
     def _replacer(m: re.Match[str]) -> str:
         return f'::"{m.group(1)}"{m.group(2) or ""}'
 
-    return _reserved_cast_re().sub(_replacer, sql)
+    return _sub_in_code(_reserved_cast_re(), _replacer, sql)
 
 
 def _read_dialect(dialect: str) -> type[_DuckDB] | str:

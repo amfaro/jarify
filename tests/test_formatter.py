@@ -1574,6 +1574,280 @@ class TestKeywordComments:
         assert ") AS s -- after\n" in out
 
 
+class TestOperatorComments:
+    """A comment on a word of an operator stays after that word (#388, #382)."""
+
+    @staticmethod
+    def _format(sql: str) -> str:
+        out, _ = format_sql(sql)
+        assert format_sql(out)[0] == out
+        return out
+
+    @pytest.mark.parametrize(
+        ("condition", "expected"),
+        [
+            ("a NOT /* c */ IN (1, 2)", "a NOT /* c */ IN (1, 2)"),
+            ("a NOT IN /* c */ (1, 2)", "a NOT IN /* c */ (1, 2)"),
+            ("a NOT -- c\n  IN (1, 2)", "a NOT /* c */ IN (1, 2)"),
+            ("a NOT IN -- c\n  (1, 2)", "a NOT IN /* c */ (1, 2)"),
+            ("a IN /* c */ (1, 2)", "a IN /* c */ (1, 2)"),
+            ("a IN /* c */ (SELECT b FROM u)", "a IN /* c */ (SELECT b FROM u)"),
+            ("a NOT /* c */ LIKE 'x%'", "a NOT /* c */ LIKE 'x%'"),
+            ("a NOT LIKE /* c */ 'x%'", "a NOT LIKE /* c */ 'x%'"),
+            ("a ILIKE /* c */ 'x%'", "a ILIKE /* c */ 'x%'"),
+            ("a NOT /* c */ GLOB 'x*'", "a NOT /* c */ GLOB 'x*'"),
+            ("a NOT SIMILAR TO /* c */ 'x'", "a NOT SIMILAR TO /* c */ 'x'"),
+            ("a LIKE 'x!%' ESCAPE /* c */ '!'", "a LIKE 'x!%' ESCAPE /* c */ '!'"),
+            ("a NOT /* c */ BETWEEN 1 AND 2", "a NOT /* c */ BETWEEN 1 AND 2"),
+            ("a BETWEEN /* c */ 1 AND 2", "a BETWEEN /* c */ 1 AND 2"),
+            ("a BETWEEN 1 AND -- c\n  2", "a BETWEEN 1 AND /* c */ 2"),
+            ("a IS /* c */ NOT NULL", "a IS /* c */ NOT NULL"),
+            ("a IS NOT /* c */ NULL", "a IS NOT /* c */ NULL"),
+            ("a IS -- c\n  NULL", "a IS /* c */ NULL"),
+            ("a IS NOT /* c */ TRUE", "a IS NOT /* c */ true"),
+            ("a IS /* c */ DISTINCT FROM b", "a IS /* c */ DISTINCT FROM b"),
+            ("a IS NOT DISTINCT FROM /* c */ b", "a IS NOT DISTINCT FROM /* c */ b"),
+        ],
+    )
+    def test_comment_on_an_operator_word_stays_after_it(self, condition, expected):
+        out = self._format(f"SELECT a FROM t WHERE {condition}")
+        assert f"WHERE {expected}\n;" in out
+
+    def test_comment_on_an_operator_in_a_select_list(self):
+        out = self._format("SELECT a NOT /* c */ IN (1, 2) AS x, b NOT /* d */ LIKE 'y' AS y FROM t")
+        assert "   a NOT /* c */ IN (1, 2) AS x\n  ,b NOT /* d */ LIKE 'y'  AS y\n" in out
+
+    def test_comment_on_an_operator_written_as_a_call_goes_after_its_right_operand(self):
+        out = self._format("SELECT a FROM t WHERE a ~ /* c */ 'x'")
+        assert "  ,'x' -- c\n" in out
+
+    @pytest.mark.parametrize(
+        "condition", ["a NOT /* c */ IN UNNEST([1, 2])", "a NOT /* c */ BETWEEN SYMMETRIC 1 AND 2"]
+    )
+    def test_comment_on_an_operator_jarify_rewrites_goes_at_the_end(self, condition):
+        out = self._format(f"SELECT a FROM t WHERE {condition}")
+        assert out.count("-- c") == 1
+
+    def test_is_not_true_and_false_keep_not_after_is(self):
+        out = self._format("SELECT a FROM t WHERE a IS NOT TRUE AND b IS NOT FALSE")
+        assert "WHERE a IS NOT true\n  AND b IS NOT false\n;" in out
+
+    def test_not_in_front_of_is_true_moves_after_is(self):
+        out = self._format("SELECT NOT a IS TRUE AS x, NOT (b IS FALSE) AS y FROM t")
+        assert "   a IS NOT true    AS x\n  ,NOT (b IS false) AS y\n" in out
+
+
+class TestClauseKeywordComments:
+    """Comments on WINDOW, DISTINCT ON, FILTER and OVER are kept (#388)."""
+
+    @staticmethod
+    def _format(sql: str) -> str:
+        out, _ = format_sql(sql)
+        assert format_sql(out)[0] == out
+        return out
+
+    @pytest.mark.parametrize("window", ["WINDOW /* c */ w", "WINDOW -- c\n  w", "-- c\nWINDOW w"])
+    def test_comment_on_window_goes_above_it(self, window):
+        out = self._format(f"SELECT SUM(a) OVER w AS s FROM t\n{window} AS (ORDER BY a)")
+        assert "FROM t\n-- c\nWINDOW w AS (ORDER BY a)\n;" in out
+
+    def test_comment_on_a_named_windows_as_goes_after_it(self):
+        out = self._format("SELECT SUM(a) OVER w AS s FROM t WINDOW w AS /* c */ (ORDER BY a)")
+        assert "WINDOW w AS (ORDER BY a) -- c\n;" in out
+
+    @pytest.mark.parametrize(
+        "distinct", ["DISTINCT ON /* c */ (a)", "DISTINCT /* c */ ON (a)", "DISTINCT ON -- c\n (a)"]
+    )
+    def test_comment_on_distinct_on_stays_after_on(self, distinct):
+        out = self._format(f"SELECT {distinct} a, b FROM t")
+        assert out.startswith("SELECT DISTINCT ON /* c */ (a)\n   a\n  ,b\n")
+
+    def test_comment_after_distinct_ons_paren_goes_on_its_first_item(self):
+        out = self._format("SELECT DISTINCT ON ( -- c\n a) a, b FROM t")
+        assert out.startswith("SELECT DISTINCT ON (\n   a -- c\n)\n   a\n  ,b\n")
+
+    @pytest.mark.parametrize(
+        "filter_", ["FILTER /* c */ (WHERE a)", "FILTER ( -- c\n  WHERE a)", "FILTER (WHERE /* c */ a)"]
+    )
+    def test_comment_in_filter_goes_after_where(self, filter_):
+        out = self._format(f"SELECT COUNT(*) {filter_} AS n FROM t")
+        assert "   COUNT(*) FILTER(WHERE /* c */ a) AS n\n" in out
+
+    @pytest.mark.parametrize(
+        "over",
+        [
+            "FILTER (WHERE a) /* c */ OVER (PARTITION BY b)",
+            "FILTER (WHERE a) -- c\n  OVER (PARTITION BY b)",
+            "FILTER (WHERE a) OVER /* c */ (PARTITION BY b)",
+        ],
+    )
+    def test_comment_before_a_window_spec_goes_after_the_window(self, over):
+        out = self._format(f"SELECT COUNT(*) {over} AS n FROM t")
+        assert "   COUNT(*) FILTER(WHERE a) OVER (PARTITION BY b) AS n -- c\n" in out
+
+
+class TestOpeningBracketComments:
+    """A comment after an opening bracket goes on the first item (#388)."""
+
+    @staticmethod
+    def _format(sql: str) -> str:
+        out, _ = format_sql(sql)
+        assert format_sql(out)[0] == out
+        return out
+
+    @pytest.mark.parametrize("comment", ["-- c\n  ", "/* c */ "])
+    def test_comment_after_a_calls_paren_goes_on_its_first_argument(self, comment):
+        out = self._format(f"SELECT coalesce( {comment}a, b, c) AS v FROM t")
+        assert "   coalesce(\n     a -- c\n    ,b\n    ,c\n  ) AS v\n" in out
+
+    @pytest.mark.parametrize("call", ["CAST( -- c\n a AS int)", "COUNT( -- c\n *)", "if( -- c\n a, 1, 2)"])
+    def test_comment_after_the_paren_of_other_calls_is_kept(self, call):
+        out = self._format(f"SELECT {call} AS v FROM t")
+        assert "-- c" in out or "/* c */" in out
+
+    def test_comment_after_an_in_lists_paren_goes_on_its_first_value(self):
+        out = self._format("SELECT a FROM t WHERE a IN ( -- c\n  1, 2)")
+        assert "WHERE a IN (\n   1 -- c\n  ,2\n)\n;" in out
+
+    def test_comment_after_a_list_literals_bracket_goes_on_its_first_item(self):
+        out = self._format("SELECT [ -- c\n  1, 2] AS l FROM t")
+        assert "   [\n     1 -- c\n    ,2\n  ] AS l\n" in out
+
+    def test_comment_in_the_parens_of_a_call_without_arguments_follows_the_call(self):
+        out = self._format("SELECT ROW_NUMBER( /* c */ ) OVER (ORDER BY a) AS rn, b FROM t")
+        assert "   ROW_NUMBER() OVER (ORDER BY a) AS rn -- c\n" in out
+
+    @pytest.mark.parametrize("value", ["CAST( /* c */ a + b AS int)", "CAST(a /* c */ + b AS int)"])
+    def test_commented_operator_in_a_cast_is_laid_out_as_its_parentheses(self, value):
+        out = self._format(f"SELECT {value} AS v, d FROM t")
+        assert "   (\n    a /* c */ + b\n  )::int AS v\n" in out
+
+    @pytest.mark.parametrize("literal", ["[1, 2]", "{'a': 1}"])
+    def test_comment_above_a_list_or_struct_literal_stays_above_it(self, literal):
+        out = self._format(f"SELECT\n  -- c\n  {literal} AS v, d FROM t")
+        assert f"SELECT\n   -- c\n   {literal} AS v\n" in out
+
+    def test_comment_on_a_lambda_parameter_column_is_kept(self):
+        out = self._format("SELECT list_transform(l, lambda x: x.key /* c */ + 1) AS v FROM t")
+        assert "lambda x: x.key /* c */ + 1\n" in out
+
+    @pytest.mark.parametrize("using", ["USING ( -- c\n  id)", "USING (id /* c */)", "USING (id -- c\n)"])
+    def test_comment_on_a_using_column_is_kept(self, using):
+        out = self._format(f"SELECT a FROM t INNER JOIN u {using}")
+        assert "INNER JOIN u USING (id /* c */)\n;" in out
+
+
+class TestStructComments:
+    """Comments in a struct literal are kept (#388)."""
+
+    @staticmethod
+    def _format(sql: str) -> str:
+        out, _ = format_sql(sql)
+        assert format_sql(out)[0] == out
+        return out
+
+    @pytest.mark.parametrize("comment", ["-- c\n  ", "/* c */ "])
+    def test_comment_between_a_struct_and_its_alias_follows_the_alias(self, comment):
+        out = self._format(f"SELECT {{'a': 1}} {comment}AS v FROM t")
+        assert "   {'a': 1} AS v -- c\n" in out
+
+    @pytest.mark.parametrize(
+        "struct",
+        ["{'a': 1, -- c\n 'b': 2}", "{ -- c\n 'a': 1, 'b': 2}", "{'a': /* c */ 1, 'b': 2}", "{a: 1, -- c\n b: 2}"],
+    )
+    def test_comment_in_a_struct_stays_with_its_entry(self, struct):
+        out = self._format(f"SELECT {struct} AS v FROM t")
+        assert "   {\n     'a': 1 -- c\n    ,'b': 2\n  } AS v\n" in out
+
+    def test_comment_on_a_struct_key_stays_after_it(self):
+        out = self._format("SELECT {'a' /* c */: 1} AS v FROM t")
+        assert "     'a' /* c */: 1\n" in out
+
+    def test_commented_out_entries_keep_their_own_lines(self):
+        sql = "SELECT {\n  'a': a\n  ,'b': b\n-- ,'c': c\n  ,'d': d\n} AS v FROM t"
+        out = self._format(sql)
+        assert "   {\n     'a': a\n    ,'b': b\n    -- ,'c': c\n    ,'d': d\n  } AS v\n" in out
+
+
+class TestValuesComments:
+    """Comments on VALUES rows are kept (#388)."""
+
+    @staticmethod
+    def _format(sql: str) -> str:
+        out, _ = format_sql(sql)
+        assert format_sql(out)[0] == out
+        return out
+
+    def test_comment_after_a_cte_values_row_stays_after_it(self):
+        out = self._format("WITH c (a, b) AS (VALUES (1, 'x'), -- first\n (2, 'y')) SELECT a, b FROM c")
+        assert "  VALUES\n     (1, 'x') -- first\n    ,(2, 'y')\n)" in out
+
+    def test_comment_after_the_last_cte_values_row_stays_after_it(self):
+        out = self._format("WITH c (a, b) AS (VALUES ('MDG', 'MGA') -- madagascar\n) SELECT a, b FROM c")
+        assert "  VALUES\n     ('MDG', 'MGA') -- madagascar\n)" in out
+
+    @pytest.mark.parametrize(
+        ("sql", "rows"),
+        [
+            (
+                "WITH c (a) AS (VALUES (1)\n  -- second\n  , (2)) SELECT a FROM c",
+                "  VALUES\n     (1)\n    -- second\n    ,(2)\n)",
+            ),
+            ("INSERT INTO t VALUES (1)\n  -- second\n  , (2)", "VALUES\n   (1)\n  -- second\n  ,(2)\n;"),
+            ("INSERT INTO t VALUES\n  -- first\n  (1), (2)", "VALUES\n   -- first\n   (1)\n  ,(2)\n;"),
+        ],
+    )
+    def test_own_line_comment_between_rows_stays_above_the_next_row(self, sql, rows):
+        assert rows in self._format(sql)
+
+    @pytest.mark.parametrize("values", ["VALUES -- rows\n (1), (2)", "\n  -- rows\n  VALUES (1), (2)"])
+    def test_comment_on_values_goes_after_it(self, values):
+        out = self._format(f"WITH c (a) AS ({values}) SELECT a FROM c")
+        assert "  VALUES -- rows\n     (1)\n    ,(2)\n)" in out
+
+
+class TestCommentTextKept:
+    """Rewriting ifnull, numeric and reserved-word casts leaves comments and strings alone (#388)."""
+
+    def test_ifnull_in_a_comment_keeps_its_case(self):
+        out, _ = format_sql("SELECT ifnull(a, 0) AS v -- uses IFNULL(a, 0) on purpose\nFROM t")
+        assert "-- uses IFNULL(a, 0) on purpose\n" in out
+
+    def test_numeric_and_reserved_casts_in_comments_and_strings_are_kept(self):
+        sql = "SELECT 'IFNULL', 'NUMERIC', '::filter[]' AS s /* NUMERIC ::filter[] */, a::NUMERIC AS n FROM t"
+        out, _ = format_sql(sql)
+        assert "   'IFNULL'\n  ,'NUMERIC'\n  ,'::filter[]' AS s -- NUMERIC ::filter[]\n  ,a::numeric   AS n\n" in out
+
+
+class TestGroupByAllComments:
+    """prefer-group-by-all keeps a GROUP BY list that carries a comment (#388)."""
+
+    def test_group_by_with_the_select_lists_comment_is_kept(self):
+        sql = "SELECT a, b -- c1\n, SUM(c) AS s FROM t GROUP BY a, b -- c1\n"
+        out, _ = format_sql(sql)
+        assert out.count("-- c1") == 2
+        assert "GROUP BY\n   a\n  ,b -- c1\n;" in out
+
+
+class TestListOwnLineComments:
+    """An own-line comment before a list item lines up with the commas on the first pass (#382)."""
+
+    @pytest.mark.parametrize(
+        ("sql", "expected"),
+        [
+            ("SELECT a FROM t WHERE b IN (\n  1,\n  -- note\n  2\n)", "WHERE b IN (\n   1\n  -- note\n  ,2\n)\n;"),
+            (
+                "SELECT a FROM t WHERE x = 1 AND b IN (\n  1,\n  -- note\n  2\n)",
+                "  AND b IN (\n     1\n    -- note\n    ,2\n  )\n;",
+            ),
+        ],
+    )
+    def test_own_line_comment_in_an_in_list_lines_up_with_the_commas(self, sql, expected):
+        out, _ = format_sql(sql)
+        assert expected in out
+        assert format_sql(out)[0] == out
+
+
 class TestCtesInSubqueries:
     """A subquery holding a WITH is laid out with its CTEs as at the top level (#378)."""
 

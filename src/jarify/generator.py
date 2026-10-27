@@ -50,6 +50,7 @@ from jarify.parser import (
     _IFNULL_SENTINEL,
     CTE_COMMENTS_AFTER_AS,
     FROM_FIRST_JOINS_KEY,
+    KEYWORD_COMMENTS,
     all_keyword_comments,
     keyword_comments,
 )
@@ -189,33 +190,65 @@ def _jarify_struct_sql(self: JarifyGenerator, expression: exp.Struct) -> str:
     )
 
     args: list[str] = []
+    # The comments on each entry (`key := value` node), such as one after its
+    # comma, and those written on their own line before its key.
+    entry_comments: list[list[str]] = []
     for i, expr in enumerate(expression.expressions):
         is_property_eq = isinstance(expr, exp.PropertyEQ)
         this = expr.this
         value = expr.expression if is_property_eq else expr
+        comments = list(expr.comments or []) if is_property_eq else []
 
         if is_bq_inline_struct:
             args.append(self.sql(value))
         else:
             if isinstance(this, exp.Identifier):
-                key = self.sql(exp.Literal.string(expr.name))
+                key_comments = this.comments or []
+                lead = [c for c in key_comments if c.strip() in self._leading_comment_texts]
+                comments = [*lead, *comments]
+                key = self.maybe_comment(
+                    self.sql(exp.Literal.string(expr.name)), comments=[c for c in key_comments if c not in lead]
+                )
             elif is_property_eq:
                 key = self.sql(this)
             else:
                 key = self.sql(exp.Literal.string(f"_{i}"))
             args.append(f"{key}: {self.sql(value)}")
+        entry_comments.append(comments)
 
     if is_bq_inline_struct:
         return f"ROW({', '.join(args)})"
 
-    if not self.pretty or not self.too_wide(args):
-        return f"{{{', '.join(args)}}}"
+    # A commented entry takes the multi-line form, so a -- comment ends its line.
+    commented = any(self._has_comments(expr) for expr in expression.expressions)
+    if not self.pretty or (not commented and not self.too_wide(args)):
+        entries = [f"{arg}{self._render_comments(c)}" for arg, c in zip(args, entry_comments, strict=True)]
+        return f"{{{', '.join(entries)}}}"
 
     # Multi-line leading-comma form
-    parts = [f" {args[0]}"]
-    parts.extend(f",{a}" for a in args[1:])
+    parts = [
+        line
+        for i, (arg, comments) in enumerate(zip(args, entry_comments, strict=True))
+        for line in self._list_item_lines(arg, comments, first=i == 0)
+    ]
     inner = self.indent("\n" + "\n".join(parts) + "\n", skip_first=True, skip_last=True)
     return f"{{{inner}}}"
+
+
+def _windows_sql(self: JarifyGenerator, expression: exp.Expr) -> str:
+    """Render a query's WINDOW clause, with the comments written on WINDOW above it."""
+    windows = expression.args.get("windows")
+    if not windows:
+        return ""
+    sql = self.seg("WINDOW ") + self.expressions(expression, key="windows", flat=True)
+    comments = keyword_comments(windows[0], "WINDOW")
+    if not comments:
+        return sql
+    if not self.pretty:
+        return self.seg(f"WINDOW{self._comments_before_sql(comments)} ") + self.expressions(
+            expression, key="windows", flat=True
+        )
+    return self.sep() + "\n".join(self._own_line_comments(comments)) + sql
 
 
 class JarifyGenerator(DuckDB.Generator):
@@ -242,6 +275,11 @@ class JarifyGenerator(DuckDB.Generator):
         # Override DuckDB's _struct_sql so struct literals wrap when they exceed
         # max_line_length.  DuckDB's built-in version always emits a flat string.
         exp.Struct: _jarify_struct_sql,
+    }
+
+    AFTER_HAVING_MODIFIER_TRANSFORMS: ClassVar[dict[str, t.Any]] = {
+        **DuckDB.Generator.AFTER_HAVING_MODIFIER_TRANSFORMS,
+        "windows": _windows_sql,
     }
 
     # Comments on QUALIFY go above it, as they do above WHERE and HAVING.
@@ -609,45 +647,8 @@ class JarifyGenerator(DuckDB.Generator):
                     sql = self.sql(e, comment=False)
                 if not sql:
                     continue
-                leader = " " if i == 0 else ","
-                if (
-                    isinstance(e, exp.Expr)
-                    and (e.comments or above)
-                    and (self._leading_comment_texts or self._trailing_sep_comment_texts)
-                ):
-                    own = e.comments or []
-                    trail_sep = [c for c in own if c.strip() in self._trailing_sep_comment_texts]
-                    # Both sets match comments by text, so a comment written in
-                    # two places can be in both; write it once, after the column.
-                    lead = [
-                        *above,
-                        *(
-                            c
-                            for c in own
-                            if c.strip() in self._leading_comment_texts
-                            and c.strip() not in self._trailing_sep_comment_texts
-                        ),
-                    ]
-                    trail = [
-                        c
-                        for c in own
-                        if c.strip() not in self._leading_comment_texts
-                        and c.strip() not in self._trailing_sep_comment_texts
-                    ]
-                    # Own-line comments keep a line of their own; a multi-line
-                    # block comment keeps its lines as written. Above a later
-                    # column, one lines up with the commas: there it follows
-                    # the column before, which writes it in that column too.
-                    lead_pad = "" if i and lifts_item_comments else " "
-                    for c in lead:
-                        result_sqls.append(f"{lead_pad}{prefix}{self._render_comments([c], leading=True)}")
-                    inline = self._render_comments(trail)
-                    result_sqls.append(f"{leader}{prefix}{sql}{inline}")
-                    for c in trail_sep:
-                        result_sqls.append(f"{prefix}{self._render_comments([c], leading=True)}")
-                else:
-                    inline = self._inline_comments(e) if isinstance(e, exp.Expr) else ""
-                    result_sqls.append(f"{leader}{prefix}{sql}{inline}")
+                comments = (e.comments or []) if isinstance(e, exp.Expr) else []
+                result_sqls.extend(self._list_item_lines(sql, comments, first=i == 0, prefix=prefix, above=above))
         finally:
             self._as_align_width = saved_align
 
@@ -674,6 +675,46 @@ class JarifyGenerator(DuckDB.Generator):
             # from swallowing the ")".
             return self.indent("\n" + result_sql + "\n", skip_first=True, skip_last=True)
         return self.indent(result_sql, skip_first=skip_first, skip_last=skip_last) if indent else result_sql
+
+    def _list_item_lines(
+        self, sql: str, comments: list[str], *, first: bool, prefix: str = "", above: t.Sequence[str] = ()
+    ) -> list[str]:
+        """Return the lines of a leading-comma list item and its comments.
+
+        A comment written on its own line before the item goes on its own
+        line above it, as do the comments in *above*, and one on its own
+        line after it, before the next comma, on its own line below it; the
+        others follow the item on its line.
+        """
+        leader = " " if first else ","
+        if not (comments or above) or not (self._leading_comment_texts or self._trailing_sep_comment_texts):
+            return [f"{leader}{prefix}{sql}{self._render_comments(comments)}"]
+        trail_sep = [c for c in comments if c.strip() in self._trailing_sep_comment_texts]
+        # Both sets match comments by text, so a comment written in
+        # two places can be in both; write it once, after the column.
+        lead = [
+            *above,
+            *(
+                c
+                for c in comments
+                if c.strip() in self._leading_comment_texts and c.strip() not in self._trailing_sep_comment_texts
+            ),
+        ]
+        trail = [
+            c
+            for c in comments
+            if c.strip() not in self._leading_comment_texts and c.strip() not in self._trailing_sep_comment_texts
+        ]
+        # Own-line comments keep a line of their own; a multi-line block
+        # comment keeps its lines as written. Above a later item, one lines
+        # up with the commas: there it follows the item before, which writes
+        # it in that column too. Above the first item it lines up with the
+        # item's text.
+        lead_column = " " if first else ""
+        lines = [f"{lead_column}{prefix}{self._render_comments([c], leading=True)}" for c in lead]
+        lines.append(f"{leader}{prefix}{sql}{self._render_comments(trail)}")
+        lines.extend(f"{prefix}{self._render_comments([c], leading=True)}" for c in trail_sep)
+        return lines
 
     def _inline_comments(self, expression: exp.Expr) -> str:
         """Render inline comments using -- for single-line, /* */ for multi-line."""
@@ -2093,9 +2134,11 @@ class JarifyGenerator(DuckDB.Generator):
         ``_negated_after_operand``).
         """
         if expression.args.get("unnest"):
-            return super().in_sql(expression)
+            # DuckDB's generator rewrites an IN UNNEST, so the comments on its
+            # words go at the end.
+            return self.maybe_comment(super().in_sql(expression), comments=all_keyword_comments(expression))
         this = self.sql(expression, "this")
-        op = "NOT IN" if self._negated_after_operand(expression) else "IN"
+        op = self._operator_sql(expression, "NOT IN" if self._negated_after_operand(expression) else "IN")
         query = expression.args.get("query")
         if self.pretty and query is not None:
             if self._may_go_on_one_line(query):
@@ -2176,17 +2219,55 @@ class JarifyGenerator(DuckDB.Generator):
         inner = expression.this
         # Comments written after NOT stay after it.
         after_not = keyword_comments(expression, "NOT")
-        if isinstance(inner, exp.Is) and isinstance(inner.expression, exp.Null):
+        if isinstance(inner, exp.Is) and isinstance(inner.expression, (exp.Null, exp.Boolean)):
+            # `IS NOT NULL`, `IS NOT true` and `IS NOT false` keep NOT after IS.
             # A trailing comment after NULL is attached to the Null node, which
-            # this shortcut never renders, so carry its comments over. NOT
-            # moves after the column, so its comments go at the end too.
+            # this shortcut never renders, so carry its comments over. A NOT
+            # written in front moves after the column, so its comments go at
+            # the end too. Those written on IS and NOT stay after IS NOT.
             comments = [*after_not, *(inner.comments or []), *(inner.expression.comments or [])]
-            return self.maybe_comment(f"{self.sql(inner.this)} IS NOT NULL", comments=comments)
+            value = self.sql(inner.expression, comment=False)
+            return self.maybe_comment(
+                f"{self.sql(inner.this)} {self._operator_sql(inner, 'IS NOT')} {value}", comments=comments
+            )
         if self._negated_after_operand(inner):
             # The predicate writes the NOT itself, after its operand, so the
             # comments written after NOT go at the end, as for IS NOT NULL.
             return self.maybe_comment(self.sql(expression, "this"), comments=after_not)
         return f"NOT{self._comments_before_sql(after_not)} {self.sql(expression, 'this')}"
+
+    def _operator_sql(self, expression: exp.Expr, operator: str, *, skip: tuple[str, ...] = ()) -> str:
+        """Return *operator* with the comments the parser kept for each of its words after that word.
+
+        A predicate keeps the comments written on its operator's words
+        (``a NOT /* c */ IN (…)``), which sqlglot drops. Those on a word
+        *operator* doesn't spell, such as ``NOT`` when jarify writes it in
+        front, go after its last word. The words in *skip* are written by
+        the caller.
+        """
+        kept = dict(expression.meta_get(KEYWORD_COMMENTS) or {})
+        for word in skip:
+            kept.pop(word, None)
+        if not kept:
+            return operator
+        words = [f"{word}{self._comments_before_sql(kept.pop(word, []))}" for word in operator.split(" ")]
+        rest = [comment for comments in kept.values() for comment in comments]
+        return " ".join(words) + self._comments_before_sql(rest)
+
+    def _like_sql(self, expression: exp.Like | exp.ILike, escape: exp.Escape | None = None) -> str:
+        sql = super()._like_sql(expression, escape=escape)
+        if isinstance(expression.expression, (exp.All, exp.Any)) and not self.SUPPORTS_LIKE_QUANTIFIERS:
+            # sqlglot rewrites `LIKE ANY (…)` with new nodes, so the comments
+            # on its words go at the end.
+            return self.maybe_comment(sql, comments=all_keyword_comments(expression))
+        return sql
+
+    def binary(self, expression: exp.Binary, op: str) -> str:
+        if not expression.meta_get(KEYWORD_COMMENTS) or op.startswith("OPERATOR("):
+            return super().binary(expression, op)
+        this = self.sql(expression, "this")
+        operator = self.maybe_comment(self._operator_sql(expression, op), comments=expression.comments)
+        return f"{this} {operator} {self.sql(expression, 'expression')}"
 
     def _comments_before_sql(self, comments: list[str]) -> str:
         """Render comments that SQL follows on their line, each as `` /* … */``.
@@ -2225,12 +2306,18 @@ class JarifyGenerator(DuckDB.Generator):
         return isinstance(expression, (exp.SimilarTo, exp.Glob))
 
     def between_sql(self, expression: exp.Between) -> str:
-        if not self._negated_after_operand(expression):
-            return super().between_sql(expression)
+        if expression.args.get("symmetric"):
+            # DuckDB's generator rewrites a BETWEEN SYMMETRIC, so the comments
+            # on its words go at the end.
+            return self.maybe_comment(super().between_sql(expression), comments=all_keyword_comments(expression))
         this = self.sql(expression, "this")
         low = self.sql(expression, "low")
         high = self.sql(expression, "high")
-        return f"{this} NOT BETWEEN {low} AND {high}"
+        op = self._operator_sql(
+            expression, "NOT BETWEEN" if self._negated_after_operand(expression) else "BETWEEN", skip=("AND",)
+        )
+        and_ = f"AND{self._comments_before_sql(keyword_comments(expression, 'AND'))}"
+        return f"{this} {op} {low} {and_} {high}"
 
     def similarto_sql(self, expression: exp.SimilarTo) -> str:
         return self.binary(expression, "NOT SIMILAR TO" if self._negated_after_operand(expression) else "SIMILAR TO")
@@ -2345,12 +2432,29 @@ class JarifyGenerator(DuckDB.Generator):
                     parts.append(cell)
             row_sqls.append(f"({''.join(parts)})")
 
-        # Leading-comma style: first row gets a leading space, rest get comma
-        lines = [f" {row_sqls[0]}"]
-        lines.extend(f",{row}" for row in row_sqls[1:])
+        # Leading-comma style: first row gets a leading space, rest get comma.
+        # Each row's comments go with it, as with a SELECT list's columns.
+        lines = [
+            line
+            for i, (row, row_sql) in enumerate(zip(rows, row_sqls, strict=True))
+            for line in self._list_item_lines(row_sql, row.comments or [], first=i == 0)
+        ]
 
         body = self.indent("\n".join(lines))
-        return f"VALUES\n{body}"
+        return f"{self._values_keyword_sql(expression)}\n{body}"
+
+    def values_sql(self, expression: exp.Values, values_as_table: bool = True) -> str:
+        sql = super().values_sql(expression, values_as_table=values_as_table)
+        if not keyword_comments(expression, "VALUES"):
+            return sql
+        return sql.replace("VALUES", self._values_keyword_sql(expression), 1)
+
+    def _values_keyword_sql(self, expression: exp.Values) -> str:
+        """Return ``VALUES`` with the comments written on it, which end its line: the rows follow on the next lines."""
+        comments = keyword_comments(expression, "VALUES")
+        if not self.pretty:
+            return f"VALUES{self._comments_before_sql(comments)}"
+        return f"VALUES{self._render_comments(comments)}"
 
     # ------------------------------------------------------------------
     # GROUP BY / ORDER BY ALL: keep ALL inline; otherwise one expression per line
@@ -2468,6 +2572,26 @@ class JarifyGenerator(DuckDB.Generator):
             and isinstance(ordered.this, exp.Var)
             and ordered.this.name.upper() == "ALL"
         )
+
+    def distinct_sql(self, expression: exp.Distinct) -> str:
+        # The comments written on DISTINCT ON go after ON.
+        sql = super().distinct_sql(expression)
+        on = expression.args.get("on")
+        comments = keyword_comments(on, "ON") if on is not None else []
+        if not comments or " ON " not in sql:
+            return sql
+        return sql.replace(" ON ", f" ON{self._comments_before_sql(comments)} ", 1)
+
+    def filter_sql(self, expression: exp.Filter) -> str:
+        # The comments written on FILTER, its ( and WHERE go after WHERE.
+        comments = keyword_comments(expression, "WHERE")
+        if not comments:
+            return super().filter_sql(expression)
+        this = self.sql(expression, "this")
+        where = self.sql(expression, "expression").strip()
+        if where.startswith("WHERE"):
+            where = f"WHERE{self._comments_before_sql(comments)}{where[len('WHERE') :]}"
+        return f"{this} FILTER({where})"
 
     # ------------------------------------------------------------------
     # Window: OVER (...) stays inline, but a commented window spec breaks
@@ -2631,9 +2755,15 @@ class JarifyGenerator(DuckDB.Generator):
             exprs_sql = self.expressions(expression.this, flat=False)
             return f"(\n{exprs_sql}\n)::{type_sql}"
 
-        value_sql = self.sql(expression, "this")
-        if self._needs_cast_parens(expression.this):
-            value_sql = f"({value_sql})"
+        value = expression.this
+        if self.pretty and self._needs_cast_parens(value) and self._has_comments(value):
+            # A commented value is laid out as the parenthesized value it
+            # parses back as, so it takes the same form on the next pass.
+            value_sql = self.paren_sql(exp.Paren(this=value.copy()))
+        elif self._needs_cast_parens(value):
+            value_sql = f"({self.sql(expression, 'this')})"
+        else:
+            value_sql = self.sql(expression, "this")
 
         return f"{value_sql}::{type_sql}"
 
@@ -2909,11 +3039,12 @@ class JarifyGenerator(DuckDB.Generator):
             self._col_name_align = saved_name
             self._col_type_align = saved_type
 
-        # Build body with leading-comma style
+        # Build body with leading-comma style; each column's comments go with
+        # it, as with a SELECT list's columns.
         lines: list[str] = []
-        for i, sql in enumerate(col_sqls):
-            leader = " " if i == 0 else ","
-            lines.append(f"{leader}{sql}")
+        for i, (col, sql) in enumerate(zip(col_defs, col_sqls, strict=True)):
+            for item_line in self._list_item_lines(sql, col.comments or [], first=i == 0):
+                lines.extend(item_line.split("\n"))
 
         if constraint_sqls:
             lines.append("")  # blank line separating columns from table constraints
