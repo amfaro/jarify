@@ -420,7 +420,37 @@ def parse_sql(sql: str, dialect: str = DUCKDB_DIALECT) -> list[Expression]:
     ``::filter[]``) so sqlglot can handle them.
     """
     preprocessed = _quote_reserved_cast_types(sql)
-    return sqlglot.parse(preprocessed, read=_read_dialect(dialect), error_level=sqlglot.ErrorLevel.RAISE)
+    trees = sqlglot.parse(preprocessed, read=_read_dialect(dialect), error_level=sqlglot.ErrorLevel.RAISE)
+    return _hoist_from_table_joins(trees)
+
+
+# Set in a query's meta when its joins were moved off a FROM-first query's
+# table, so the generator keeps writing it FROM-first.
+FROM_FIRST_JOINS_KEY = "jarify_from_first_joins"
+
+
+def _hoist_from_table_joins(trees: list[Expression]) -> list[Expression]:
+    """Move joins that sqlglot attached to a query's FROM table onto the query.
+
+    In a FROM-first query (``FROM t p JOIN d dd ON …``) sqlglot puts the joins
+    in the FROM table's ``joins`` arg instead of the query's, where the
+    generator renders them. Rendering the table and its alias alone then
+    dropped every join. Both placements mean the same query, so the joins are
+    moved to the query, ahead of any it already has, and the query is marked
+    with ``FROM_FIRST_JOINS_KEY``.
+    """
+    for tree in trees:
+        if tree is None:
+            continue
+        for select in tree.find_all(_exp.Select):
+            from_ = select.args.get("from_")
+            table = from_.this if from_ is not None else None
+            joins = table.args.get("joins") if isinstance(table, _exp.Table) else None
+            if joins:
+                table.set("joins", None)
+                select.set("joins", [*joins, *(select.args.get("joins") or [])])
+                select.meta[FROM_FIRST_JOINS_KEY] = True
+    return trees
 
 
 def parse_sql_lenient(sql: str, dialect: str = DUCKDB_DIALECT) -> tuple[list[Expression], list[ParseError]]:
@@ -440,4 +470,4 @@ def parse_sql_lenient(sql: str, dialect: str = DUCKDB_DIALECT) -> tuple[list[Exp
             sqlglot.parse(preprocessed, read=read, error_level=sqlglot.ErrorLevel.RAISE)
         except ParseError as e:
             errors.append(e)
-    return trees, errors
+    return _hoist_from_table_joins(trees), errors
