@@ -1680,7 +1680,22 @@ class JarifyGenerator(DuckDB.Generator):
     def order_sql(self, expression: exp.Order, flat: bool = False) -> str:
         if self.pretty and self._is_order_by_all(expression):
             return self.seg("ORDER BY ALL")
-        return super().order_sql(expression, flat=flat)
+        sql = super().order_sql(expression, flat=flat)
+        if not self.pretty or not self.too_wide([sql]):
+            return sql
+        keyword = f"ORDER {'SIBLINGS ' if expression.args.get('siblings') else ''}BY"
+        if expression.args.get("this") is not None:
+            # An aggregate's `x ORDER BY a, b` is a call argument. When it
+            # doesn't fit, ORDER BY goes on its own line under the argument,
+            # its keys one per line if they don't fit either.
+            keys = self.expressions(expression, flat=True)
+            clause = f"{keyword} {keys}"
+            if self.too_wide([clause]):
+                clause = self._wrapped_list_clause(keyword, expression)
+            return self._argument_lines(f"{self.sql(expression, 'this')}\n{clause}")
+        if flat and isinstance(expression.parent, exp.Window):
+            return self._argument_lines(self._wrapped_list_clause(keyword, expression))
+        return sql
 
     @staticmethod
     def _is_order_by_all(expression: exp.Order) -> bool:
@@ -1733,6 +1748,29 @@ class JarifyGenerator(DuckDB.Generator):
             lines.append(f" {self.sql(spec)}")
         lines.append(" )")
         return self.indent("\n".join(line for line in lines if line.strip()), skip_first=True, skip_last=True)
+
+    def partition_by_sql(self, expression: exp.Window | exp.MatchRecognize) -> str:
+        sql = super().partition_by_sql(expression)
+        if self.pretty and isinstance(expression, exp.Window) and self.too_wide([sql]):
+            # A wrapped window puts each clause on its own line (format_args);
+            # a PARTITION BY that still doesn't fit puts one key per line.
+            return self._argument_lines(self._wrapped_list_clause("PARTITION BY", expression, key="partition_by"))
+        return sql
+
+    def _wrapped_list_clause(self, keyword: str, expression: exp.Expr, key: str | None = None) -> str:
+        """Return *keyword* with its list one item per line below it, like a query's ORDER BY."""
+        return f"{keyword}\n{self.expressions(expression, key=key)}"
+
+    def _argument_lines(self, sql: str) -> str:
+        """Shift the lines after the first one column right, for an argument of a wrapped call.
+
+        In leading-comma style, _wrapped_args puts a one-character leader
+        before an argument's first line only; the extra column keeps the
+        argument's other lines in line with its first.
+        """
+        if not self.leading_comma:
+            return sql
+        return sql.replace("\n", "\n ")
 
     # ------------------------------------------------------------------
     # -> / ->>: render without surrounding spaces (value->>'key' not value ->> 'key').
