@@ -23,6 +23,14 @@ def _is_single_when(node: exp.Case) -> bool:
     return len(node.args.get("ifs", [])) == 1
 
 
+def _starts_a_column(node: exp.Case) -> bool:
+    """Return True if *node* is a column, bare or under its alias, or a GROUP BY or ORDER BY key."""
+    parent = node.parent
+    if isinstance(parent, (exp.Alias, exp.Ordered)):
+        return node.arg_key == "this"
+    return isinstance(parent, (exp.Select, exp.Group)) and node.arg_key == "expressions"
+
+
 def _has_comments(node: exp.Case) -> bool:
     """Return True if a comment is attached to *node* or sits inside its branches.
 
@@ -32,8 +40,14 @@ def _has_comments(node: exp.Case) -> bool:
     A comment attached to the CASE itself, such as one on the line above a
     CASE nested in another CASE's ELSE, keeps the CASE too, and so does one
     on a WHEN, THEN or ELSE keyword, which an ``if()`` call has no place for.
+
+    A column's own comments, such as one on the line above it, belong to
+    the column, not to the CASE: sqlglot moves them onto the column's alias
+    unless the alias has comments of its own, and the formatter writes the
+    ones above it on their own lines. They go with the ``if()``.
     """
-    return any(n.comments or all_keyword_comments(n) for n in node.walk())
+    column = _starts_a_column(node)
+    return any((n.comments and not (column and n is node)) or all_keyword_comments(n) for n in node.walk())
 
 
 def _is_rewritable(node: exp.Case) -> bool:
@@ -53,7 +67,9 @@ class PreferIfOverCaseRule(FormatterRule):
     - Applies only to *searched* CASE (``CASE WHEN cond THEN val …``).
     - Simple CASE (``CASE expr WHEN lit …``) is left unchanged.
     - CASE with 2+ WHEN branches is left unchanged.
-    - CASE carrying a comment, on itself or inside a branch, is left unchanged.
+    - CASE carrying a comment, on itself or inside a branch, is left unchanged,
+      unless it makes up a whole column and the comment is the column's (see
+      ``_has_comments``).
     - A CASE nested in another CASE's branch is rewritten in the same pass.
 
     **ELSE handling**: When the CASE has no ELSE clause the implicit return
@@ -101,6 +117,8 @@ class PreferIfOverCaseRule(FormatterRule):
                 true=if_branch.args["true"],
                 false=else_val if else_val is not None else exp.Null(),
             )
+            # A column's own comments (see _has_comments) stay with it.
+            replacement.add_comments(case.comments)
             case.replace(replacement)
 
         return tree

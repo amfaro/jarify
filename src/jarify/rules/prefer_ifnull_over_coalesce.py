@@ -27,6 +27,9 @@ class PreferIfnullOverCoalesceRule(FormatterRule):
                 this="ifnull",
                 expressions=[coalesce.this.copy(), coalesce.expressions[0].copy()],
             )
+            # The call's comments, such as one written on its own line above
+            # it or after it, stay with it.
+            replacement.add_comments(coalesce.comments)
             coalesce.replace(replacement)
         return tree
 
