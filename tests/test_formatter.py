@@ -14,6 +14,11 @@ def _alias_positions(sql: str, *aliases: str) -> list[int]:
     ]
 
 
+def _as_columns(sql: str, *aliases: str) -> list[int]:
+    """Return the 1-based editor column where each matching `AS` keyword starts."""
+    return [position + 2 for position in _alias_positions(sql, *aliases)]
+
+
 def test_format_simple_select():
     result, _ = format_sql("select 1")
     assert result.strip() != ""
@@ -130,6 +135,117 @@ def test_as_alignment_stays_visually_consistent_across_nested_ctes():
         "final_two",
     )
     assert len(set(as_positions)) == 1, f"Nested CTE alias alignment drifted: {as_positions}"
+
+
+class TestAliasVisualGuideInterval:
+    def test_rounds_as_column_up_to_next_guide(self):
+        # `customer_name` ends in column 16, so AS would otherwise start in column 18.
+        sql = "SELECT customer_name AS name, id AS customer_id FROM customers"
+        baseline, _ = format_sql(sql)
+        result, _ = format_sql(sql, JarifyConfig(alias_visual_guide_interval=12))
+
+        assert _as_columns(baseline, "name", "customer_id") == [18, 18]
+        assert _as_columns(result, "name", "customer_id") == [24, 24]
+
+    def test_keeps_as_column_already_on_a_guide(self):
+        sql = "SELECT lifetime_orders_cnt AS order_count, id AS customer_id FROM customer_stats"
+        baseline, _ = format_sql(sql)
+        result, _ = format_sql(sql, JarifyConfig(alias_visual_guide_interval=12))
+
+        assert _as_columns(baseline, "order_count", "customer_id") == [24, 24]
+        assert result == baseline
+
+    def test_moves_past_guide_when_longest_expression_needs_it(self):
+        sql = "SELECT lifetime_orders_count AS order_count, id AS customer_id FROM customer_stats"
+        result, _ = format_sql(sql, JarifyConfig(alias_visual_guide_interval=12))
+
+        assert _as_columns(result, "order_count", "customer_id") == [36, 36]
+
+    def test_rounds_up_after_min_column_alias_floor(self):
+        config = JarifyConfig(min_column_alias=34, alias_visual_guide_interval=12)
+        short, _ = format_sql("SELECT id AS order_id, status AS order_status FROM orders", config)
+        long, _ = format_sql(
+            "SELECT id AS order_id, ifnull(shipping_address, billing_address) AS address FROM orders", config
+        )
+
+        assert _as_columns(short, "order_id", "order_status") == [36, 36]
+        assert _as_columns(long, "order_id", "address") == [48, 48]
+
+    def test_applies_one_guide_column_across_nested_ctes(self):
+        sql = (
+            "WITH outer_group AS ("
+            "  WITH seed_group AS ("
+            "    SELECT alpha_value AS seed_one, beta_metric AS seed_two FROM source_a"
+            "  )"
+            "  SELECT seed_one AS outer_one, seed_two AS outer_two FROM seed_group"
+            "), "
+            "sibling_group AS ("
+            "  SELECT gamma_code AS sibling_one, delta_indicator AS sibling_two FROM source_b"
+            ") "
+            "SELECT outer_one AS final_one, sibling_two AS final_two "
+            "FROM outer_group JOIN sibling_group ON outer_one = sibling_one"
+        )
+        aliases = ("seed_one", "seed_two", "outer_one", "outer_two", "sibling_one", "sibling_two")
+        aliases += ("final_one", "final_two")
+        baseline, _ = format_sql(sql)
+        result, _ = format_sql(sql, JarifyConfig(alias_visual_guide_interval=12))
+
+        assert set(_as_columns(baseline, *aliases)) == {22}
+        assert _as_columns(result, *aliases) == [24] * len(aliases)
+
+    def test_aligns_multiline_expression_by_its_closing_line(self):
+        sql = (
+            "SELECT c.id AS customer_id, "
+            "CASE WHEN c.ltv > 100000 THEN 'gold' WHEN c.ltv > 10000 THEN 'silver' ELSE 'bronze' END AS tier "
+            "FROM customers c"
+        )
+        result, _ = format_sql(sql, JarifyConfig(alias_visual_guide_interval=12))
+
+        end_line = next(line for line in result.splitlines() if " AS tier" in line)
+        assert end_line.lstrip().startswith("END")
+        assert _as_columns(result, "customer_id", "tier") == [12, 12]
+
+    def test_applies_to_subquery_with_local_alignment(self):
+        sql = "SELECT x FROM t LEFT JOIN (SELECT p AS s1, some_long_thing AS s2 FROM u) s ON s.s1 = t.x"
+        baseline, _ = format_sql(sql)
+        result, _ = format_sql(sql, JarifyConfig(alias_visual_guide_interval=12))
+
+        assert _as_columns(baseline, "s1", "s2") == [22, 22]
+        assert _as_columns(result, "s1", "s2") == [24, 24]
+
+    def test_applies_to_each_locally_aligned_union_branch(self):
+        sql = "SELECT p AS s1, qq AS s2 FROM u UNION ALL SELECT p AS s1, qqqqqq AS s2 FROM v"
+        baseline, _ = format_sql(sql)
+        result, _ = format_sql(sql, JarifyConfig(alias_visual_guide_interval=12))
+
+        assert _as_columns(baseline, "s1", "s2") == [7, 7, 11, 11]
+        assert _as_columns(result, "s1", "s2") == [12, 12, 12, 12]
+
+    def test_interval_of_one_matches_default_output(self):
+        sql = (
+            "WITH a AS (SELECT x AS first, CASE WHEN y THEN 1 ELSE 2 END AS second FROM t) "
+            "SELECT * REPLACE (q + 1 AS q) RENAME (r AS renamed_r, s AS renamed_s), "
+            "first AS one, second AS two FROM a JOIN (SELECT p AS s1, qq AS s2 FROM u) s ON s.s1 = a.first"
+        )
+        baseline, _ = format_sql(sql)
+        result, _ = format_sql(sql, JarifyConfig(alias_visual_guide_interval=1))
+
+        assert result == baseline
+
+    def test_leaves_table_alias_alignment_unchanged(self):
+        sql = (
+            "SELECT o.id AS order_id, c.name AS customer_name FROM orders o "
+            "INNER JOIN customers c ON c.id = o.customer_id LEFT JOIN addresses addr ON addr.id = o.address_id"
+        )
+        baseline, _ = format_sql(sql)
+        result, _ = format_sql(sql, JarifyConfig(alias_visual_guide_interval=12))
+
+        table_prefixes = ("FROM", "INNER JOIN", "LEFT JOIN")
+        table_lines = [line for line in result.splitlines() if line.startswith(table_prefixes)]
+        assert len(table_lines) == 3
+        assert table_lines == [line for line in baseline.splitlines() if line.startswith(table_prefixes)]
+        assert _as_columns(baseline, "order_id", "customer_name") == [11, 11]
+        assert _as_columns(result, "order_id", "customer_name") == [12, 12]
 
 
 def test_searched_case_issue_260_layout_is_preserved():
@@ -565,6 +681,20 @@ class TestFromFirst:
         replace_rename_lines = [line for line in out.splitlines() if " AS vendor_" in line or " AS display_" in line]
         assert len({line.index(" AS ") for line in replace_rename_lines}) == 1
         assert replace_rename_lines[0].index(" AS ") == 24
+
+    def test_modified_star_respects_alias_visual_guide_interval(self):
+        sql = (
+            "SELECT * REPLACE (id + 1 AS vendor_id, name || suffix AS vendor_name) "
+            "RENAME (id AS display_id, name AS display_name) FROM vendors"
+        )
+        baseline, _ = format_sql(sql)
+        out, _ = format_sql(sql, JarifyConfig(alias_visual_guide_interval=12))
+
+        assert _as_columns(baseline, "vendor_id", "vendor_name") == [22, 22]
+        assert _as_columns(out, "vendor_id", "vendor_name") == [24, 24]
+        # RENAME already lands on the column-12 guide, so it stays put.
+        assert _as_columns(baseline, "display_id", "display_name") == [12, 12]
+        assert _as_columns(out, "display_id", "display_name") == [12, 12]
 
 
 class TestLeftOuterJoinNormalization:

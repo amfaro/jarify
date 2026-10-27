@@ -773,9 +773,67 @@ INNER JOIN _sibling_group ON outer_one = sibling_one
 **Also good** (`min-column-alias = 24`)
 ```sql
 SELECT
-   a                    AS one
-  ,bb                   AS two
+   a                     AS one
+  ,bb                    AS two
 FROM t
+;
+```
+
+#### Visual-guide interval
+
+Set `alias_visual_guide_interval` (also accepted as `alias-visual-guide-interval`) to a positive integer `n` to put every aligned `AS` on an editor visual guide. The guide is the column `AS` starts in, counted from 1. Jarify takes the column where `AS` would otherwise start and moves it right to the first multiple of `n` at or after it. A column already on a guide stays where it is, and a longer expression moves `AS` to a later guide. Zero, a negative number or no value leaves the option unset, and output is unchanged.
+
+DataGrip and the other JetBrains IDEs call these lines *Visual guides* (`Settings | Editor | Code Style | Visual guides`, or `ij_visual_guides` in EditorConfig). DataGrip takes an explicit comma-separated list of guide columns, such as `12,24,36`. Jarify deliberately takes one interval instead: `12` means guides at columns 12, 24, 36, 48 and so on.
+
+The interval applies wherever jarify aligns column aliases:
+
+- the query-wide column shared by the outer `SELECT` and its CTEs, nested CTEs included
+- `SELECT` lists that align on their own, such as the branches of a top-level `UNION`
+- multi-line expressions, which align by their closing line (`END AS …`)
+- the `REPLACE` and `RENAME` lists of a star
+
+Table aliases in `FROM` and `JOIN` keep their own alignment.
+
+When `min-column-alias` is also set, jarify applies the floor first and then moves to the next guide. `min-column-alias = 34` pads expressions through column 34, so `AS` starts in column 36 at the earliest. Adding `alias_visual_guide_interval = 12` puts `AS` in column 36, 48 or 60: the first of those that leaves at least one space after the longest expression in the query.
+
+The interval is a personal editor preference, so it fits in your global config:
+
+```toml
+# ~/.config/jarify/config.toml
+[jarify]
+alias_visual_guide_interval = 12
+```
+
+**Before** (no interval: `customer_name` ends in column 16, so `AS` starts in column 18)
+```sql
+SELECT
+   customer_name AS name
+  ,id            AS customer_id
+FROM customers
+;
+```
+
+**After** (`alias_visual_guide_interval = 12`: `AS` moves to column 24)
+```sql
+SELECT
+   customer_name       AS name
+  ,id                  AS customer_id
+FROM customers
+;
+```
+
+**Also good** (`min-column-alias = 34` and `alias_visual_guide_interval = 12`: `AS` in column 36, or 48 when the longest expression needs it)
+```sql
+SELECT
+   id                              AS order_id
+  ,status                          AS order_status
+FROM orders
+;
+
+SELECT
+   id                                          AS order_id
+  ,ifnull(shipping_address, billing_address)   AS address
+FROM orders
 ;
 ```
 
@@ -1409,6 +1467,7 @@ Supported directives:
 - `-- jarify: disable-file <rule>` — disable a rule for the whole file
 - `-- jarify: set max_line_length = 140` / `-- jarify: reset max_line_length` — override line length for following statements until reset
 - `-- jarify: set min-column-alias = 80` / `-- jarify: reset min-column-alias` — set or clear a minimum visible column-alias alignment floor for following statements
+- `-- jarify: set alias-visual-guide-interval = 12` / `-- jarify: reset alias-visual-guide-interval` — set or clear the visual-guide interval for column-alias alignment for following statements
 
 Rules use their lint names such as `no-select-star`, `cte-naming`, or `prefer-if-over-case`. The wildcard `all` matches every rule — handy for silencing files edited in a non-DuckDB IDE. `enable all` closes every open `disable` region.
 
