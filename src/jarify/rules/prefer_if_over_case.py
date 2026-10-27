@@ -25,9 +25,10 @@ def _is_single_when(node: exp.Case) -> bool:
 def _has_comments(node: exp.Case) -> bool:
     """Return True if a comment is attached to *node* or sits inside its branches.
 
-    IF() renders its arguments on one line, where a ``--`` comment would
-    swallow the rest of the call, so commented branches stay as CASE.  A
-    comment attached to the CASE itself, such as one on the line above a
+    A comment inside the WHEN, THEN or ELSE expression keeps the CASE, so the
+    comment stays beside the branch it documents. (An ``if()`` call holding
+    it would be safe: ``if_sql`` puts a commented argument on its own line.)
+    A comment attached to the CASE itself, such as one on the line above a
     CASE nested in another CASE's ELSE, keeps the CASE too: sqlglot drops a
     comment attached to an ``if()`` call when it parses the call.
     """
