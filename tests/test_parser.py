@@ -4,8 +4,10 @@ import io
 import sys
 
 import pytest
+import sqlglot.expressions as exp
 
 from jarify.parser import (
+    CTE_COMMENTS_AFTER_AS,
     FROM_FIRST_JOINS_KEY,
     _extract_ctas_body_placeholders,
     _extract_line_rust_fmt_placeholders,
@@ -39,6 +41,21 @@ def test_parse_lenient_collects_errors():
     _, errors = parse_sql_lenient("SELECT FROM WHERE")
     # Should parse leniently without raising
     assert isinstance(errors, list)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "WITH _a AS\n-- note\n(SELECT 1) SELECT 1",
+        "WITH _a AS MATERIALIZED -- note\n(SELECT 1) SELECT 1",
+        "WITH _a(x) AS NOT MATERIALIZED\n-- note\n(SELECT 1) SELECT 1",
+    ],
+)
+def test_parse_keeps_comment_between_cte_as_and_paren(sql):
+    """sqlglot drops it; the parser attaches it to the CTE and marks it."""
+    cte = parse_sql(sql)[0].find(exp.CTE)
+    assert cte.comments == [" note"]
+    assert cte.meta[CTE_COMMENTS_AFTER_AS] == [" note"]
 
 
 def test_parse_lenient_emits_nothing_to_stderr():

@@ -587,7 +587,7 @@ FROM _latest_version
 
 ### CTE inline comments — after `AS`
 
-Inline comments on a CTE definition are placed after `AS` on the same line, using `--` style. The opening `(` still goes on its own line below.
+Inline comments on a CTE definition are placed after `AS` on the same line, using `--` style. The opening `(` still goes on its own line below. A comment written between `AS` (or `MATERIALIZED`) and the opening `(` goes there too, even one on its own line.
 
 **Bad**
 ```sql
@@ -1029,6 +1029,24 @@ LEFT JOIN other_table y ON x.id = y.id -- match
                         OR x.alt_id = y.id -- fallback
 INNER JOIN third      z ON z.id = x.id
 ;
+```
+
+A comment on a `FROM` or `JOIN` table follows its alias, or the table when it has none, so the aliases stay aligned. When `ON` or `USING` follows it on the line, each comment is a `/* */` block comment.
+
+**Bad** (the comment is dropped, or comes between the table and its alias)
+```sql
+FROM orders            o
+LEFT JOIN users /* people */ u ON u.id = o.user_id
+LEFT JOIN addresses addr ON addr.id = o.aid
+CROSS JOIN regions
+```
+
+**Good**
+```sql
+FROM orders            o -- source
+LEFT JOIN users        u /* people */ ON u.id = o.user_id
+LEFT JOIN addresses addr ON addr.id = o.aid
+CROSS JOIN regions -- every region
 ```
 
 ---
