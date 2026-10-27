@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlglot.expressions as exp
 
+from jarify.parser import all_keyword_comments
 from jarify.rules.base import FormatterRule, _node_pos
 from jarify.types import LintViolation
 
@@ -28,6 +29,18 @@ def _non_agg_sqls(select: exp.Select) -> set[str]:
     return result
 
 
+def _rewritable(group: exp.Group) -> bool:
+    """Return True when GROUP BY ALL could replace *group*'s list without losing a comment.
+
+    GROUP BY ALL drops the list, so a list that carries a comment stays,
+    even when the same text is written on the SELECT list too: that's a
+    second comment, which the rewrite would delete.
+    """
+    return not any(
+        node.comments or all_keyword_comments(node) for expression in group.expressions for node in expression.walk()
+    )
+
+
 class PreferGroupByAllRule(FormatterRule):
     """Format and lint: rewrite explicit GROUP BY col list to GROUP BY ALL when equivalent."""
 
@@ -47,7 +60,7 @@ class PreferGroupByAllRule(FormatterRule):
             group = select.args.get("group")
             if not group or not group.expressions:
                 continue
-            if group.args.get("all"):
+            if group.args.get("all") or not _rewritable(group):
                 continue
 
             non_agg = _non_agg_sqls(select)
@@ -74,6 +87,9 @@ class PreferGroupByAllRule(FormatterRule):
                 continue
             if group.args.get("all"):
                 # Already GROUP BY ALL — nothing to flag
+                continue
+            if not _rewritable(group):
+                # fmt keeps a commented list, so don't flag what it won't fix
                 continue
 
             non_agg = _non_agg_sqls(select)

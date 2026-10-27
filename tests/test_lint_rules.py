@@ -326,6 +326,13 @@ class TestPreferGroupByAll:
         rules = _lint(sql)
         assert "prefer-group-by-all" not in rules
 
+    def test_no_warn_when_the_group_by_list_has_a_comment(self):
+        # fmt keeps a commented list, since GROUP BY ALL would drop the comment,
+        # even when the SELECT list has a comment with the same text (#388).
+        sql = "SELECT a, b -- c\n, count(*) AS n FROM t GROUP BY a, b -- c\n"
+        rules = _lint(sql)
+        assert "prefer-group-by-all" not in rules
+
 
 class TestPreferUsingOverOn:
     def test_warns_on_same_column_name_equijoin(self):
