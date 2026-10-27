@@ -1069,3 +1069,97 @@ class TestCommentsInOneLineConstructs:
         once, _ = format_sql("SELECT a /* note */ + 1 AS c FROM t")
         twice, _ = format_sql(once)
         assert once == twice
+
+
+class TestFunctionCaseOverrides:
+    SQL = (
+        "SELECT string_agg(a, ',') AS s, any_value(b) AS v, list(c) AS l, arg_max(e, f) AS am, "
+        "lag(j) OVER () AS lg, regexp_extract(x, 'y') AS r FROM t"
+    )
+
+    def test_default_classification_is_unchanged(self):
+        out, _ = format_sql(self.SQL)
+        assert out == (
+            "SELECT\n"
+            "   STRING_AGG(a, ',')     AS s\n"
+            "  ,ANY_VALUE(b)           AS v\n"
+            "  ,list(c)                AS l\n"
+            "  ,ARG_MAX(e, f)          AS am\n"
+            "  ,LAG(j) OVER ()         AS lg\n"
+            "  ,regexp_extract(x, 'y') AS r\n"
+            "FROM t\n"
+            ";\n"
+        )
+
+    def test_lists_override_builtin_case_in_both_directions(self):
+        config = JarifyConfig(uppercase_functions=["list", "regexp_extract"], lowercase_functions=["any_value", "lag"])
+        out, _ = format_sql(self.SQL, config)
+        assert out == (
+            "SELECT\n"
+            "   STRING_AGG(a, ',')     AS s\n"
+            "  ,any_value(b)           AS v\n"
+            "  ,LIST(c)                AS l\n"
+            "  ,ARG_MAX(e, f)          AS am\n"
+            "  ,lag(j) OVER ()         AS lg\n"
+            "  ,REGEXP_EXTRACT(x, 'y') AS r\n"
+            "FROM t\n"
+            ";\n"
+        )
+
+    def test_names_match_case_insensitively(self):
+        config = JarifyConfig(uppercase_functions=["LiSt"], lowercase_functions=["ANY_VALUE"])
+        out, _ = format_sql("SELECT List(a) AS l, Any_Value(b) AS v FROM t", config)
+        assert "LIST(a) " in out
+        assert "any_value(b) " in out
+
+    def test_override_applies_to_canonical_renames(self):
+        config = JarifyConfig(uppercase_functions=["list"], lowercase_functions=["string_agg"])
+        out, _ = format_sql("SELECT array_agg(a ORDER BY a) AS l, listagg(b, ',') AS s FROM t", config)
+        assert "LIST(a ORDER BY a) " in out
+        assert "string_agg(b, ',') " in out
+
+    def test_override_applies_to_list_distinct_wrapping(self):
+        config = JarifyConfig(uppercase_functions=["list"], max_line_length=40)
+        sql = "SELECT array_agg(DISTINCT some_long_column_name || another_long_column_name) AS l FROM t"
+        out, _ = format_sql(sql, config)
+        assert "LIST(\n" in out
+        assert format_sql(out, config)[0] == out
+
+    def test_override_applies_to_ifnull_written_and_rewritten(self):
+        config = JarifyConfig(uppercase_functions=["ifnull"])
+        out, _ = format_sql("SELECT ifnull(a, 0) AS x, coalesce(b, 0) AS y FROM t", config)
+        assert "IFNULL(a, 0) " in out
+        assert "IFNULL(b, 0) " in out
+        assert "ifnull" not in out
+
+    def test_override_applies_to_if_inline_and_wrapped(self):
+        config = JarifyConfig(uppercase_functions=["if"])
+        out, _ = format_sql("SELECT CASE WHEN a THEN 1 ELSE 0 END AS x, if(b, 1, 2) AS y FROM t", config)
+        assert "IF(a, 1, 0) " in out
+        assert "IF(b, 1, 2) " in out
+        wide = (
+            "SELECT if(some_really_long_column_name_one > 100 AND another_really_long_column_name_two < 200, "
+            "'a_long_true_branch_value', 'a_long_false_branch_value_xxxxxxxxxxxxxxxxxx') AS x FROM t"
+        )
+        out, _ = format_sql(wide, config)
+        assert "   IF(\n" in out
+
+    def test_user_macros_keep_default_case_unless_listed(self):
+        config = JarifyConfig(uppercase_functions=["my_macro"])
+        out, _ = format_sql("SELECT my_macro(a) AS m, other_macro(b) AS o, main.my_macro(c) AS q FROM t", config)
+        assert "MY_MACRO(a) " in out
+        assert "other_macro(b) " in out
+        assert "main.my_macro(c) " in out
+
+    def test_sqlmesh_macro_calls_are_not_changed(self):
+        config = JarifyConfig(uppercase_functions=["my_macro", "each"])
+        out, warnings = format_sql("MODEL (name a.b);\nselect @my_macro(a) as m, @each(b) as e from t\n", config)
+        assert not warnings
+        assert "@my_macro(a) " in out
+        assert "@each(b) " in out
+
+    def test_overrides_are_idempotent(self):
+        config = JarifyConfig(uppercase_functions=["list", "ifnull", "if"], lowercase_functions=["any_value"])
+        sql = "SELECT array_agg(a) AS l, ifnull(b, 0) AS i, if(c, 1, 2) AS f, any_value(d) AS v FROM t"
+        out, _ = format_sql(sql, config)
+        assert format_sql(out, config)[0] == out
