@@ -433,11 +433,13 @@ def _lines_continuing_after_line_comment(sql: str) -> list[str]:
     return [line for line in sql.splitlines() if "-- " in line and "--" in line.split("-- ", 1)[1]]
 
 
-def test_several_comments_on_one_node_each_end_their_line():
+def test_several_comments_on_one_node_stay_on_its_line():
+    # On lines of their own, the comments after the first would belong to the
+    # next token on the next pass: a `)`, `]` or `}`, a clause keyword, `::`.
     sql = "SELECT a /* first */ /* second */ AS c, b FROM t GROUP BY a /* g1 */ /* g2 */;\n"
     result, _ = format_sql(sql)
-    assert "   a AS c -- first\n  -- second\n  ,b\n" in result
-    assert "   a -- g1\n  -- g2\n;" in result
+    assert "   a AS c /* first */ -- second\n  ,b\n" in result
+    assert "   a /* g1 */ -- g2\n;" in result
     assert not _lines_continuing_after_line_comment(result)
     assert format_sql(result)[0] == result
 
@@ -1872,7 +1874,10 @@ class TestCtesInSubqueries:
     def test_then_value_holding_a_with_takes_its_own_layout(self):
         sql = "SELECT CASE WHEN a THEN (WITH c AS (SELECT 1 AS a) SELECT max(a) FROM c) WHEN b THEN 2 END AS v"
         out, _ = format_sql(sql)
-        assert "     THEN (\n        WITH c AS\n" in out
+        # The value's other lines keep their column relative to THEN, as a
+        # WHEN condition's do relative to WHEN: its ")" goes under THEN.
+        assert "     THEN (\n       WITH c AS\n" in out
+        assert "       FROM c\n     )\n     WHEN b\n" in out
 
 
 class TestNestedJoins:
@@ -2851,3 +2856,299 @@ class TestCaseLayoutPositions:
     def test_aliases_line_up_after_a_case_end(self, case):
         out, _ = format_sql(f"SELECT a AS x, {case} AS y, c AS z FROM t")
         assert len(set(_as_columns(out, "x", "y", "z"))) == 1
+
+
+_TRAILING_COMMAS = JarifyConfig(leading_commas=False, trailing_commas=True)
+
+
+def _stable(out: str, config: JarifyConfig | None = None) -> bool:
+    return format_sql(out, config)[0] == out
+
+
+class TestColumnCommentsStayInPlace:
+    """A comment written above, between or after columns stays there (#394)."""
+
+    @pytest.mark.parametrize("column", ["ifnull(a, 1)", "f(a)", "(c + 1)", "x.title_case()"])
+    def test_comment_between_columns_after_a_column_ending_in_a_paren(self, column):
+        # sqlglot gives the comma's comment to the column before it, whatever
+        # that column ends in; it was taken for a comment above that column.
+        out, _ = format_sql(f"SELECT\n   {column}\n  -- c1\n  ,x AS y\nFROM t")
+        assert f"   {column}\n  -- c1\n  ,x AS y\n" in out
+        assert _stable(out)
+
+    @pytest.mark.parametrize(
+        ("sql", "expected"),
+        [
+            ("SELECT a FROM t GROUP BY\n   f(a)\n  -- c1\n  ,b", "GROUP BY\n   f(a)\n  -- c1\n  ,b\n"),
+            ("SELECT a FROM t ORDER BY\n   f(a)\n  -- c1\n  ,b", "ORDER BY\n   f(a)\n  -- c1\n  ,b\n"),
+            ("SELECT a FROM t WHERE x IN (\n   f(a)\n  -- c1\n  ,b)", "WHERE x IN (\n   f(a)\n  -- c1\n  ,b\n)\n"),
+        ],
+        ids=["group_by", "order_by", "in_list"],
+    )
+    def test_comment_between_items_after_an_item_ending_in_a_paren(self, sql, expected):
+        out, _ = format_sql(sql)
+        assert expected in out
+        assert _stable(out)
+
+    @pytest.mark.parametrize(
+        ("column", "rendered"),
+        [
+            ("-a", "-a"),
+            ("~a", "~a"),
+            ("x.title_case()", "x.title_case()"),
+            ("t.x.upper()", "t.x.upper()"),
+            ("-f(a)", "-f(a)"),
+            ("-(a + 1)", "-(a + 1)"),
+            ("INTERVAL 1 DAY", "INTERVAL '1' DAY"),
+            ("DATE '2020-01-01'", "'2020-01-01'::date"),
+        ],
+    )
+    @pytest.mark.parametrize("alias", ["", " AS v"])
+    def test_comment_above_the_first_column_is_kept(self, column, rendered, alias):
+        # sqlglot dropped a comment on a unary operator, on the column a
+        # method is called on, and on INTERVAL or a typed literal's type.
+        out, _ = format_sql(f"SELECT\n  -- c1\n  {column}{alias}\n  ,z\nFROM t")
+        assert f"SELECT\n   -- c1\n   {rendered}" in out
+        assert _stable(out)
+
+    def test_comment_above_a_star_is_kept(self):
+        out, _ = format_sql("SELECT\n  -- c1\n  * EXCLUDE (a)\nFROM t")
+        assert "SELECT\n   -- c1\n   *\n   EXCLUDE (\n" in out
+        assert _stable(out)
+
+    @pytest.mark.parametrize(
+        ("case", "rendered"),
+        [
+            ("CASE WHEN a THEN 1 ELSE 0 END", "if(a, 1, 0)"),
+            ("CASE a WHEN 1 THEN 2 END", "CASE a\n    WHEN 1 THEN 2\n  END"),
+        ],
+        ids=["rewritten_to_if", "simple_case"],
+    )
+    def test_comment_after_a_case_stays_with_one_above_it(self, case, rendered):
+        # sqlglot dropped the comment after END when the CASE took one from
+        # above it.
+        out, _ = format_sql(f"SELECT\n  -- c1\n  {case} -- c2\n  ,b\nFROM t")
+        assert f"   -- c1\n   {rendered} -- c2\n  ,b\n" in out
+        assert _stable(out)
+
+    @pytest.mark.parametrize(
+        ("column", "expected"),
+        [
+            ("a\n  -- c1\n  + 1", "   -- c1\n   a + 1\n  ,z\n"),
+            ("a + -- c1\n   1", "   a + 1 -- c1\n  ,z\n"),
+            ("a + 1\n  -- c1", "   a + 1\n  -- c1\n  ,z\n"),
+            # An AND chain followed by a comment takes its multi-line form, as
+            # it does on the next pass, when its last term holds the comment.
+            ("a AND -- c1\n  b", "   a\n  AND b -- c1\n  ,z\n"),
+        ],
+        ids=["above_the_operator", "after_the_operator", "between_columns", "after_and"],
+    )
+    def test_comments_on_an_unaliased_operator_column_are_written_once(self, column, expected):
+        # Like an aliased column's, which sqlglot moves onto the alias. They
+        # were written after the operator and by the list too, one more copy
+        # on every pass.
+        out, _ = format_sql(f"SELECT\n   {column}\n  ,z\nFROM t")
+        assert out.count("c1") == 1
+        assert expected in out
+        assert _stable(out)
+
+    @pytest.mark.parametrize("operator", ["a *", "NOT"])
+    def test_comment_above_a_parenthesis_after_an_operator_follows_it(self, operator):
+        # Written before the parenthesis, it would follow the operator on its
+        # line and belong to the operator on the next pass.
+        out, _ = format_sql(f"SELECT {operator}\n-- c1\n(b + 1) AS v FROM t")
+        assert f"   {operator} (b + 1) /* c1 */ AS v\n" in out
+        assert _stable(out)
+
+    def test_comments_on_bare_parenthesized_columns_are_kept(self):
+        # A parenthesis rendered twice, once to measure it, dropped them.
+        sql = "SELECT\n   z\n  ,(b + 1) -- c2\n  ,(c + 1)\n  -- c3\n  ,y AS w\n  ,v AS u\nFROM t"
+        out, _ = format_sql(sql)
+        assert "  ,(b + 1) -- c2\n  ,(c + 1)\n  -- c3\n  ,y" in out
+        assert _stable(out)
+
+
+class TestDroppedOperandComments:
+    """Comments sqlglot drops where it rebuilds a node are kept (#394)."""
+
+    @pytest.mark.parametrize(
+        ("column", "rendered"),
+        [
+            ("a::my_type", "a::my_type"),
+            ("b->>'key'", "b->>'key'"),
+            ("INTERVAL 1 DAY", "INTERVAL '1' DAY"),
+            ("SUM(b) OVER (PARTITION BY c)", "SUM(b) OVER (PARTITION BY c)"),
+        ],
+    )
+    def test_comment_after_a_column_is_kept(self, column, rendered):
+        out, _ = format_sql(f"SELECT\n  -- c1\n  {column} -- c2\n  ,z\nFROM t")
+        assert f"   -- c1\n   {rendered} -- c2\n  ,z\n" in out
+        assert _stable(out)
+
+    @pytest.mark.parametrize("call", ["list_filter(l, lambda c: regexp_matches(c, 'x')", "f(regexp_matches(c, 'x')"])
+    def test_comment_after_a_binary_node_written_as_a_function_is_kept(self, call):
+        # regexp_matches is a binary node, whose comments sqlglot writes only
+        # after an operator, and it has none.
+        out, _ = format_sql(f"SELECT {call} -- c1\n) AS v FROM t")
+        assert "regexp_matches(c, 'x') -- c1\n" in out
+        assert _stable(out)
+
+    def test_comment_above_a_lambda_argument_is_kept(self):
+        out, _ = format_sql("SELECT list_transform(k,\n  -- c1\n  lambda x: x + 1) AS v FROM t")
+        assert out.count("-- c1") == 1
+        assert _stable(out)
+
+    def test_comment_on_a_rebuilt_function_argument_is_kept(self):
+        # date_trunc's builder turns its unit into a keyword.
+        out, _ = format_sql("SELECT date_trunc('week' -- c1\n, d) AS v FROM t")
+        assert out.count("-- c1") == 1
+        assert _stable(out)
+
+    def test_comment_after_a_tuples_paren_is_kept(self):
+        out, _ = format_sql("SELECT ( -- c1\n a.x, a.y)::point_type AS v FROM t")
+        assert "   (\n     a.x -- c1\n    ,a.y\n  )::point_type AS v\n" in out
+        assert _stable(out)
+
+    def test_comment_before_an_equals_in_qualify_is_kept(self):
+        sql = "SELECT a FROM t QUALIFY\n  -- c1\n  ROW_NUMBER() OVER (ORDER BY b) /* c2 */ = 1\n  AND a > 2"
+        out, _ = format_sql(sql)
+        assert "QUALIFY\n  -- c1\n  ROW_NUMBER() OVER (ORDER BY b) /* c2 */ = 1\n  AND a > 2\n" in out
+        assert _stable(out)
+
+    def test_comment_on_an_aligned_where_equals_is_kept(self):
+        out, _ = format_sql("SELECT a FROM t WHERE a = /* c1 */ 1 AND bb = 2")
+        assert "WHERE a  = /* c1 */ 1\n  AND bb = 2\n" in out
+        assert _stable(out)
+
+    @pytest.mark.parametrize("cross_join", ["warn", "off"])
+    def test_comment_on_a_comma_join_is_kept(self, cross_join):
+        config = JarifyConfig(no_implicit_cross_join=cross_join)
+        out, _ = format_sql("SELECT a FROM t\n-- c1\n, u", config)
+        assert "FROM t\n-- c1\n" in out
+        assert _stable(out, config)
+
+    @pytest.mark.parametrize(
+        ("sql", "expected"),
+        [
+            ("SELECT coalesce(b, c, a /* c1 */ /* c2 */) AS v FROM t", "    ,a /* c1 */ -- c2\n  ) AS v\n"),
+            ("SELECT CAST(a /* c1 */ /* c2 */ AS int) AS v FROM t", "   a /* c1 */ /* c2 */::int AS v\n"),
+            ("SELECT a FROM t WHERE x IN (1, 2 /* c1 */ /* c2 */)", "  ,2 /* c1 */ -- c2\n)\n"),
+        ],
+        ids=["last_argument", "cast", "last_in_list"],
+    )
+    def test_several_comments_after_a_value_stay_on_its_line(self, sql, expected):
+        # On lines of their own, the comments after the first belonged to the
+        # `)` or `::` after them on the next pass.
+        out, _ = format_sql(sql)
+        assert expected in out
+        assert _stable(out)
+
+
+class TestCreateTableColumnComments:
+    """A comment above a CREATE TABLE column stays above it (#394)."""
+
+    def test_comment_above_a_column_stays_above_it_outside_the_alignment(self):
+        out, _ = format_sql("CREATE TABLE t (\n  id int,\n  -- c1\n  label text\n)")
+        assert out == "CREATE TABLE t\n(\n   id    int\n  -- c1\n  ,label text\n)\n;\n"
+        assert _stable(out)
+
+    def test_comment_after_a_user_defined_type_is_kept(self):
+        out, _ = format_sql("CREATE TABLE t (a my_type -- c1\n, b int)")
+        assert "   a my_type -- c1\n  ,b int\n" in out
+        assert _stable(out)
+
+
+class TestTrailingCommaComments:
+    """With trailing commas, comments around columns stay where they were written, as with leading commas (#394)."""
+
+    @pytest.mark.parametrize("column", ["a + 1 AS v", "a", "CASE WHEN x THEN 1 WHEN y THEN 2 END AS w"])
+    def test_comment_above_the_first_column_stays_above_it(self, column):
+        out, _ = format_sql(f"SELECT\n  -- c1\n  {column},\n  b\nFROM t", _TRAILING_COMMAS)
+        assert "SELECT\n  -- c1\n  " in out
+        assert "/* c1 */" not in out
+        assert _stable(out, _TRAILING_COMMAS)
+
+    def test_comments_between_and_after_columns_stay_there(self):
+        sql = "SELECT\n  a,\n  -- c1\n  b, -- c2\n  c\n  -- c3\n  , d\nFROM t"
+        out, _ = format_sql(sql, _TRAILING_COMMAS)
+        assert "  a,\n  -- c1\n  b, -- c2\n  c,\n  -- c3\n  d\n" in out
+        assert _stable(out, _TRAILING_COMMAS)
+
+    @pytest.mark.parametrize(
+        ("sql", "expected"),
+        [
+            ("SELECT a FROM t WHERE c IN (\n  -- c1\n  1,\n  2)", "WHERE c IN (\n  -- c1\n  1,\n  2\n)\n"),
+            ("SELECT a FROM t GROUP BY\n  a,\n  -- c1\n  b", "GROUP BY\n  a,\n  -- c1\n  b\n"),
+            (
+                "SELECT ROW_NUMBER() OVER (ORDER BY a,\n  -- c1\n  b) AS n FROM t",
+                "       a,\n       -- c1\n       b\n",
+            ),
+        ],
+        ids=["in_list", "group_by", "window_order_by"],
+    )
+    def test_comment_above_an_item_of_another_list_stays_above_it(self, sql, expected):
+        out, _ = format_sql(sql, _TRAILING_COMMAS)
+        assert expected in out
+        assert _stable(out, _TRAILING_COMMAS)
+
+
+class TestArraySubquery:
+    """ARRAY(query) is laid out like a scalar subquery (#394)."""
+
+    def test_query_goes_below_array_paren(self):
+        out, _ = format_sql("SELECT array(SELECT a FROM u WHERE u.k = 1) AS v FROM t")
+        assert out == "SELECT\n   array(\n    SELECT\n       a\n    FROM u\n    WHERE u.k = 1\n  ) AS v\nFROM t\n;\n"
+        assert _stable(out)
+
+    def test_query_with_a_with_goes_below_array_paren(self):
+        out, _ = format_sql("SELECT array(WITH x AS (SELECT 1 AS a) SELECT a FROM x) AS v FROM t")
+        assert "   array(\n    WITH x AS\n    (\n" in out
+        assert "    FROM x\n  ) AS v\n" in out
+        assert _stable(out)
+
+
+class TestCaseBranchWrapping:
+    """A CASE branch value that doesn't fit on its line takes its own layout (#394)."""
+
+    # 115 columns: `THEN ` and it fit in 120, but not after the CASE's indentation too.
+    _LONG = "(SELECT MAX(b) FROM u WHERE u.id = t.id AND u.kind = '" + "x" * 59 + "')"
+
+    def test_long_then_value_wraps_with_its_paren_under_then(self):
+        out, _ = format_sql(f"SELECT CASE WHEN a = 1 THEN {self._LONG} WHEN a = 2 THEN 3 END AS v FROM t")
+        assert "     THEN (\n       SELECT\n          MAX(b)\n       FROM u\n" in out
+        assert "\n     )\n     WHEN a = 2\n" in out
+        assert _stable(out)
+
+    def test_long_else_value_wraps_too(self):
+        out, _ = format_sql(f"SELECT CASE WHEN a = 1 THEN 2 WHEN a = 2 THEN 3 ELSE {self._LONG} END AS v FROM t")
+        assert "     ELSE (\n       SELECT\n" in out
+        assert "\n     )\n   END AS v\n" in out
+        assert _stable(out)
+
+    def test_the_case_column_counts(self):
+        # In a CTE the CASE starts further right, so a value that fits in the
+        # main query doesn't fit there.
+        # 10 + 108 columns in the main query, 14 + 108 in the CTE.
+        value = "(SELECT MAX(b) FROM u WHERE u.id = t.id AND u.kind = '" + "x" * 52 + "')"
+        main, _ = format_sql(f"SELECT CASE WHEN a = 1 THEN {value} WHEN a = 2 THEN 3 END AS v FROM t")
+        nested, _ = format_sql(
+            f"WITH _c AS (WITH _d AS (SELECT CASE WHEN a = 1 THEN {value} WHEN a = 2 THEN 3 END AS v FROM t) "
+            "SELECT v FROM _d) SELECT v FROM _c"
+        )
+        assert f"     THEN {value}\n" in main
+        assert "         THEN (\n" in nested
+        assert all(len(line) <= 120 for line in nested.splitlines())
+
+    def test_long_if_branch_wraps_too(self):
+        # A single-branch CASE becomes if(), whose branches start four columns
+        # past its name.
+        out, _ = format_sql(f"SELECT CASE WHEN a = 1 THEN {self._LONG} ELSE 0 END AS v FROM t")
+        assert "   if(\n      a = 1\n     ,(\n        SELECT\n" in out
+        assert all(len(line) <= 120 for line in out.splitlines())
+        assert _stable(out)
+
+    def test_simple_case_value_wraps_with_its_paren_under_when(self):
+        out, _ = format_sql(f"SELECT CASE a WHEN 1 THEN {self._LONG} ELSE 2 END AS v FROM t")
+        assert "    WHEN 1 THEN (\n      SELECT\n" in out
+        assert "\n    )\n    ELSE 2\n" in out
+        assert _stable(out)

@@ -66,6 +66,22 @@ def _marking_tilde(parse: typing.Callable[..., typing.Any]) -> typing.Callable[.
 TILDE_OPERATOR_KEY = "jarify_tilde_operator"
 
 
+def _keeping_path_comments(build: typing.Callable[..., typing.Any]) -> typing.Callable[..., typing.Any]:
+    """Wrap a JSON_OPERATORS entry so the comments on its path are kept.
+
+    sqlglot rebuilds a literal path (`a->>'key'`) as a JSONPath node, which
+    drops the comments written after it.  They go after the extraction.
+    """
+
+    def _build(self: _JarifyDuckDBParser, this: _exp.Expr | None, path: _exp.Expr | None) -> _exp.Expr | None:
+        result = build(self, this, path)
+        if isinstance(result, _exp.Expr) and isinstance(path, _exp.Expr):
+            self._keep(result, _unkept(result, [c for node in path.walk() for c in node.comments or []]))
+        return result
+
+    return _build
+
+
 # The predicates RANGE_PARSERS builds that drop their operator's comments,
 # besides those built by sqlglot's binary_range_parser(), such as LIKE.
 _RANGE_OPERATOR_TOKENS = frozenset({TokenType.BETWEEN, TokenType.IN, TokenType.IS})
@@ -80,6 +96,9 @@ class _JarifyDuckDBParser(_DuckDB.Parser):
         )
         for token_type, parse in _DuckDB.Parser.RANGE_PARSERS.items()
     }
+    JSON_OPERATORS: typing.ClassVar = {
+        token_type: _keeping_path_comments(build) for token_type, build in _DuckDB.Parser.JSON_OPERATORS.items()
+    }
     TYPE_CONVERTERS: typing.ClassVar = {
         k: v for k, v in _DuckDB.Parser.TYPE_CONVERTERS.items() if k != _exp.DType.DECIMAL
     }
@@ -93,6 +112,18 @@ class _JarifyDuckDBParser(_DuckDB.Parser):
         **_DuckDB.Parser.UNARY_PARSERS,
         TokenType.NOT: lambda self: self._parse_not(),
     }
+
+    # The operator tokens _parse_bitwise reads.
+    _BITWISE_OPERATORS: typing.ClassVar = frozenset(
+        {
+            *_DuckDB.Parser.BITWISE,
+            *_DuckDB.Parser.JSON_OPERATORS,
+            TokenType.DPIPE,
+            TokenType.DQMARK,
+            TokenType.LT,
+            TokenType.GT,
+        }
+    )
 
     # Comments the overrides below attach to nodes, as (node, keyword or
     # None, comment).  See parse().
@@ -130,6 +161,54 @@ class _JarifyDuckDBParser(_DuckDB.Parser):
     # comments only until it reads the next token, and for these it never
     # does.  The overrides keep them.
 
+    def _parse_unary(self) -> _exp.Expr | None:
+        start = self._index
+        result = super()._parse_unary()
+        if result is not None and self._index > start:
+            self._keep_operand_comments(result, start)
+        return result
+
+    def _keep_operand_comments(self, operand: _exp.Expr, start: int) -> None:
+        """Keep the comments on the first and last tokens of *operand*, which starts at token *start*.
+
+        sqlglot drops the comments on an operand's first token when it builds
+        the operand's node after reading past that token: a unary operator
+        (`-a`), the column a method is called on (`x.title_case()`),
+        `INTERVAL`, a typed literal's type (`DATE '…'`).  It drops those on
+        the last token when the node already took comments from its first
+        token (a comment above CASE drops the one after END) or when the
+        last token's node is rebuilt (a user-defined type after `::`).
+        Those on the first token go on the node of the first token, before
+        its own; those on the last token go on the operand, after its own.
+        """
+        tokens = self._tokens
+        first, last = tokens[start], tokens[self._index - 1]
+        if first.comments:
+            self._keep(_first_token_node(operand), _unkept(operand, first.comments), prepend=True)
+        if last is not first and last.comments:
+            self._keep(operand, _unkept(operand, last.comments))
+
+    def _parse_bitwise(self) -> _exp.Expr | None:
+        # sqlglot builds the nodes of `||`, `&`, `|`, `<<`, `>>`, `??`, `->`
+        # and `->>` without the comments on the operator; they go on the
+        # expression, which writes them after an operator or after itself.
+        start = self._index
+        result = super()._parse_bitwise()
+        if result is not None and self._index > start:
+            tokens = self._tokens[start : self._index]
+            operators = [token for token in tokens if token.comments and token.token_type in self._BITWISE_OPERATORS]
+            self._keep(result, _unkept(result, [c for token in operators for c in token.comments]))
+        return result
+
+    def _parse_lambda(self, alias: bool = False) -> _exp.Expr | None:
+        # A call's argument: sqlglot drops the comments on a lambda's first
+        # token, `lambda` or its parameter.
+        start = self._index
+        result = super()._parse_lambda(alias=alias)
+        if result is not None and self._index > start:
+            self._keep_operand_comments(result, start)
+        return result
+
     def _parse_not(self) -> _exp.Not:
         # Comments written before NOT go on the Not node, like a comment
         # before any other condition; those written after it are kept for
@@ -164,6 +243,10 @@ class _JarifyDuckDBParser(_DuckDB.Parser):
             keywords = _top_level_tokens(self._tokens[start : self._index], {TokenType.ON, TokenType.USING})
             if keywords and keywords[-1].comments:
                 join.add_comments(keywords[-1].comments)
+        # sqlglot drops the comments on the comma of a comma join (`FROM t,
+        # u`); they go on the join too.
+        if join is not None and start < self._index and self._tokens[start].token_type == TokenType.COMMA:
+            self._keep(join, _unkept(join, self._tokens[start].comments), prepend=True)
         return join
 
     def _parse_case(self) -> _exp.Expr | None:
@@ -320,7 +403,22 @@ class _JarifyDuckDBParser(_DuckDB.Parser):
             return
         self._keep(item, _unkept(item, self._split_comments(opening)[1]), prepend=True)
 
+    def _parse_paren(self) -> _exp.Expr | None:
+        opening = self._index if self._curr.token_type == TokenType.L_PAREN else None
+        result = super()._parse_paren()
+        # sqlglot gives a tuple the comments on its "(", and _parse_csv the
+        # ones written after it to the first item too.  Those stay on the
+        # item, as in any other list: a tuple laid out across lines, as
+        # `(a, b)::struct_type` is, writes its items' comments, not its own.
+        if isinstance(result, _exp.Tuple) and result.comments and result.expressions and opening is not None:
+            first = result.expressions[0]
+            held = {id(c) for node in first.walk() for c in node.comments or []}
+            after = {id(c) for c in self._split_comments(opening)[1]} & held
+            result.comments = [c for c in result.comments if id(c) not in after]
+        return result
+
     def _parse_function_call(self, *args: typing.Any, **kwargs: typing.Any) -> _exp.Expr | None:
+        start = self._index
         paren = self._index + 1 if self._next.token_type == TokenType.L_PAREN else None
         result = super()._parse_function_call(*args, **kwargs)
         # A call parsed by its own parser, such as CAST, drops the comments
@@ -339,6 +437,35 @@ class _JarifyDuckDBParser(_DuckDB.Parser):
                 first if isinstance(first, _exp.Expr) else result,
                 _unkept(result, self._split_comments(paren)[1]),
                 prepend=True,
+            )
+        if result is not None and self._index > start:
+            self._keep_call_comments(result, start)
+        return result
+
+    def _keep_call_comments(self, call: _exp.Expr, start: int) -> None:
+        """Keep the comments in *call*, which starts at token *start*, that its builder dropped.
+
+        A function's builder can rebuild its arguments without their
+        comments: `date_trunc('week', …)` turns its unit into a keyword.
+        Those on the call's first token go on its node, before its own; the
+        others after the call.
+        """
+        tokens = self._tokens[start : self._index]
+        if not any(token.comments for token in tokens):
+            return
+        first, *rest = tokens
+        if first.comments:
+            self._keep(_first_token_node(call), _unkept(call, first.comments), prepend=True)
+        self._keep(call, _unkept(call, [c for token in rest for c in token.comments]))
+
+    def _parse_column_def(self, this: _exp.Expr | None, computed_column: bool = True) -> _exp.Expr | None:
+        # sqlglot rebuilds a user-defined type (`label my_type`) without the
+        # comments written after it; they go after the column.
+        start = self._index
+        result = super()._parse_column_def(this, computed_column=computed_column)
+        if isinstance(result, _exp.ColumnDef) and self._index > start:
+            self._keep(
+                result, _unkept(result, [c for token in self._tokens[start : self._index] for c in token.comments])
             )
         return result
 
@@ -614,6 +741,18 @@ def _unkept(node: _exp.Expr, comments: list[str]) -> list[str]:
         return []
     held = {id(c) for n in node.walk() for c in [*(n.comments or []), *all_keyword_comments(n)]}
     return [c for c in comments if id(c) not in held]
+
+
+def _first_token_node(node: _exp.Expr) -> _exp.Expr:
+    """Return the node built from *node*'s first token.
+
+    A method call, `x.title_case()`, is a chain of Dot nodes; its first token
+    is the leftmost operand's, where the generator looks for the comments
+    written above a column (see JarifyGenerator._first_token_nodes).
+    """
+    while isinstance(node, _exp.Dot) and isinstance(node.this, _exp.Expr):
+        node = node.this
+    return node
 
 
 def _drop_duplicate_comments(trees: list[_exp.Expr | None], recovered: list[tuple[_exp.Expr, str | None, str]]) -> None:

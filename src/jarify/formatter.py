@@ -120,6 +120,7 @@ def _format_sql_core(sql: str, config: JarifyConfig) -> tuple[str, list[FormatWa
     leading_comment_texts = _find_leading_comment_texts(masked_sql)
     trailing_sep_comment_texts = _find_trailing_sep_comment_texts(masked_sql)
     closing_paren_comment_texts = _find_closing_paren_comment_texts(masked_sql)
+    own_line_comment_texts = _find_own_line_comment_texts(masked_sql)
     formatted_parts: list[str] = []
 
     for tree in trees:
@@ -132,6 +133,7 @@ def _format_sql_core(sql: str, config: JarifyConfig) -> tuple[str, list[FormatWa
         generator._leading_comment_texts = leading_comment_texts
         generator._trailing_sep_comment_texts = trailing_sep_comment_texts
         generator._closing_paren_comment_texts = closing_paren_comment_texts
+        generator._own_line_comment_texts = own_line_comment_texts
         formatted_parts.append(generator.generate(tree))
 
     # Join statements but hold off on the trailing ;\n -- it must come *after*
@@ -237,23 +239,22 @@ def _find_leading_comment_texts(sql: str) -> frozenset[str]:
 
     tokens = SqlglotTokenizer().tokenize(sql)
     inline_blocks = _inline_block_comment_texts(sql, tokens)
+    next_item_commas = _next_item_commas(tokens)
     leading: set[str] = set()
     for idx, tok in enumerate(tokens):
         if not tok.comments:
             continue
         prev_end = tokens[idx - 1].end if idx > 0 else 0
         before = sql[prev_end : tok.start]
-        prev_type = tokens[idx - 1].token_type if idx > 0 else None
         for comment in tok.comments:
             stripped = comment.strip()
             if not stripped or not _own_line_comment_in(before, comment):
                 continue
-            # When the owning token is a comma AND the preceding token is a
-            # plain expression (not a closing paren), sqlglot's parser moves
-            # the comment to the *preceding* expression node.  That makes it
-            # trailing-sep, not leading.  Skip it here; captured by
+            # A comma's comments go to the item before it, except between
+            # CTEs and VALUES rows (see _next_item_commas).  On the item
+            # before, they are trailing-sep, not leading: captured by
             # _find_trailing_sep_comment_texts instead.
-            if tok.token_type == TokenType.COMMA and prev_type != TokenType.R_PAREN:
+            if tok.token_type == TokenType.COMMA and idx not in next_item_commas:
                 continue
             leading.add(stripped)
     return frozenset(leading - inline_blocks)
@@ -278,14 +279,14 @@ def _find_trailing_sep_comment_texts(sql: str) -> frozenset[str]:
 
     tokens = SqlglotTokenizer().tokenize(sql)
     inline_blocks = _inline_block_comment_texts(sql, tokens)
+    next_item_commas = _next_item_commas(tokens)
     trailing_sep: set[str] = set()
     for idx, tok in enumerate(tokens):
         if not tok.comments or tok.token_type != TokenType.COMMA:
             continue
-        prev_type = tokens[idx - 1].token_type if idx > 0 else None
-        # Closing paren before comma = end of a body/subquery; the comment
-        # belongs to the *next* expression (e.g. a CTE name), not this rule.
-        if prev_type == TokenType.R_PAREN:
+        # The comma between two CTEs or two VALUES rows gives its comments
+        # to the item after it (e.g. a CTE name), not this rule.
+        if idx in next_item_commas:
             continue
         prev_end = tokens[idx - 1].end if idx > 0 else 0
         before = sql[prev_end : tok.start]
@@ -294,6 +295,79 @@ def _find_trailing_sep_comment_texts(sql: str) -> frozenset[str]:
             if stripped and _own_line_comment_in(before, comment):
                 trailing_sep.add(stripped)
     return frozenset(trailing_sep - inline_blocks)
+
+
+# The tokens that can follow a `)` inside a WITH or VALUES list without ending
+# it: the comma before the next item, and in a WITH the AS after a CTE's
+# column list or its USING KEY (…).
+_LIST_CONTINUES: dict[TokenType, frozenset[TokenType]] = {
+    TokenType.WITH: frozenset({TokenType.COMMA, TokenType.ALIAS}),
+    TokenType.VALUES: frozenset({TokenType.COMMA}),
+}
+
+
+def _next_item_commas(tokens: list[Token]) -> frozenset[int]:
+    """Return the indices of the commas whose comments go to the item after them.
+
+    sqlglot gives a comma's comments to the item before it, as in a SELECT
+    list, even when that item ends in ``)``: ``ifnull(a, 1)``.  The comma
+    between two CTEs is the exception; its comments go to the CTE after it.
+    jarify's parser does the same for the comma between two VALUES rows.
+    Both commas follow the ``)`` that closes the CTE's body or the row.
+    """
+    found: set[int] = set()
+    # The list read at each paren depth: WITH or VALUES while its items are
+    # read, else None.
+    lists: list[TokenType | None] = [None]
+    for idx, tok in enumerate(tokens):
+        token_type = tok.token_type
+        prev_type = tokens[idx - 1].token_type if idx else None
+        open_list = lists[-1]
+        if open_list is not None and prev_type == TokenType.R_PAREN and token_type not in _LIST_CONTINUES[open_list]:
+            lists[-1] = open_list = None  # the list's last item has ended
+        if token_type == TokenType.L_PAREN:
+            lists.append(None)
+        elif token_type == TokenType.R_PAREN:
+            if len(lists) > 1:
+                lists.pop()
+        elif token_type in _LIST_CONTINUES:
+            lists[-1] = token_type
+        elif token_type == TokenType.COMMA and open_list is not None and prev_type == TokenType.R_PAREN:
+            found.add(idx)
+    return frozenset(found)
+
+
+def _find_own_line_comment_texts(sql: str) -> frozenset[str]:
+    """Return stripped texts of comments written on a line of their own.
+
+    That's every leading and trailing-sep comment, and also one written on
+    its own line after the token that owns it, as before a ``;``: the
+    tokenizer gives those comments to the token before the ``;``.  The
+    generator keeps the comments written on the line of the SQL they follow
+    on that line, and puts these on lines of their own.
+    """
+    tokens = SqlglotTokenizer().tokenize(sql)
+    inline_blocks = _inline_block_comment_texts(sql, tokens)
+    own_line: set[str] = set()
+    for idx, tok in enumerate(tokens):
+        if not tok.comments:
+            continue
+        before = sql[tokens[idx - 1].end if idx > 0 else 0 : tok.start]
+        after = sql[tok.end + 1 : tokens[idx + 1].start if idx + 1 < len(tokens) else len(sql)]
+        for comment in tok.comments:
+            stripped = comment.strip()
+            if stripped and (_own_line_comment_in(before, comment) or _own_line_comment_after(after, comment)):
+                own_line.add(stripped)
+    return frozenset(own_line - inline_blocks)
+
+
+def _own_line_comment_after(text: str, comment: str) -> bool:
+    """Return True when *text*, the source after the token that owns *comment*, holds it on a line of its own."""
+    for written in (f"--{comment}", f"/*{comment}*/"):
+        start = text.find(written)
+        if start != -1:
+            return "\n" in text[:start]
+    return False
 
 
 def _own_line_comment_in(text: str, comment: str) -> bool:
@@ -411,6 +485,7 @@ def _try_pivot_order_by_workaround(sql: str, config: JarifyConfig) -> str | None
     generator._leading_comment_texts = _find_leading_comment_texts(pivot_sql)
     generator._trailing_sep_comment_texts = _find_trailing_sep_comment_texts(pivot_sql)
     generator._closing_paren_comment_texts = _find_closing_paren_comment_texts(pivot_sql)
+    generator._own_line_comment_texts = _find_own_line_comment_texts(pivot_sql)
 
     # Format every statement; ORDER BY attaches only to the last one (the PIVOT)
     formatted_parts = [generator.generate(_apply_rules(t, rules)) for t in trees]

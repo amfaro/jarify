@@ -333,6 +333,14 @@ class TestPreferGroupByAll:
         rules = _lint(sql)
         assert "prefer-group-by-all" not in rules
 
+    def test_warns_when_the_select_list_has_a_comment(self):
+        # GROUP BY ALL keeps the SELECT list and its comments. Which column
+        # holds a comment written between two columns depends on the comma
+        # style, so the comment can't decide whether the lists match (#394).
+        sql = "SELECT a -- c\n, b, count(*) AS n FROM t GROUP BY a, b"
+        rules = _lint(sql)
+        assert "prefer-group-by-all" in rules
+
 
 class TestPreferUsingOverOn:
     def test_warns_on_same_column_name_equijoin(self):

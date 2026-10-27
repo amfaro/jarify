@@ -1,0 +1,3 @@
+[jarify]
+leading_commas = false
+trailing_commas = true
