@@ -37,6 +37,141 @@ class _JarifyDuckDBParser(_DuckDB.Parser):
     # own `transform` macro. Remove the special-case parser entry so bare
     # TRANSFORM(...) round-trips as an anonymous function call.
     FUNCTIONS: typing.ClassVar = {k: v for k, v in _DuckDB.Parser.FUNCTIONS.items() if k != "TRANSFORM"}
+    UNARY_PARSERS: typing.ClassVar = {
+        **_DuckDB.Parser.UNARY_PARSERS,
+        TokenType.NOT: lambda self: self._parse_not(),
+    }
+
+    # sqlglot drops the comments on the keywords below: it reads a keyword's
+    # comments only until it reads the next token, and for these it never
+    # does.  The overrides keep them.
+
+    def _parse_not(self) -> _exp.Not:
+        # Comments written before NOT go on the Not node, like a comment
+        # before any other condition; those written after it are kept for
+        # the generator to write after NOT.
+        before, after = self._split_comments(self._index - 1)
+        not_ = self.expression(_exp.Not(this=self._parse_equality()))
+        if before:
+            not_.add_comments(before, prepend=True)
+        _set_keyword_comments(not_, "NOT", after)
+        return not_
+
+    def _parse_qualify(self) -> _exp.Qualify | None:
+        # As for WHERE and HAVING, the comments on QUALIFY go on the clause.
+        if not self._match(TokenType.QUALIFY):
+            return None
+        comments = self._prev_comments
+        return self.expression(_exp.Qualify(this=self._parse_disjunction()), comments=comments)
+
+    def _parse_join(
+        self,
+        skip_join_token: bool = False,
+        parse_bracket: bool = False,
+        alias_tokens: typing.Collection[TokenType] | None = None,
+    ) -> _exp.Join | None:
+        start = self._index
+        join = super()._parse_join(
+            skip_join_token=skip_join_token, parse_bracket=parse_bracket, alias_tokens=alias_tokens
+        )
+        # The comments on ON or USING go on the join, as the comments on
+        # WHERE go on the WHERE clause.
+        if join is not None and (join.args.get("on") or join.args.get("using")):
+            keywords = _top_level_tokens(self._tokens[start : self._index], {TokenType.ON, TokenType.USING})
+            if keywords and keywords[-1].comments:
+                join.add_comments(keywords[-1].comments)
+        return join
+
+    def _parse_case(self) -> _exp.Expr | None:
+        start = self._index
+        case = super()._parse_case()
+        if not isinstance(case, _exp.Case):
+            return case
+        # Each WHEN / THEN keeps its comments on its branch, ELSE on the CASE.
+        keywords = _top_level_tokens(
+            self._tokens[start : self._index], {TokenType.WHEN, TokenType.THEN, TokenType.ELSE}
+        )
+        branches = case.args.get("ifs") or []
+        for keyword, token_type in (("WHEN", TokenType.WHEN), ("THEN", TokenType.THEN)):
+            tokens = [token for token in keywords if token.token_type == token_type]
+            if len(tokens) == len(branches):
+                for branch, token in zip(branches, tokens, strict=True):
+                    _set_keyword_comments(branch, keyword, token.comments)
+        else_tokens = [token for token in keywords if token.token_type == TokenType.ELSE]
+        if else_tokens:
+            _set_keyword_comments(case, "ELSE", else_tokens[-1].comments)
+        return case
+
+    def _parse_if(self) -> _exp.Expr | None:
+        # `if(…)` drops the comments on IF, such as one on the line above the
+        # call, and those on its closing paren, such as one written between
+        # the call and its AS.  Other calls keep them.
+        comments = self._prev_comments
+        result = super()._parse_if()
+        if result is not None:
+            if comments:
+                result.add_comments(comments, prepend=True)
+            if self._prev.token_type == TokenType.R_PAREN:
+                self._add_comments(result)
+        return result
+
+    def _parse_window(self, this: _exp.Expr | None, alias: bool = False) -> _exp.Expr | None:
+        result = super()._parse_window(this, alias=alias)
+        # An aggregate's `FILTER (…)` drops the comments on its closing paren.
+        if isinstance(result, _exp.Filter) and self._prev.token_type == TokenType.R_PAREN:
+            self._add_comments(result)
+        return result
+
+    def parse_set_operation(self, this: _exp.Expr | None, consume_pipe: bool = False) -> _exp.Expr | None:
+        start = self._index
+        operation = super().parse_set_operation(this, consume_pipe=consume_pipe)
+        # sqlglot keeps the comments on UNION, EXCEPT or INTERSECT, but drops
+        # those on the words after it, such as ALL or BY NAME.
+        if isinstance(operation, _exp.SetOperation):
+            tokens = self._tokens[start : self._index]
+            keyword = next((i for i, token in enumerate(tokens) if token.token_type in self.SET_OPERATIONS), None)
+            for token in tokens[keyword + 1 :] if keyword is not None else []:
+                if token.text.upper() not in _SET_OPERATION_MODIFIERS:
+                    break
+                operation.add_comments(token.comments)
+        return operation
+
+    def _parse_subquery(self, this: _exp.Expr | None, parse_alias: bool = True) -> _exp.Subquery | None:
+        # A subquery in FROM or JOIN loses the comments on its closing paren
+        # when an alias follows.  Those written on their own line before the
+        # paren are kept to end the body; those after it go on the subquery.
+        closing = bool(self._prev_comments) and self._prev.token_type == TokenType.R_PAREN
+        before, after = self._split_comments(self._index - 1) if closing else ([], [])
+        if closing:
+            self._prev_comments = []
+        subquery = super()._parse_subquery(this, parse_alias=parse_alias)
+        if closing and subquery is not None:
+            _set_keyword_comments(subquery, ")", before)
+            if after:
+                subquery.add_comments(after)
+        return subquery
+
+    def _split_comments(self, index: int) -> tuple[list[str], list[str]]:
+        """Split the comments on token *index* into those written before it and those after it.
+
+        The tokenizer gives a token the comments that start on the lines
+        between it and the previous token, and those that start on its own
+        line after it.
+        """
+        token = self._tokens[index]
+        gap_start = self._tokens[index - 1].end + 1 if index > 0 else 0
+        gap = self.sql[gap_start : token.start]
+        position = before = 0
+        for comment in token.comments:
+            for text in (f"--{comment}", f"/*{comment}*/"):
+                found = gap.find(text, position)
+                if found != -1:
+                    position = found + len(text)
+                    before += 1
+                    break
+            else:
+                break
+        return token.comments[:before], token.comments[before:]
 
     def _parse_select_query(self, *args: typing.Any, **kwargs: typing.Any) -> _exp.Expr | None:
         # The FROM token of a FROM-first query (`FROM t`, `FROM t SELECT a`)
@@ -88,6 +223,48 @@ class _JarifyDuckDBParser(_DuckDB.Parser):
 
 # Meta key on a CTE node: comments written between its AS and the body's "(".
 CTE_COMMENTS_AFTER_AS = "jarify_comments_after_as"
+
+# Meta key for comments on a keyword that sqlglot drops, which the generator
+# writes at that keyword: {keyword: comments}.  On a Not node, "NOT" holds
+# those written after NOT; on a CASE branch (an If node), "WHEN" and "THEN";
+# on a Case node, "ELSE"; on a Subquery, ")" holds those written on their own
+# line before its closing paren.  They are not in the node's comments, which
+# the generator writes after the node.
+KEYWORD_COMMENTS = "jarify_keyword_comments"
+
+
+def keyword_comments(node: _exp.Expr, keyword: str) -> list[str]:
+    """Return the comments the parser kept for *keyword* on *node*."""
+    return (node.meta_get(KEYWORD_COMMENTS) or {}).get(keyword, [])
+
+
+def all_keyword_comments(node: _exp.Expr) -> list[str]:
+    """Return the comments the parser kept for all keywords of *node*."""
+    return [comment for comments in (node.meta_get(KEYWORD_COMMENTS) or {}).values() for comment in comments]
+
+
+# Words that can follow UNION, EXCEPT or INTERSECT before the next query.
+_SET_OPERATION_MODIFIERS = frozenset({"ALL", "DISTINCT", "BY", "NAME", "STRICT", "CORRESPONDING"})
+
+
+def _set_keyword_comments(node: _exp.Expr, keyword: str, comments: list[str]) -> None:
+    comments = [comment for comment in comments if comment.strip()]
+    if comments:
+        node.meta.setdefault(KEYWORD_COMMENTS, {})[keyword] = comments
+
+
+def _top_level_tokens(tokens: list[typing.Any], types: set[TokenType]) -> list[typing.Any]:
+    """Return the tokens of *types* in *tokens* that are outside parens and nested CASEs."""
+    found = []
+    depth = 0
+    for token in tokens:
+        if token.token_type in (TokenType.L_PAREN, TokenType.CASE):
+            depth += 1
+        elif token.token_type in (TokenType.R_PAREN, TokenType.END):
+            depth -= 1
+        elif depth == 0 and token.token_type in types:
+            found.append(token)
+    return found
 
 
 def _comments_before_cte_body(tokens: list[typing.Any]) -> list[str]:

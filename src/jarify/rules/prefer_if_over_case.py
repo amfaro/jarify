@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlglot.expressions as exp
 
+from jarify.parser import all_keyword_comments
 from jarify.rules.base import FormatterRule, _node_pos
 from jarify.types import LintViolation
 
@@ -29,10 +30,10 @@ def _has_comments(node: exp.Case) -> bool:
     comment stays beside the branch it documents. (An ``if()`` call holding
     it would be safe: ``if_sql`` puts a commented argument on its own line.)
     A comment attached to the CASE itself, such as one on the line above a
-    CASE nested in another CASE's ELSE, keeps the CASE too: sqlglot drops a
-    comment attached to an ``if()`` call when it parses the call.
+    CASE nested in another CASE's ELSE, keeps the CASE too, and so does one
+    on a WHEN, THEN or ELSE keyword, which an ``if()`` call has no place for.
     """
-    return any(n.comments for n in node.walk())
+    return any(n.comments or all_keyword_comments(n) for n in node.walk())
 
 
 def _is_rewritable(node: exp.Case) -> bool:

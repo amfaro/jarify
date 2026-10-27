@@ -1358,6 +1358,164 @@ class TestJoinTableComments:
         assert format_sql(out)[0] == out
 
 
+class TestKeywordComments:
+    """Comments on keywords whose comments sqlglot drops are kept (#378)."""
+
+    @staticmethod
+    def _format(sql: str) -> str:
+        out, _ = format_sql(sql)
+        assert format_sql(out)[0] == out
+        return out
+
+    @pytest.mark.parametrize("comment", ["/* neg */", "-- neg\n "])
+    def test_comment_after_not_stays_after_it(self, comment):
+        out = self._format(f"SELECT a FROM t WHERE NOT {comment}a")
+        assert out == "SELECT\n   a\nFROM t\nWHERE NOT /* neg */ a\n;\n"
+
+    def test_comment_after_not_before_parenthesized_condition(self):
+        out = self._format("SELECT a FROM t WHERE b = 1 AND NOT -- neg\n  (c = 1 OR d = 2)")
+        assert "WHERE b = 1\n  AND NOT /* neg */ (c = 1 OR d = 2)\n;" in out
+
+    def test_comment_after_not_before_not_in_goes_at_the_end(self):
+        out = self._format("SELECT a FROM t WHERE NOT /* c */ a IN (1, 2) AND b = 1")
+        assert "WHERE a NOT IN (1, 2) -- c\n  AND b = 1\n;" in out
+
+    def test_comment_above_not_goes_above_the_clause(self):
+        out = self._format("SELECT a FROM t WHERE\n  -- why\n  NOT a\n")
+        assert "FROM t\n-- why\nWHERE NOT a\n;" in out
+
+    def test_comment_after_not_that_cannot_be_a_block_comment_ends_its_line(self):
+        out = self._format("SELECT a FROM t WHERE NOT -- a*/b\n  a")
+        assert "WHERE NOT -- a*/b\n" in out
+
+    @pytest.mark.parametrize("qualify", ["QUALIFY /* q */ ", "QUALIFY -- q\n  ", "-- q\nQUALIFY "])
+    def test_comment_on_qualify_goes_above_it(self, qualify):
+        out = self._format(f"SELECT a FROM t\n{qualify}ROW_NUMBER() OVER (ORDER BY a) = 1")
+        assert out == "SELECT\n   a\nFROM t\n-- q\nQUALIFY\n  ROW_NUMBER() OVER (ORDER BY a) = 1\n;\n"
+
+    @pytest.mark.parametrize("join", ["INNER JOIN", "LEFT JOIN"])
+    @pytest.mark.parametrize("comment", ["/* on */ ", "-- on\n  "])
+    def test_comment_on_join_on_goes_above_the_join(self, join, comment):
+        out = self._format(f"SELECT t.a FROM t {join} u ON {comment}u.id = t.id")
+        assert out == f"SELECT\n   t.a\nFROM t\n-- on\n{join} u ON u.id = t.id\n;\n"
+
+    def test_comment_above_join_on_goes_above_the_join(self):
+        out = self._format("SELECT t.a FROM t INNER JOIN u\n  -- on\n  ON u.id = t.id")
+        assert "FROM t\n-- on\nINNER JOIN u ON u.id = t.id\n;" in out
+
+    def test_comment_on_join_using_goes_above_the_join(self):
+        out = self._format("SELECT t.a FROM t LEFT JOIN u USING /* by id */ (id)")
+        assert "FROM t\n-- by id\nLEFT JOIN u USING (id)\n;" in out
+
+    def test_comment_after_union_all_goes_above_it(self):
+        out = self._format("SELECT a FROM t\nUNION ALL -- managers too\nSELECT b FROM u")
+        assert "FROM t\n-- managers too\nUNION ALL\nSELECT" in out
+
+    @pytest.mark.parametrize("comment", ["-- c\n  ", "/* c */ "])
+    def test_comment_between_if_and_its_alias_is_kept(self, comment):
+        out = self._format(f"SELECT if(a = 1, 'x', 'y') {comment}AS v FROM t")
+        assert out == "SELECT\n   if(a = 1, 'x', 'y') AS v -- c\nFROM t\n;\n"
+
+    def test_comment_above_if_is_kept(self):
+        out = self._format("SELECT\n  -- why\n  if(a = 1, 'x', 'y') AS v\nFROM t")
+        assert out == "SELECT\n   -- why\n   if(a = 1, 'x', 'y') AS v\nFROM t\n;\n"
+
+    def test_comment_after_filter_is_kept(self):
+        out = self._format("SELECT count(*) FILTER (WHERE a) -- c\n  AS n FROM t")
+        assert "COUNT(*) FILTER(WHERE a) AS n -- c\n" in out
+
+    def test_comment_after_then_goes_above_then(self):
+        sql = (
+            "SELECT CASE WHEN a = 1 THEN /* c */ CASE WHEN b = 1 THEN 1 WHEN b = 2 THEN 2 END "
+            "WHEN a = 2 THEN 3 END AS v FROM t"
+        )
+        out = self._format(sql)
+        assert "     WHEN a = 1\n     -- c\n     THEN CASE\n" in out
+
+    def test_comments_above_when_and_else_stay_above_them(self):
+        sql = (
+            "SELECT\n  CASE\n    -- first\n    WHEN a = 1 THEN 1\n    -- second\n    WHEN a = 2 THEN 2\n"
+            "    -- fallback\n    ELSE 3\n  END AS v\nFROM t"
+        )
+        out = self._format(sql)
+        assert out == (
+            "SELECT\n   CASE\n     -- first\n     WHEN a = 1\n     THEN 1\n     -- second\n     WHEN a = 2\n"
+            "     THEN 2\n     -- fallback\n     ELSE 3\n   END AS v\nFROM t\n;\n"
+        )
+
+    def test_comments_after_when_and_else_go_above_them(self):
+        out = self._format("SELECT CASE WHEN /* w */ a THEN 1 WHEN b THEN 2 ELSE -- e\n  3 END AS v FROM t")
+        assert "   CASE\n     -- w\n     WHEN a\n" in out
+        assert "     -- e\n     ELSE 3\n" in out
+
+    def test_comments_in_simple_case_go_above_the_when_line(self):
+        out = self._format("SELECT CASE x WHEN /* w */ 1 THEN /* t */ 'a' ELSE /* e */ 'b' END AS v FROM t")
+        assert "   CASE x\n    -- w\n    -- t\n    WHEN 1 THEN 'a'\n    -- e\n    ELSE 'b'\n" in out
+
+    def test_comment_in_a_nested_case_goes_above_its_keyword(self):
+        sql = "SELECT CASE WHEN a THEN CASE WHEN b THEN /* t */ 1 WHEN c THEN 2 END WHEN d THEN 3 END AS v FROM t"
+        out = self._format(sql)
+        assert "            WHEN b\n            -- t\n            THEN 1\n" in out
+
+    def test_case_on_one_line_writes_keyword_comments_after_the_keyword(self):
+        # A CASE always takes its multi-line form, but its one-line form must
+        # keep the comments too, without letting them swallow SQL.
+        from jarify.generator import JarifyGenerator
+        from jarify.parser import parse_sql
+
+        (tree,) = parse_sql("SELECT CASE WHEN /* w */ a THEN -- t\n 1 ELSE /* e */ 2 END")
+        compact = JarifyGenerator(JarifyConfig())._compact_sql(tree.expressions[0])
+        assert compact == "CASE WHEN /* w */ a THEN /* t */ 1 ELSE /* e */ 2 END"
+
+    def test_single_when_case_with_a_keyword_comment_stays_case(self):
+        out = self._format("SELECT CASE WHEN a THEN /* t */ 1 END AS v FROM t")
+        assert "if(" not in out
+        assert "     -- t\n     THEN 1\n" in out
+
+    @pytest.mark.parametrize("join", ["", "LEFT JOIN u ON u.a = s.a"])
+    def test_comment_before_subquery_closing_paren_ends_its_body(self, join):
+        out = self._format(f"SELECT s.a FROM (\n  SELECT a FROM t\n  -- end of body\n) s {join}")
+        assert "  FROM t\n  -- end of body\n) AS s\n" in out
+
+    def test_comment_before_closing_paren_of_unaliased_subquery_ends_its_body(self):
+        out = self._format("SELECT a FROM (\n  SELECT a FROM t\n  /* end */\n)")
+        assert "  FROM t\n  -- end\n)\n;" in out
+
+    def test_comment_before_joined_subquery_closing_paren_ends_its_body(self):
+        out = self._format("SELECT t.a FROM t LEFT JOIN (\n  SELECT a FROM u\n  -- end\n) s ON s.a = t.a")
+        assert "  FROM u\n  -- end\n) AS s ON s.a = t.a\n" in out
+
+    def test_comment_after_subquery_closing_paren_follows_the_alias(self):
+        out = self._format("SELECT s.a FROM (SELECT a FROM t) -- after\n  s")
+        assert ") AS s -- after\n" in out
+
+
+class TestCtesInSubqueries:
+    """A subquery holding a WITH is laid out with its CTEs as at the top level (#378)."""
+
+    def test_from_subquery_lays_out_its_ctes(self):
+        sql = "SELECT s.a FROM (\n  WITH c AS ( -- note c\n    SELECT 1 AS a\n  )\n  SELECT a FROM c\n) s"
+        out, _ = format_sql(sql)
+        assert out == (
+            "SELECT\n   s.a\nFROM (\n  WITH c AS -- note c\n  (\n    SELECT\n       1 AS a\n  )\n"
+            "  SELECT\n     a\n  FROM c\n) AS s\n;\n"
+        )
+        assert format_sql(out)[0] == out
+
+    def test_in_subquery_lays_out_its_ctes(self):
+        out, _ = format_sql("SELECT a FROM t WHERE a IN (WITH c AS (SELECT 1 AS a) SELECT a FROM c)")
+        assert "WHERE a IN\n(\n  WITH c AS\n  (\n" in out
+
+    def test_cte_comment_survives_a_subquery_rendered_twice(self):
+        out, _ = format_sql("SELECT (WITH c AS ( -- note c\n  SELECT 1 AS a) SELECT max(a) FROM c) AS m, 1 AS n")
+        assert out.count("-- note c") == 1
+
+    def test_then_value_holding_a_with_takes_its_own_layout(self):
+        sql = "SELECT CASE WHEN a THEN (WITH c AS (SELECT 1 AS a) SELECT max(a) FROM c) WHEN b THEN 2 END AS v"
+        out, _ = format_sql(sql)
+        assert "     THEN (\n        WITH c AS\n" in out
+
+
 class TestGroupByPerLine:
     def test_group_by_multi_column_one_per_line(self):
         # When all non-agg columns are in GROUP BY, the formatter rewrites to GROUP BY ALL.
