@@ -1116,7 +1116,8 @@ class JarifyGenerator(DuckDB.Generator):
         comma outer form like SELECT column lists (content at pad+1, comma
         at pad). The condition stays compact on one line, but true/false
         branches may use their normal multi-line formatting when still too
-        wide.
+        wide. An argument that carries a comment or holds a CASE always
+        expands the call and keeps its normal multi-line formatting.
         """
         has_else = expression.args.get("false") is not None
 
@@ -1128,46 +1129,46 @@ class JarifyGenerator(DuckDB.Generator):
         # Pretty mode: keep the condition compact so AND/OR chains do not
         # wrap mid-call. Branches start compact too, but can fall back to
         # their normal SQL rendering when still too wide on their own.
-        compact_cond = self._compact_sql(expression.this)
-        true_expr = expression.args["true"]
-        compact_then = self._compact_sql(true_expr)
-        compact_args = [compact_cond, compact_then]
-
-        false_expr = expression.args.get("false")
-        if false_expr is not None:
-            compact_args.append(self._compact_sql(false_expr))
+        args = [a for a in (expression.this, expression.args["true"], expression.args.get("false")) if a is not None]
+        compact_args = [self._compact_sql(a) for a in args]
 
         # A commented argument can't be rendered compactly (a -- comment would
-        # swallow the rest of the line), so it forces the expanded form and
+        # swallow the rest of the line), and neither can one holding a CASE,
+        # which is always multi-line. Either forces the expanded form and
         # keeps its normal multi-line rendering.
-        def _fits(arg: exp.Expr, compact: str) -> bool:
-            return not self._has_comments(arg) and not self.too_wide([compact])
+        own_sqls = [self._multiline_arg_sql(a) for a in args]
 
         func_name = self.normalize_func("if")
         inline = f"{func_name}({', '.join(compact_args)})"
-        args = [a for a in (expression.this, true_expr, false_expr) if a is not None]
-        if not any(self._has_comments(a) for a in args) and not self.too_wide([inline]):
+        if all(own is None for own in own_sqls) and not self.too_wide([inline]):
             return inline
 
-        branch_sqls = [self.sql(expression.this) if self._has_comments(expression.this) else compact_cond]
-        branch_sqls.append(compact_then if _fits(true_expr, compact_then) else self.sql(true_expr))
-        if false_expr is not None:
-            compact_false = self._compact_sql(false_expr)
-            branch_sqls.append(compact_false if _fits(false_expr, compact_false) else self.sql(false_expr))
+        branch_sqls = [own_sqls[0] if own_sqls[0] is not None else compact_args[0]]
+        for arg, compact, own in zip(args[1:], compact_args[1:], own_sqls[1:], strict=True):
+            if own is not None:
+                branch_sqls.append(own)
+            else:
+                branch_sqls.append(compact if not self.too_wide([compact]) else self.sql(arg))
 
         # Too wide: expand the outer IF() with leading commas. Keep the
         # condition on one compact line, but allow branch expressions to bring
         # along their own nested wrapping.
         p = self.pad
 
-        def _prefixed(arg_sql: str, *, first: str, rest: str) -> list[str]:
+        def _prefixed(arg_sql: str, *, first: str) -> list[str]:
             lines = arg_sql.splitlines() or [arg_sql]
+            # A CASE lays out its WHEN / THEN / ELSE / END lines for the
+            # one-character leader (" " or ",") that a SELECT list or a
+            # wrapped call puts before it, so its lines continue from the
+            # leader's column, as they do there. Other multi-line arguments
+            # continue from the argument's first column.
+            rest = " " * (p + 1 if self._starts_with_case(lines[0]) else p + 2)
             return [f"{first}{lines[0]}", *(f"{rest}{line}" for line in lines[1:])]
 
         lines = [f"{func_name}("]
-        lines.extend(_prefixed(branch_sqls[0], first=" " * (p + 2), rest=" " * (p + 2)))
+        lines.extend(_prefixed(branch_sqls[0], first=" " * (p + 2)))
         for arg_sql in branch_sqls[1:]:
-            lines.extend(_prefixed(arg_sql, first=" " * (p + 1) + ",", rest=" " * (p + 2)))
+            lines.extend(_prefixed(arg_sql, first=" " * (p + 1) + ","))
         lines.append(")")
         return "\n".join(lines)
 
@@ -1334,6 +1335,25 @@ class JarifyGenerator(DuckDB.Generator):
     def _has_inner_comments(self, expression: exp.Expr) -> bool:
         """Return True when a descendant of expression (not expression itself) carries comments."""
         return any(node.comments for node in expression.walk() if node is not expression)
+
+    def _multiline_arg_sql(self, expression: exp.Expr) -> str | None:
+        """Return expression's normal SQL when a call can't put it on one line.
+
+        That is when expression carries a comment, which would swallow the
+        rest of a one-line call, or holds a CASE that renders across lines
+        (a CASE is always multi-line). Otherwise return None.
+        """
+        if self._has_comments(expression):
+            return self.sql(expression)
+        if expression.find(exp.Case) is None:
+            return None
+        sql = self.sql(expression)
+        return sql if "\n" in sql else None
+
+    @staticmethod
+    def _starts_with_case(line: str) -> bool:
+        """Return True when line, the first line of an expression's SQL, opens a CASE."""
+        return line == "CASE" or line.startswith("CASE ")
 
     def _compact_sql(self, expression: exp.Expr) -> str:
         """Render expression compactly without line breaks."""
@@ -1918,8 +1938,13 @@ class JarifyGenerator(DuckDB.Generator):
         return f"{func_name}({inner})"
 
     def format_args(self, *args: t.Any, sep: str = ", ") -> str:
-        arg_sqls = tuple(self.sql(arg) for arg in args if arg is not None and not isinstance(arg, bool))
-        if self.pretty and (self.too_wide(arg_sqls) or self._has_commented_arg(args, sep)):
+        args = tuple(arg for arg in args if arg is not None and not isinstance(arg, bool))
+        arg_sqls = tuple(self.sql(arg) for arg in args)
+        if self.pretty and (
+            self.too_wide(arg_sqls)
+            or self._has_commented_arg(args, sep)
+            or self._has_multiline_case_arg(args, arg_sqls, sep)
+        ):
             return self._wrapped_args(arg_sqls, sep=sep)
         return sep.join(arg_sqls)
 
@@ -1927,6 +1952,15 @@ class JarifyGenerator(DuckDB.Generator):
         """A commented argument wraps the call one argument per line, so its
         -- comment ends the line instead of swallowing the rest of the call."""
         return sep.strip() == "," and any(isinstance(a, exp.Expr) and self._has_comments(a) for a in args)
+
+    def _has_multiline_case_arg(self, args: t.Sequence[t.Any], arg_sqls: t.Sequence[str], sep: str) -> bool:
+        """An argument holding a multi-line CASE wraps the call one argument
+        per line, so the CASE is laid out as in a SELECT list instead of
+        starting partway along the call's line."""
+        return sep.strip() == "," and any(
+            "\n" in sql and isinstance(arg, exp.Expr) and arg.find(exp.Case) is not None
+            for arg, sql in zip(args, arg_sqls, strict=True)
+        )
 
     def _wrapped_args(self, arg_sqls: t.Sequence[str], sep: str = ", ") -> str:
         """Lay out call arguments one per line, between the call's parentheses."""
