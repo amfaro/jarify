@@ -489,7 +489,7 @@ ORDER BY
 
 ### Window specs — one clause per line when wrapping
 
-A window spec stays on one line when it fits. When it doesn't, each clause (`PARTITION BY`, `ORDER BY`, the frame) goes on its own line, with no commas between them.
+A window spec stays on one line when it fits. When it doesn't, each clause (`PARTITION BY`, `ORDER BY`, the frame) goes on its own line, with no commas between them. A `PARTITION BY` or `ORDER BY` list that still doesn't fit on its line puts one expression per line in leading-comma style, like a query's `ORDER BY`.
 
 **Bad**
 ```sql
@@ -505,6 +505,25 @@ SELECT
      ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
   ) AS running
 FROM a
+;
+```
+
+**Good — a list too long for its line**
+```sql
+SELECT
+   ROW_NUMBER() OVER (
+     ORDER BY
+        time_frame_key
+       ,client_name
+       ,process_type
+       ,process_sub_type
+       ,audience
+       ,nom_detail_status_keys
+       ,nom_status_key
+       ,nom_team_status_key
+       ,points_actually_awarded
+  ) AS node_id
+FROM t
 ;
 ```
 
@@ -1203,6 +1222,44 @@ SELECT
     )::active_ingredient_struct
   )
 FROM t
+;
+```
+
+---
+
+### `ORDER BY` inside aggregates — own line when wrapping
+
+An aggregate's `ORDER BY` stays on its argument's line while `expr ORDER BY …` fits, as in `list(a ORDER BY b)`. When it doesn't, the call wraps and `ORDER BY` goes on its own line, lined up with the argument. A key list that still doesn't fit puts one key per line, as in a window spec.
+
+**Bad**
+```sql
+SELECT
+   list({'nomination_id': nomination_id, 'created_at': created_at, 'created_on': created_at::date} ORDER BY created_at DESC, nomination_id DESC) AS noms
+  ,list(nomination_id ORDER BY created_at DESC, nomination_id DESC, client_id, program_id, nomination_application_id, employee_user_id, reporting_period_key) AS ids
+FROM t
+GROUP BY ALL
+```
+
+**Good**
+```sql
+SELECT
+   list(
+     {'nomination_id': nomination_id, 'created_at': created_at, 'created_on': created_at::date}
+     ORDER BY created_at DESC, nomination_id DESC
+  ) AS noms
+  ,list(
+     nomination_id
+     ORDER BY
+        created_at DESC
+       ,nomination_id DESC
+       ,client_id
+       ,program_id
+       ,nomination_application_id
+       ,employee_user_id
+       ,reporting_period_key
+  ) AS ids
+FROM t
+GROUP BY ALL
 ;
 ```
 
