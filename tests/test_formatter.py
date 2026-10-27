@@ -1881,14 +1881,16 @@ class TestPreferIfOverCaseNesting:
         assert format_sql(out)[0] == out
 
 
-def _case_layout(sql: str) -> list[tuple[int, str]]:
-    """Return each line of the first CASE in sql as (column offset from CASE, leading text).
+def _case_layout(sql: str, which: int = 0) -> list[tuple[int, str]]:
+    """Return each line of a CASE in sql as (column offset from CASE, leading text).
 
-    The END line keeps only ``END``, so what follows it (an alias, a comma,
-    a closing paren) doesn't matter.
+    *which* picks the line the CASE starts on, among the lines holding
+    ``CASE``: the first by default, ``-1`` for the last (a nested CASE). The
+    END line keeps only ``END``, so what follows it (an alias, a comma, a
+    closing paren) doesn't matter.
     """
     lines = sql.splitlines()
-    start = next(i for i, line in enumerate(lines) if "CASE" in line)
+    start = [i for i, line in enumerate(lines) if "CASE" in line][which]
     column = lines[start].index("CASE")
     layout = [(0, lines[start][column:])]
     for line in lines[start + 1 :]:
@@ -1954,3 +1956,126 @@ class TestCaseInFunctionArgs:
         out, _ = format_sql(sql)
         assert "\n     ,(\n         very_long_value_a_xxxxxxxxxxxxxxxxx\n" in out
         assert "\n      )::some_type\n" in out
+
+
+_SEARCHED_CASE = "CASE WHEN x = 1 THEN 'one' WHEN x = 2 THEN 'two' ELSE 'many' END"
+_SIMPLE_CASE = "CASE k WHEN 1 THEN 'one' WHEN 2 THEN 'two' ELSE 'many' END"
+_CASE_FORMS = pytest.mark.parametrize("case", [_SEARCHED_CASE, _SIMPLE_CASE], ids=["searched", "simple"])
+# Statements with a CASE in some position, at {case}
+_CASE_POSITIONS = {
+    "then": "SELECT CASE WHEN y = 1 THEN {case} WHEN y = 2 THEN 'b' END AS v FROM t",
+    "else": "SELECT CASE WHEN y = 1 THEN 'a' WHEN y = 2 THEN 'b' ELSE {case} END AS v FROM t",
+    "simple_case_then": "SELECT CASE j WHEN 1 THEN {case} WHEN 2 THEN 'b' END AS v FROM t",
+    "when": "SELECT CASE WHEN {case} = 'one' THEN 1 WHEN y = 2 THEN 2 END AS v FROM t",
+    "string_agg": "SELECT STRING_AGG({case}, ', ') AS v FROM t",
+    "parens_concat": "SELECT ({case}) || 'x' AS v FROM t",
+    "parens_cast": "SELECT ({case})::text AS v FROM t",
+    "after_operator": "SELECT 'a' || {case} AS v FROM t",
+    "count_distinct": "SELECT COUNT(DISTINCT {case}) AS v FROM t",
+    "window_order_by": "SELECT ROW_NUMBER() OVER (PARTITION BY a ORDER BY {case}) AS n FROM t",
+    "window_partition_by": "SELECT ROW_NUMBER() OVER (PARTITION BY {case} ORDER BY a) AS n FROM t",
+    "aggregate_order_by": "SELECT list(a ORDER BY {case}) AS l FROM t",
+    "where": "SELECT a FROM t WHERE {case} = 'one'",
+    "where_and": "SELECT a FROM t WHERE a = 1 AND {case} = 'one'",
+    "where_or": "SELECT a FROM t WHERE a = 1 OR {case} = 'one'",
+    "having": "SELECT a FROM t GROUP BY ALL HAVING {case} = 'one'",
+    "qualify": "SELECT a FROM t QUALIFY {case} = 'one'",
+    "join_on": "SELECT a FROM t JOIN u ON u.k = {case}",
+    "in_subquery": "SELECT a FROM t WHERE a IN (SELECT {case} FROM u)",
+    "in_list": "SELECT x IN ('a', {case}) AS b FROM t",
+}
+# With trailing commas there's no leading comma for a simple CASE's END to go
+# under, so END goes under CASE in both forms.
+_TRAILING_CASE_LAYOUTS = {
+    _SEARCHED_CASE: [
+        (0, "CASE"),
+        (2, "WHEN x = 1"),
+        (2, "THEN 'one'"),
+        (2, "WHEN x = 2"),
+        (2, "THEN 'two'"),
+        (2, "ELSE 'many'"),
+        (0, "END"),
+    ],
+    _SIMPLE_CASE: [(0, "CASE k"), (2, "WHEN 1 THEN 'one'"), (2, "WHEN 2 THEN 'two'"), (2, "ELSE 'many'"), (0, "END")],
+}
+_TRAILING_CASE_CASES = [
+    pytest.param("SELECT a, {case} AS v, b FROM t", _SEARCHED_CASE, id="select_list-searched"),
+    *(
+        pytest.param(_CASE_POSITIONS[name], case, id=f"{name}-{form}")
+        for name in ("then", "where", "window_order_by")
+        for case, form in ((_SEARCHED_CASE, "searched"), (_SIMPLE_CASE, "simple"))
+    ),
+]
+
+
+class TestCaseLayoutPositions:
+    """A CASE is laid out as in a SELECT list, relative to its CASE keyword, wherever it appears (#377)."""
+
+    @_CASE_FORMS
+    @pytest.mark.parametrize("sql", _CASE_POSITIONS.values(), ids=_CASE_POSITIONS.keys())
+    def test_case_is_laid_out_under_its_keyword(self, sql, case):
+        expected = _case_layout(format_sql(f"SELECT {case} AS c FROM t")[0])
+        out, _ = format_sql(sql.replace("{case}", case))
+        assert _case_layout(out, which=-1) == expected
+        assert format_sql(out)[0] == out
+
+    @pytest.mark.parametrize(("sql", "case"), _TRAILING_CASE_CASES)
+    def test_trailing_commas(self, sql, case):
+        config = JarifyConfig(leading_commas=False, trailing_commas=True)
+        out, _ = format_sql(sql.replace("{case}", case), config)
+        assert _case_layout(out, which=-1) == _TRAILING_CASE_LAYOUTS[case]
+        assert format_sql(out, config)[0] == out
+
+    def test_nested_case_in_then_lines_up_under_its_keyword(self):
+        out, _ = format_sql(_CASE_POSITIONS["then"].replace("{case}", _SEARCHED_CASE))
+        assert out == (
+            "SELECT\n"
+            "   CASE\n"
+            "     WHEN y = 1\n"
+            "     THEN CASE\n"
+            "            WHEN x = 1\n"
+            "            THEN 'one'\n"
+            "            WHEN x = 2\n"
+            "            THEN 'two'\n"
+            "            ELSE 'many'\n"
+            "          END\n"
+            "     WHEN y = 2\n"
+            "     THEN 'b'\n"
+            "   END AS v\n"
+            "FROM t\n"
+            ";\n"
+        )
+
+    def test_case_in_window_order_by_wraps_the_window_one_key_per_line(self):
+        out, _ = format_sql(_CASE_POSITIONS["window_order_by"].replace("{case}", _SEARCHED_CASE))
+        assert "   ROW_NUMBER() OVER (\n     PARTITION BY a\n     ORDER BY\n        CASE\n          WHEN x = 1\n" in out
+        assert "          ELSE 'many'\n        END\n  ) AS n\n" in out
+
+    def test_case_in_where_lines_up_after_the_keyword(self):
+        out, _ = format_sql(f"SELECT a FROM t WHERE {_SEARCHED_CASE} = 'one' AND b = 2")
+        assert "WHERE CASE\n        WHEN x = 1\n" in out
+        assert "        ELSE 'many'\n      END = 'one'\n  AND b = 2\n" in out
+
+    def test_case_on_the_left_of_where_equality_doesnt_pad_the_others(self):
+        out, _ = format_sql(f"SELECT a FROM t WHERE a = 1 AND {_SEARCHED_CASE} = 'one'")
+        assert "\nWHERE a = 1\n  AND CASE\n" in out
+
+    def test_case_in_parentheses_keeps_them_around_it(self):
+        out, _ = format_sql(f"SELECT ({_SEARCHED_CASE})::text AS v FROM t")
+        assert "   (CASE\n      WHEN x = 1\n" in out
+        assert "      ELSE 'many'\n    END)::text AS v\n" in out
+
+    def test_case_in_string_agg_puts_each_argument_on_its_own_line(self):
+        out, _ = format_sql(f"SELECT STRING_AGG({_SEARCHED_CASE}, ', ' ORDER BY y) AS v FROM t")
+        assert "   STRING_AGG(\n     CASE\n       WHEN x = 1\n" in out
+        assert "       ELSE 'many'\n     END\n    ,', '\n     ORDER BY y\n  ) AS v\n" in out
+
+    def test_case_in_join_on_is_laid_out_like_where(self):
+        out, _ = format_sql(f"SELECT a FROM t JOIN u ON u.k = {_SEARCHED_CASE} AND u.j = t.j")
+        assert "INNER JOIN u ON u.k = CASE\n                        WHEN x = 1\n" in out
+        assert "                      END\n            AND u.j = t.j\n" in out
+
+    @pytest.mark.parametrize("case", [_SEARCHED_CASE, f"b || {_SEARCHED_CASE}"], ids=["case", "after_operator"])
+    def test_aliases_line_up_after_a_case_end(self, case):
+        out, _ = format_sql(f"SELECT a AS x, {case} AS y, c AS z FROM t")
+        assert len(set(_as_columns(out, "x", "y", "z"))) == 1

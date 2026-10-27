@@ -29,6 +29,8 @@ Subclasses sqlglot's DuckDBGenerator to enforce jarify's opinionated rules:
   column-aligned when the block contains only simple (single-line) table refs
 - A -- comment never swallows SQL: commented windows, calls and IN lists take
   their multi-line form; any other comment followed by SQL becomes /* */
+- A CASE is always multi-line, laid out relative to the column its CASE
+  keyword starts in, wherever it appears
 """
 
 from __future__ import annotations
@@ -67,6 +69,77 @@ def _mark_comment_lines(comment: str) -> str:
 def restore_comment_lines(sql: str) -> str:
     """Put the lines of multi-line block comments back exactly as written."""
     return _MARKED_COMMENT_LINE_RE.sub(lambda m: "\n " if m.group(1) == _COMMENT_SPACE_MARK else "\n", sql)
+
+
+# A CASE is laid out relative to the column its CASE keyword starts in, as in
+# a SELECT list: a searched CASE's WHEN / THEN / ELSE two columns past the C
+# and END under it; a simple CASE's WHEN / ELSE one column past the C and END
+# one column before it, under the leading comma (with trailing commas, a
+# simple CASE's END goes under the C too). case_sql() can't know that column,
+# since whatever encloses the CASE may put text before it on its line
+# (`WHERE `, `THEN `, `a || `). So it lays the CASE out for the column a
+# SELECT list gives it and marks the C of CASE and the E of END. Once the
+# statement is rendered, _anchor_cases() moves each CASE's lines by the
+# difference between the column its CASE landed in and the one they were laid
+# out for. Each mark replaces its letter, so widths stay the same.
+_CASE_MARK = "\U00100000"  # the C of a CASE whose END goes under it
+_SIMPLE_CASE_MARK = "\U00100001"  # the C of a CASE whose END goes one column before it
+_END_MARK = "\U00100002"  # the E of a CASE's END
+_CASE_MARK_RE = re.compile(f"[{_CASE_MARK}{_SIMPLE_CASE_MARK}{_END_MARK}]")
+_CASE_UNMARK = str.maketrans({_CASE_MARK: "C", _SIMPLE_CASE_MARK: "C", _END_MARK: "E"})
+
+
+def _case_line_shifts(lines: list[str], start_col: int) -> list[int]:
+    """Return how many columns anchoring moves each line right (left when negative).
+
+    *start_col* is the column the first line starts in; the other lines'
+    columns are their own. A CASE's lines run from the line after its CASE to
+    its END. An enclosing CASE is anchored before the CASEs inside it, so they
+    are measured where it moved them.
+    """
+    shifts = [0] * len(lines)
+    pairs: list[tuple[int, int, int, int, bool]] = []
+    opened: list[tuple[int, int, bool]] = []
+    for row, line in enumerate(lines):
+        for mark in _CASE_MARK_RE.finditer(line):
+            if mark.group() != _END_MARK:
+                opened.append((row, mark.start(), mark.group() == _SIMPLE_CASE_MARK))
+            elif opened:
+                case_row, case_index, simple = opened.pop()
+                pairs.append((case_row, case_index, row, mark.start(), simple))
+    for case_row, case_index, end_row, end_index, simple in sorted(pairs):
+        case_col = case_index + shifts[case_row] + (start_col if case_row == 0 else 0)
+        end_col = end_index + shifts[end_row]
+        # The lines expect the CASE where END is, or one column right of it.
+        delta = case_col - (end_col + simple)
+        for row in range(case_row + 1, end_row + 1):
+            shifts[row] += delta
+    return shifts
+
+
+def _anchor_cases(sql: str, start_col: int = 0) -> str:
+    """Lay every marked CASE in *sql* out relative to the column its CASE keyword is in.
+
+    *start_col* is the column *sql*'s first line starts in.
+    """
+    if _END_MARK not in sql:
+        return sql
+    lines = sql.split("\n")
+    anchored = []
+    for line, shift in zip(lines, _case_line_shifts(lines, start_col), strict=True):
+        if shift > 0 and line:
+            line = " " * shift + line
+        elif shift < 0:
+            line = line[min(-shift, len(line) - len(line.lstrip(" "))) :]
+        anchored.append(line)
+    return "\n".join(anchored).translate(_CASE_UNMARK)
+
+
+def _last_line_case_shift(sql: str, start_col: int) -> int:
+    """Return how many columns _anchor_cases() will move the last line of *sql* right."""
+    if _END_MARK not in sql:
+        return 0
+    return _case_line_shifts(sql.split("\n"), start_col)[-1]
 
 
 # Column-alias alignment measures where each SELECT list and star REPLACE /
@@ -220,6 +293,21 @@ class JarifyGenerator(DuckDB.Generator):
         self._closing_paren_comment_texts: frozenset[str] = frozenset()  # set by formatter before generate()
         self._connector_force_expand: bool = False  # set True inside WHERE/HAVING to always break AND/OR
         self._block_comment_texts: frozenset[str] = frozenset()  # comments generate() renders as /* */
+        self._statement: exp.Expr | None = None  # the tree super().generate() is rendering
+
+    def preprocess(self, expression: exp.Expr) -> exp.Expr:
+        expression = super().preprocess(expression)
+        self._statement = expression
+        return expression
+
+    def sql(self, expression: str | exp.Expr | None, key: str | None = None, comment: bool = True) -> str:
+        sql = super().sql(expression, key, comment)
+        if key is None and expression is not None and expression is self._statement:
+            # The whole statement is rendered, so every CASE's column is known.
+            # Anchor them before generate() puts back the line breaks inside
+            # string literals, which aren't lines of the layout.
+            sql = _anchor_cases(sql)
+        return sql
 
     def generate(self, expression: exp.Expr, copy: bool = True) -> str:
         """Generate SQL, never letting a -- comment swallow SQL after it.
@@ -525,7 +613,11 @@ class JarifyGenerator(DuckDB.Generator):
         result_sql = "\n".join(s.rstrip() for s in result_sqls)
         # dynamic=True means "wrap only if necessary" — stay inline when content fits.
         # Commented items never go inline: a -- comment would swallow the rest of the line.
-        commented = dynamic and any(isinstance(e, exp.Expr) and self._has_comments(e) for e in expressions_list)
+        # Nor does an item holding a CASE, which is always multi-line: like a
+        # call's argument, it goes on a line of its own.
+        commented = dynamic and any(
+            isinstance(e, exp.Expr) and (self._has_comments(e) or self._holds_case(e)) for e in expressions_list
+        )
         if dynamic and not commented and not self.too_wide(result_sqls):
             return sep.join(s.lstrip(",").lstrip() for s in result_sqls)
         if dynamic and new_line:
@@ -670,6 +762,11 @@ class JarifyGenerator(DuckDB.Generator):
             parent = parent.parent
         return self._alias_list_prefix(select, self.pad + 1 + (ancestor_selects * self._indent))
 
+    @property
+    def _list_item_column(self) -> int:
+        """The column a list item's text starts in, relative to its lines: after the leader with leading commas."""
+        return 1 if self.leading_comma else 0
+
     def _star_list_prefix_width(self, star: exp.Star) -> int:
         """Return the visible prefix width before a star's REPLACE or RENAME expressions.
 
@@ -686,7 +783,10 @@ class JarifyGenerator(DuckDB.Generator):
 
         For single-line aliased expressions the width is simply ``len(col_sql)``.
         For multi-line aliased expressions (e.g. scalar subqueries, CASE blocks)
-        the effective width is ``max(0, len(last_line.lstrip()) - 1)``.
+        the effective width is ``max(0, len(last_line) - 1)``, measuring the
+        last line with its indentation (a CASE's ``END`` is indented, and
+        further when the CASE starts partway along its first line), as
+        ``alias_sql`` does.
 
         The ``-1`` adjustment exists because ``alias_sql`` adds ``+1`` to the
         padding for multi-line expressions in order to compensate for the
@@ -709,8 +809,10 @@ class JarifyGenerator(DuckDB.Generator):
                     last_line = col_sql.splitlines()[-1]
                     # Subtract 1: cancels the +1 compensation in alias_sql so that
                     # SELECT lists with only multi-line expressions don't produce a
-                    # spurious extra space before AS.
-                    col_widths.append(max(0, len(last_line.lstrip()) - 1))
+                    # spurious extra space before AS. Measure the last line where
+                    # anchoring a CASE will put it (`a || CASE … END` moves it right).
+                    shift = _last_line_case_shift(col_sql, self._list_item_column)
+                    col_widths.append(max(0, len(last_line) - 1 + shift))
                 else:
                     col_widths.append(len(col_sql))
             else:
@@ -742,7 +844,9 @@ class JarifyGenerator(DuckDB.Generator):
                 # (the `` ``/``,`` leader only goes on the first line).  To land
                 # ``AS`` at the same visual column as single-line aliases — which
                 # DO carry a 1-char leader — we add an extra +1 to the padding.
-                padding = " " * max(0, align_width - len(lines[-1]) + 1)
+                # Measure the last line where anchoring a CASE will put it.
+                width = len(lines[-1]) + _last_line_case_shift(this_sql, self._list_item_column)
+                padding = " " * max(0, align_width - width + 1)
                 lines[-1] = f"{lines[-1]}{padding} AS {alias_name}"
                 return "\n".join(lines)
             padding = " " * max(0, align_width - len(this_sql))
@@ -981,9 +1085,9 @@ class JarifyGenerator(DuckDB.Generator):
         if isinstance(table, exp.Subquery):
             # Render compactly; non-pretty seg() prepends a space, so strip it.
             # A commented subquery can't go on one line (a -- comment would
-            # swallow the rest of it).
+            # swallow the rest of it), nor can one holding a CASE.
             compact = self._compact_sql(expression).strip()
-            if not self._has_comments(table) and not self.too_wide([compact]):
+            if not self._has_comments(table) and not self._holds_case(table) and not self.too_wide([compact]):
                 return self.seg(compact)
             return super().from_sql(expression)
 
@@ -1046,14 +1150,15 @@ class JarifyGenerator(DuckDB.Generator):
         """Append the ON or USING clause to the JOIN line *head*.
 
         The ON condition stays inline on one line. A commented condition
-        cannot (a ``--`` comment would swallow the rest of the line), so it is
+        cannot (a ``--`` comment would swallow the rest of the line), and
+        neither can one holding a CASE, which is always multi-line. Either is
         laid out like WHERE: AND/OR on their own lines, right-justified so the
         conditions align after ``ON``.
         """
         on_expr = expression.args.get("on")
         using = expression.args.get("using")
         if on_expr:
-            if self._has_comments(on_expr):
+            if self._has_comments(on_expr) or self._holds_case(on_expr):
                 return "\n".join(self._aligned_condition_lines(f"{head} ON", on_expr))
             saved = self.pretty
             self.pretty = False
@@ -1279,8 +1384,13 @@ class JarifyGenerator(DuckDB.Generator):
         lead = [c for c in comments if c.strip() in self._leading_comment_texts]
         trail = [c for c in comments if c.strip() not in self._leading_comment_texts]
 
-        compact = self._compact_sql(expression.this)
-        if not self._has_comments(expression.this) and not self.too_wide([f"({compact})"]):
+        this = expression.this
+        compact = self._compact_sql(this)
+        if isinstance(this, exp.Case) and not self._has_comments(this):
+            # A CASE is always multi-line. The parentheses stay around it, and
+            # it is laid out under its keyword: `(CASE` … `END)`.
+            sql = f"({self.sql(expression, 'this')})"
+        elif not self._has_comments(this) and not self._holds_case(this) and not self.too_wide([f"({compact})"]):
             sql = f"({compact})"
         else:
             # A comment on its own line before the first condition inside the
@@ -1359,13 +1469,10 @@ class JarifyGenerator(DuckDB.Generator):
         p = self.pad
 
         def _prefixed(arg_sql: str, *, first: str) -> list[str]:
+            # A multi-line argument continues from the argument's first
+            # column. (_anchor_cases() lines a CASE up under its keyword.)
             lines = arg_sql.splitlines() or [arg_sql]
-            # A CASE lays out its WHEN / THEN / ELSE / END lines for the
-            # one-character leader (" " or ",") that a SELECT list or a
-            # wrapped call puts before it, so its lines continue from the
-            # leader's column, as they do there. Other multi-line arguments
-            # continue from the argument's first column.
-            rest = " " * (p + 1 if self._starts_with_case(lines[0]) else p + 2)
+            rest = " " * (p + 2)
             return [f"{first}{lines[0]}", *(f"{rest}{line}" for line in lines[1:])]
 
         lines = [f"{func_name}("]
@@ -1383,6 +1490,13 @@ class JarifyGenerator(DuckDB.Generator):
     def case_sql(self, expression: exp.Case) -> str:
         this = self.sql(expression, "this")
 
+        def _branch_sql(node: exp.Expr, keyword: str) -> str:
+            """A branch value stays on one line when it fits, unless it holds a CASE."""
+            compact = self._compact_sql(node)
+            if self._holds_case(node) or self.too_wide([f"{keyword} {compact}"]):
+                return self.sql(node)
+            return compact
+
         when_parts: list[str] = []
         then_parts: list[str] = []
         for e in expression.args["ifs"]:
@@ -1394,26 +1508,20 @@ class JarifyGenerator(DuckDB.Generator):
                     wp = self.sql(wp_expr)
                 finally:
                     self._connector_force_expand = prev_force
+            elif self.pretty and wp_expr is not None and self._holds_case(wp_expr):
+                wp = self.sql(wp_expr)
             else:
                 wp = self._compact_sql(wp_expr) if wp_expr is not None else self.sql(e, "this")
 
             true_expr = e.args.get("true")
-            if self.pretty and true_expr is not None:
-                compact = self._compact_sql(true_expr)
-                tp = compact if not self.too_wide([f"THEN {compact}"]) else self.sql(e, "true")
-            else:
-                tp = self.sql(e, "true")
+            tp = _branch_sql(true_expr, "THEN") if self.pretty and true_expr is not None else self.sql(e, "true")
             when_parts.append(wp)
             then_parts.append(tp)
 
         default_expr = expression.args.get("default")
         default_sql: str | None = None
         if default_expr is not None:
-            if self.pretty:
-                compact = self._compact_sql(default_expr)
-                default_sql = compact if not self.too_wide([f"ELSE {compact}"]) else self.sql(expression, "default")
-            else:
-                default_sql = self.sql(expression, "default")
+            default_sql = _branch_sql(default_expr, "ELSE") if self.pretty else self.sql(expression, "default")
 
         def _append_multiline(
             stmts: list[str], keyword: str, value: str, *, prefix: str = "", continuation_prefix: str = ""
@@ -1459,11 +1567,20 @@ class JarifyGenerator(DuckDB.Generator):
         if not self.pretty:
             return " ".join(_build_simple(align=False))
 
+        # Mark the C of CASE and the E of END for _anchor_cases(), which moves
+        # the lines laid out here to the column the CASE keyword lands in.
         if not this:
-            return self.indent("\n".join(_build_searched()), skip_first=True, skip_last=True)
-
-        align = len(when_parts) >= 2 and all("\n" not in tp for tp in then_parts)
-        return self.indent("\n".join(_build_simple(align=align)), skip_first=True, skip_last=True)
+            stmts = _build_searched()
+            stmts[0] = _CASE_MARK + stmts[0][1:]
+            stmts[-1] = f" {_END_MARK}ND"
+        else:
+            align = len(when_parts) >= 2 and all("\n" not in tp for tp in then_parts)
+            stmts = _build_simple(align=align)
+            # END goes under the leading comma; with trailing commas there's
+            # none, and END goes under CASE.
+            stmts[0] = (_SIMPLE_CASE_MARK if self.leading_comma else _CASE_MARK) + stmts[0][1:]
+            stmts[-1] = f"{_END_MARK}ND"
+        return self.indent("\n".join(stmts), skip_first=True, skip_last=True)
 
     # ------------------------------------------------------------------
     # WHERE / HAVING: first condition inline, AND/OR right-justified
@@ -1496,7 +1613,9 @@ class JarifyGenerator(DuckDB.Generator):
 
         # Max EQ LHS width across top-level AND operands only — nested EQs (inside
         # Paren, subqueries, etc.) must not influence padding of sibling conditions.
-        eq_lhs_widths = [len(self.sql(cond.this)) for cond in conditions if isinstance(cond, exp.EQ)]
+        # A multi-line LHS, such as a CASE, isn't padded, so it doesn't count.
+        eq_lhs_sqls = [self.sql(cond.this) for cond in conditions if isinstance(cond, exp.EQ)]
+        eq_lhs_widths = [len(lhs) for lhs in eq_lhs_sqls if "\n" not in lhs]
         # Only align when there are at least 2 top-level EQ comparisons
         target = (max(eq_lhs_widths) + 1) if len(eq_lhs_widths) >= 2 else 0
 
@@ -1512,7 +1631,7 @@ class JarifyGenerator(DuckDB.Generator):
             else:
                 cond_str = (
                     self.sql(cond)
-                    if isinstance(cond, exp.Paren) and self._has_comments(cond)
+                    if isinstance(cond, exp.Paren) and (self._has_comments(cond) or self._holds_case(cond))
                     else self._compact_sql(cond)
                     if isinstance(cond, exp.Paren)
                     else self.sql(cond)
@@ -1642,15 +1761,15 @@ class JarifyGenerator(DuckDB.Generator):
         """
         if self._has_comments(expression):
             return self.sql(expression)
-        if expression.find(exp.Case) is None:
+        if not self._holds_case(expression):
             return None
         sql = self.sql(expression)
         return sql if "\n" in sql else None
 
     @staticmethod
-    def _starts_with_case(line: str) -> bool:
-        """Return True when line, the first line of an expression's SQL, opens a CASE."""
-        return line == "CASE" or line.startswith("CASE ")
+    def _holds_case(expression: exp.Expr | None) -> bool:
+        """Return True when expression is or contains a CASE, which is always multi-line."""
+        return expression is not None and expression.find(exp.Case) is not None
 
     def _compact_sql(self, expression: exp.Expr) -> str:
         """Render expression compactly without line breaks."""
@@ -1703,7 +1822,7 @@ class JarifyGenerator(DuckDB.Generator):
         # Check for comments before flattening: rendering the terms pops a
         # Paren's comments, so a second render would lose them.
         this = expression.this
-        if isinstance(this, exp.Connector) and not self._has_comments(this):
+        if isinstance(this, exp.Connector) and not self._has_comments(this) and not self._holds_case(this):
             terms_temp: list[str] = []
             ops_list: list[str] = []
             self._flatten_connector(this, terms_temp, ops_list)
@@ -1794,8 +1913,12 @@ class JarifyGenerator(DuckDB.Generator):
         if self.pretty and query is not None:
             compact = self._compact_sql(query.this)
             # A commented subquery can't go on one line (a -- comment would
-            # swallow the rest of it).
-            if not self._has_comments(query) and not self.too_wide([f"{this} {op} ({compact})"]):
+            # swallow the rest of it), nor can one holding a CASE.
+            if (
+                not self._has_comments(query)
+                and not self._holds_case(query)
+                and not self.too_wide([f"{this} {op} ({compact})"])
+            ):
                 return f"{this} {op} ({compact})"
             select_sql = self.sql(query.this)
             indented = self.indent(select_sql)
@@ -2046,7 +2169,10 @@ class JarifyGenerator(DuckDB.Generator):
         if self.pretty and self._is_order_by_all(expression):
             return self.seg("ORDER BY ALL")
         sql = super().order_sql(expression, flat=flat)
-        if not self.pretty or not self.too_wide([sql]):
+        # A CASE never fits on a line: it is always multi-line.
+        keys_hold_case = self.pretty and any(self._holds_case(key) for key in expression.expressions)
+        this_holds_case = self.pretty and self._holds_case(expression.args.get("this"))
+        if not self.pretty or not (self.too_wide([sql]) or keys_hold_case or this_holds_case):
             return sql
         if expression.args.get("this") is not None:
             # An aggregate's `x ORDER BY a, b` is a call argument (calls
@@ -2064,12 +2190,13 @@ class JarifyGenerator(DuckDB.Generator):
         """Return a call argument with an aggregate's ORDER BY on its own line below it.
 
         The keys stay on the ORDER BY line while it fits and go one per line
-        otherwise, like a window's. The lines are laid out for one argument
-        of a wrapped call (see _argument_lines).
+        otherwise, like a window's; a CASE, always multi-line, never fits.
+        The lines are laid out for one argument of a wrapped call (see
+        _argument_lines).
         """
         keyword = self._order_keyword(order)
         clause = f"{keyword} {self.expressions(order, flat=True)}"
-        if self.too_wide([clause]):
+        if self.too_wide([clause]) or any(self._holds_case(key) for key in order.expressions):
             clause = self._wrapped_list_clause(keyword, order)
         return self._argument_lines(f"{arg_sql}\n{clause}")
 
@@ -2178,9 +2305,11 @@ class JarifyGenerator(DuckDB.Generator):
 
     def partition_by_sql(self, expression: exp.Window | exp.MatchRecognize) -> str:
         sql = super().partition_by_sql(expression)
-        if self.pretty and isinstance(expression, exp.Window) and self.too_wide([sql]):
+        keys_hold_case = any(self._holds_case(key) for key in expression.args.get("partition_by") or [])
+        if self.pretty and isinstance(expression, exp.Window) and (self.too_wide([sql]) or keys_hold_case):
             # A wrapped window puts each clause on its own line (format_args);
-            # a PARTITION BY that still doesn't fit puts one key per line.
+            # a PARTITION BY that still doesn't fit, such as one holding a
+            # CASE, puts one key per line.
             return self._argument_lines(self._wrapped_list_clause("PARTITION BY", expression, key="partition_by"))
         return sql
 
@@ -2445,9 +2574,16 @@ class JarifyGenerator(DuckDB.Generator):
             self.too_wide(arg_sqls)
             or self._has_commented_arg(args, sep)
             or self._has_multiline_case_arg(args, arg_sqls, sep)
+            or self._has_multiline_clause(arg_sqls, sep)
         ):
             return self._wrapped_args(arg_sqls, sep=sep)
         return sep.join(arg_sqls)
+
+    @staticmethod
+    def _has_multiline_clause(arg_sqls: t.Sequence[str], sep: str) -> bool:
+        """A window spec's clauses (space-separated) go one per line when one of
+        them spans lines, such as a PARTITION BY or ORDER BY holding a CASE."""
+        return sep == " " and any("\n" in sql for sql in arg_sqls)
 
     def _has_commented_arg(self, args: t.Sequence[t.Any], sep: str) -> bool:
         """A commented argument wraps the call one argument per line, so its
@@ -2459,7 +2595,7 @@ class JarifyGenerator(DuckDB.Generator):
         per line, so the CASE is laid out as in a SELECT list instead of
         starting partway along the call's line."""
         return sep.strip() == "," and any(
-            "\n" in sql and isinstance(arg, exp.Expr) and arg.find(exp.Case) is not None
+            "\n" in sql and isinstance(arg, exp.Expr) and self._holds_case(arg)
             for arg, sql in zip(args, arg_sqls, strict=True)
         )
 

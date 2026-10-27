@@ -339,7 +339,9 @@ HAVING COUNT(*) > 1
 
 When a `WHERE` clause contains two or more equality (`=`) comparisons anywhere in the condition tree, the left-hand sides of all **top-level** `AND` equality conditions are right-padded so that the `=` signs align vertically. The target column is the longest LHS (across all `=` in the clause, including nested ones) plus one space.
 
-Parenthesised compound conditions (e.g. `(a = b OR c IS NULL)`) that appear as direct `AND` operands are kept on a single line.
+A multi-line left-hand side, such as a `CASE`, isn't padded and doesn't count toward the target column.
+
+Parenthesised compound conditions (e.g. `(a = b OR c IS NULL)`) that appear as direct `AND` operands are kept on a single line, unless they hold a comment or a `CASE`.
 
 **Bad**
 ```sql
@@ -357,7 +359,7 @@ WHERE type       = _property_type
 
 ### WHERE — `IN (subquery)` layout
 
-When the full `col IN (SELECT ...)` expression fits on one line within the configured max line length, it stays inline. When it would exceed the threshold, or the subquery contains a comment, the `(` goes on its own line, the inner query is indented by one level, and `)` closes at the same column as `IN`. (A `--` comment on the inline form would comment out the rest of the line; for the same reason a commented `FROM (subquery)` is never collapsed onto one line.)
+When the full `col IN (SELECT ...)` expression fits on one line within the configured max line length, it stays inline. When it would exceed the threshold, or the subquery contains a comment or a `CASE`, the `(` goes on its own line, the inner query is indented by one level, and `)` closes at the same column as `IN`. (A `--` comment on the inline form would comment out the rest of the line, and a `CASE` is always multi-line; for the same reasons a `FROM (subquery)` holding either is never collapsed onto one line.)
 
 **Bad**
 ```sql
@@ -388,7 +390,7 @@ WHERE program_key IN
 
 ### WHERE — `IN (…)` value list layout
 
-When the full `col IN (a, b, …)` expression fits on one line within the configured max line length, it stays inline. When it would exceed the threshold, or a value carries a comment, the values go one per line in leading-comma style, like wrapped function arguments: `IN (` ends its line, and `)` gets a line of its own, lined up with the start of the line that holds `IN (`. The same layout applies to an `IN` list in a `SELECT` list or a `PIVOT`, and a long list literal (`[…]`) wraps the same way.
+When the full `col IN (a, b, …)` expression fits on one line within the configured max line length, it stays inline. When it would exceed the threshold, or a value carries a comment or holds a `CASE`, the values go one per line in leading-comma style, like wrapped function arguments: `IN (` ends its line, and `)` gets a line of its own, lined up with the start of the line that holds `IN (`. The same layout applies to an `IN` list in a `SELECT` list or a `PIVOT`, and a long list literal (`[…]`) wraps the same way.
 
 **Bad**
 ```sql
@@ -549,6 +551,39 @@ SELECT
        ,nom_team_status_key
        ,points_actually_awarded
   ) AS node_id
+FROM t
+;
+```
+
+A `CASE` never fits on a line, so a window whose `PARTITION BY` or `ORDER BY` holds one is wrapped too, with that list one key per line and the CASE laid out under its keyword (see [`CASE` — always multi-line](#case--always-multi-line)).
+
+**Bad**
+```sql
+SELECT
+   ROW_NUMBER() OVER (PARTITION BY a ORDER BY CASE
+     WHEN x = 1
+     THEN 'one'
+     WHEN x = 2
+     THEN 'two'
+     ELSE 'many'
+   END) AS n
+FROM t
+```
+
+**Good**
+```sql
+SELECT
+   ROW_NUMBER() OVER (
+     PARTITION BY a
+     ORDER BY
+        CASE
+          WHEN x = 1
+          THEN 'one'
+          WHEN x = 2
+          THEN 'two'
+          ELSE 'many'
+        END
+  ) AS n
 FROM t
 ;
 ```
@@ -1059,6 +1094,22 @@ INNER JOIN third      z ON z.id = x.id
 ;
 ```
 
+An `ON` condition holding a `CASE`, which is always multi-line, is laid out the same way, and the CASE is laid out under its keyword:
+
+```sql
+SELECT
+   t.a
+FROM t
+INNER JOIN u ON u.k = CASE
+                        WHEN t.x = 1
+                        THEN 'one'
+                        WHEN t.x = 2
+                        THEN 'two'
+                      END
+            AND u.j = t.j
+;
+```
+
 A comment on a `FROM` or `JOIN` table follows its alias, or the table when it has none, so the aliases stay aligned. When `ON` or `USING` follows it on the line, each comment is a `/* */` block comment.
 
 **Bad** (the comment is dropped, or comes between the table and its alias)
@@ -1355,7 +1406,7 @@ FROM t
 
 ### `ORDER BY` inside aggregates — own line when wrapping
 
-An aggregate with an `ORDER BY` stays on one line while the whole call fits, as in `list(a ORDER BY b)` or `STRING_AGG(a, ', ' ORDER BY b)`. When it doesn't, the call wraps: its arguments go one per line, like any wrapped call's, and `ORDER BY` goes on its own line below them, lined up with them. A key list that still doesn't fit puts one key per line, as in a window spec. `STRING_AGG`'s separator and the other arguments of an aggregate such as `arg_max` count as arguments.
+An aggregate with an `ORDER BY` stays on one line while the whole call fits, as in `list(a ORDER BY b)` or `STRING_AGG(a, ', ' ORDER BY b)`. When it doesn't, the call wraps: its arguments go one per line, like any wrapped call's, and `ORDER BY` goes on its own line below them, lined up with them. A key list that still doesn't fit puts one key per line, as in a window spec. `STRING_AGG`'s separator and the other arguments of an aggregate such as `arg_max` count as arguments. A `CASE` never fits on a line: an argument holding one puts `ORDER BY` on its own line, and a key list holding one puts one key per line.
 
 **Bad**
 ```sql
@@ -1477,12 +1528,79 @@ SELECT
       AND baq
      THEN world
      ELSE NULL
-   END        AS abc
+   END         AS abc
 FROM data
 ;
 ```
 
-A CASE passed as a function argument is laid out as in a SELECT list. The call puts each argument on its own line, even when the call would fit on one, and the CASE's lines keep their SELECT-list columns: in a searched CASE, `WHEN`, `THEN` and `ELSE` start two columns past the `C` of `CASE` and `END` sits under it; in a simple CASE, `WHEN` and `ELSE` start one column past the `C` and `END` sits under the comma.
+A CASE is laid out the same way wherever it appears, relative to the column its `CASE` keyword starts in: in a searched CASE, `WHEN`, `THEN` and `ELSE` start two columns past the `C` of `CASE` and `END` sits under it; in a simple CASE, `WHEN` and `ELSE` start one column past the `C` and `END` one column before it (under the comma, in a SELECT list). That holds for a CASE in another CASE's branch, after an operator, in parentheses, and in a `WHERE`, `HAVING`, `QUALIFY` or `JOIN … ON` condition. With trailing commas there's no comma for a simple CASE's `END` to sit under, so it sits under the `C`, as in a searched CASE.
+
+**Bad** (a CASE left on one line, or its lines not under its `CASE`)
+```sql
+SELECT
+   CASE
+     WHEN y = 1
+     THEN CASE WHEN x = 1 THEN 'one' WHEN x = 2 THEN 'two' ELSE 'many' END
+     WHEN y = 2
+     THEN 'b'
+   END AS nested
+  ,(CASE WHEN x = 1 THEN 'one' WHEN x = 2 THEN 'two' ELSE 'many' END)::text AS cast_text
+  ,b || CASE k
+    WHEN 1 THEN 'one'
+    WHEN 2 THEN 'two'
+  END AS suffixed
+FROM t
+WHERE CASE
+   WHEN x = 1
+   THEN 'one'
+   WHEN x = 2
+   THEN 'two'
+   ELSE 'many'
+ END = 'one'
+  AND c = 3
+```
+
+**Good**
+```sql
+SELECT
+   CASE
+     WHEN y = 1
+     THEN CASE
+            WHEN x = 1
+            THEN 'one'
+            WHEN x = 2
+            THEN 'two'
+            ELSE 'many'
+          END
+     WHEN y = 2
+     THEN 'b'
+   END         AS nested
+  ,(CASE
+      WHEN x = 1
+      THEN 'one'
+      WHEN x = 2
+      THEN 'two'
+      ELSE 'many'
+    END)::text AS cast_text
+  ,b || CASE k
+         WHEN 1 THEN 'one'
+         WHEN 2 THEN 'two'
+       END     AS suffixed
+FROM t
+WHERE CASE
+        WHEN x = 1
+        THEN 'one'
+        WHEN x = 2
+        THEN 'two'
+        ELSE 'many'
+      END = 'one'
+  AND c = 3
+;
+```
+
+A construct that stays on one line when it fits doesn't when it holds a CASE, since the CASE never fits on one line. A `JOIN … ON` condition holding one is laid out like `WHERE` (see [`JOIN` formatting](#join-formatting--inline-on-aligned-aliases)); a subquery holding one takes its multi-line form; an `IN (…)` list or list literal puts one value per line; a window spec puts each clause on its own line, and a `PARTITION BY` or `ORDER BY` holding the CASE one key per line (see [Window specs](#window-specs--one-clause-per-line-when-wrapping)); and an aggregate's `ORDER BY` goes on its own line under the argument (see [`ORDER BY` inside aggregates](#order-by-inside-aggregates--own-line-when-wrapping)).
+
+A CASE passed as a function argument, `string_agg()` included, is laid out as in a SELECT list. The call puts each argument on its own line, even when the call would fit on one, so the CASE starts its line, as in a SELECT list.
 
 **Bad**
 ```sql
@@ -2064,7 +2182,7 @@ WHERE x != y
 
 **Auto-fixed by `fmt`.** Rewrite single-branch `CASE WHEN … THEN … [ELSE …] END` expressions to DuckDB's `IF(condition, true_val, false_val)` function. The IF form is shorter and more idiomatic for simple conditionals.
 
-Applies only to *searched* CASE with exactly one WHEN branch. Multi-branch CASE and simple CASE (`CASE expr WHEN lit …`) are left unchanged. A CASE with a comment inside its WHEN, THEN or ELSE expression is also left unchanged, because `IF()` keeps its arguments on one line where a `--` comment would swallow the rest of the call. So is a CASE with a comment attached to the CASE itself, such as one written on the line above a CASE nested in another CASE's ELSE, because an `if()` call can't keep a comment of its own. When the original `CASE` has no `ELSE`, jarify emits an explicit `NULL` third argument because DuckDB's `IF()` requires three arguments.
+Applies only to *searched* CASE with exactly one WHEN branch. Multi-branch CASE and simple CASE (`CASE expr WHEN lit …`) are left unchanged. A CASE with a comment inside its WHEN, THEN or ELSE expression is also left unchanged, so the comment stays beside the branch it documents; the rule only rewrites a CASE that carries no comment. So is a CASE with a comment attached to the CASE itself, such as one written on the line above a CASE nested in another CASE's ELSE, because an `if()` call can't keep a comment of its own. When the original `CASE` has no `ELSE`, jarify emits an explicit `NULL` third argument because DuckDB's `IF()` requires three arguments.
 
 **Bad**
 ```sql
