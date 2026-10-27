@@ -48,3 +48,13 @@ INNER JOIN (
   ) ON v.id = u.id
 ) ON u.id = t.id
 ;
+
+-- A comment on the group's first table
+SELECT
+   t.a
+FROM t
+LEFT JOIN (
+  u -- c1
+  INNER JOIN v ON v.id = u.id
+) ON u.id = t.id
+;

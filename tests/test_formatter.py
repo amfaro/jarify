@@ -1628,6 +1628,20 @@ class TestNestedJoins:
             ") ON uu.id = tt.uid\n"
         ) in out
 
+    @pytest.mark.parametrize(
+        ("group", "first_line"),
+        [
+            ("(\n  -- c1\n  u JOIN v ON v.id = u.id)", "  u -- c1\n"),
+            ("(u /* c1 */ x JOIN v y ON y.id = x.id)", "  u            x -- c1\n"),
+            ("(u x /* c1 */ JOIN v y ON y.id = x.id)", "  u            x -- c1\n"),
+        ],
+    )
+    def test_first_table_comment_is_written_once(self, group, first_line):
+        out, _ = format_sql(f"SELECT t.a FROM t LEFT JOIN {group} ON t.id = t.id")
+        assert first_line in out
+        assert out.count("c1") == 1
+        assert format_sql(out)[0] == out
+
     def test_deeper_nesting_keeps_every_join(self):
         out, _ = format_sql("SELECT t.a FROM t JOIN u JOIN v JOIN w ON w.id = v.id ON v.id = u.id ON u.id = t.id")
         assert (
