@@ -470,6 +470,23 @@ class TestPreferIfOverCase:
         rules = _lint(sql)
         assert "prefer-if-over-case" not in rules
 
+    def test_warns_on_each_nested_case(self):
+        # fmt rewrites both the outer CASE and the one in its ELSE, so lint flags both.
+        sql = "SELECT CASE WHEN x THEN 1 ELSE CASE WHEN c THEN 4 ELSE 5 END END FROM t"
+        rules = _lint(sql)
+        assert rules.count("prefer-if-over-case") == 2
+
+    def test_warns_on_case_nested_in_multi_when(self):
+        sql = "SELECT CASE WHEN a = 1 THEN CASE WHEN b THEN 1 ELSE 2 END WHEN a = 2 THEN 3 END FROM t"
+        rules = _lint(sql)
+        assert rules.count("prefer-if-over-case") == 1
+
+    def test_no_warn_when_case_carries_comment(self):
+        # The comment is attached to the inner CASE, which fmt keeps as a CASE.
+        sql = "SELECT CASE WHEN q = 1 THEN 0 ELSE\n  -- why\n  CASE WHEN c THEN 4 ELSE 5 END END FROM t"
+        rules = _lint(sql)
+        assert "prefer-if-over-case" not in rules
+
     def test_off_disables_rule(self):
         sql = "SELECT CASE WHEN a > 1 THEN 'big' ELSE 'small' END FROM t"
         rules = _lint(sql, prefer_if_over_case="off")

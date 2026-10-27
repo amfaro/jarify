@@ -1163,3 +1163,27 @@ class TestFunctionCaseOverrides:
         sql = "SELECT array_agg(a) AS l, ifnull(b, 0) AS i, if(c, 1, 2) AS f, any_value(d) AS v FROM t"
         out, _ = format_sql(sql, config)
         assert format_sql(out, config)[0] == out
+
+
+class TestPreferIfOverCaseNesting:
+    def test_rewrites_a_case_nested_in_else_in_one_pass(self):
+        out, _ = format_sql("SELECT CASE WHEN x THEN 1 ELSE CASE WHEN c THEN 4 ELSE 5 END END AS k FROM t")
+        assert out == "SELECT\n   if(x, 1, if(c, 4, 5)) AS k\nFROM t\n;\n"
+
+    def test_rewrites_a_case_nested_in_then_in_one_pass(self):
+        out, _ = format_sql("SELECT CASE WHEN x THEN CASE WHEN c THEN 4 END ELSE 0 END AS k FROM t")
+        assert out == "SELECT\n   if(x, if(c, 4, NULL), 0) AS k\nFROM t\n;\n"
+
+    def test_rewrites_a_case_nested_in_a_multi_when_case(self):
+        out, _ = format_sql("SELECT CASE WHEN a = 1 THEN CASE WHEN b THEN 1 ELSE 2 END WHEN a = 2 THEN 3 END AS k")
+        assert "THEN if(b, 1, 2)\n" in out
+        assert out.count("CASE") == 1
+
+    def test_keeps_a_case_that_carries_a_comment(self):
+        # The comment is attached to the inner CASE itself; an IF() call would
+        # drop it, so the inner CASE stays a CASE and the comment is kept.
+        sql = "SELECT CASE WHEN q = 1 THEN 0 ELSE\n  -- why\n  CASE WHEN c THEN 4 ELSE 5 END END AS k FROM t\n"
+        out, _ = format_sql(sql)
+        assert "-- why" in out
+        assert "if(" not in out
+        assert format_sql(out)[0] == out
