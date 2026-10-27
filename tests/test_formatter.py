@@ -7,11 +7,7 @@ from jarify.formatter import format_sql
 
 
 def _alias_positions(sql: str, *aliases: str) -> list[int]:
-    return [
-        line.index(" AS ")
-        for line in sql.splitlines()
-        if any(f" AS {alias}" in line for alias in aliases)
-    ]
+    return [line.index(" AS ") for line in sql.splitlines() if any(f" AS {alias}" in line for alias in aliases)]
 
 
 def _as_columns(sql: str, *aliases: str) -> list[int]:
@@ -387,6 +383,32 @@ def test_several_comments_on_a_cte_go_above_it_one_per_line():
     sql = "WITH _a AS (SELECT 1 AS x)\n/* one */\n/* two */\n,_b AS (SELECT 2 AS y)\nSELECT x, y FROM _a, _b\n"
     result, _ = format_sql(sql)
     assert ")\n-- one\n-- two\n,_b AS\n(" in result
+    assert format_sql(result)[0] == result
+
+
+@pytest.mark.parametrize(
+    "head",
+    ["_a AS\n-- note\n", "_a AS /* note */ ", "_a AS MATERIALIZED\n-- note\n", "_a (x) AS\n-- note\n"],
+)
+def test_comment_before_cte_paren_goes_after_as(head):
+    """sqlglot drops a comment between a CTE's AS and its "(" (#355)."""
+    result, _ = format_sql(f"WITH {head}(SELECT 1 AS x)\nSELECT x FROM _a\n")
+    assert result.count("note") == 1
+    assert "AS -- note\n(\n" in result or "MATERIALIZED -- note\n(\n" in result
+    assert format_sql(result)[0] == result
+
+
+def test_comment_before_cte_paren_stays_after_as_below_a_comment_above_the_cte():
+    sql = "WITH _a AS (SELECT 1 AS x)\n/* block */\n,_b AS\n-- note\n(SELECT 2 AS y)\nSELECT y FROM _b\n"
+    result, _ = format_sql(sql)
+    assert ")\n-- block\n,_b AS -- note\n(" in result
+    assert format_sql(result)[0] == result
+
+
+def test_comment_before_cte_paren_comes_last_when_comments_go_above():
+    sql = "WITH _a AS (SELECT 1 AS x)\n,_b AS -- block\n-- note\n(SELECT 2 AS y)\nSELECT y FROM _b\n"
+    result, _ = format_sql(sql)
+    assert ")\n-- block\n-- note\n,_b AS\n(" in result
     assert format_sql(result)[0] == result
 
 
@@ -1149,6 +1171,46 @@ class TestWindowListWrapping:
         )
         once, _ = format_sql(sql)
         assert format_sql(once)[0] == once
+
+
+class TestJoinTableComments:
+    """A comment on a FROM / JOIN table is kept, after the table or its alias (#355)."""
+
+    def test_comment_after_join_table_is_kept(self):
+        out, _ = format_sql("SELECT t.a FROM t INNER JOIN u /* x */ ON u.id = t.id")
+        assert out == "SELECT\n   t.a\nFROM t\nINNER JOIN u /* x */ ON u.id = t.id\n;\n"
+        assert format_sql(out)[0] == out
+
+    def test_line_comment_after_join_table_does_not_swallow_on(self):
+        out, _ = format_sql("SELECT t.a FROM t\nINNER JOIN u -- x\nON u.id = t.id\n")
+        assert "INNER JOIN u /* x */ ON u.id = t.id\n" in out
+
+    @pytest.mark.parametrize("join", ["u /* x */ y", "u y /* x */"])
+    def test_comment_on_aliased_join_table_follows_the_alias(self, join):
+        out, _ = format_sql(f"SELECT x.a FROM t x INNER JOIN {join} ON y.id = x.id")
+        assert "INNER JOIN u y /* x */ ON y.id = x.id\n" in out
+
+    def test_comment_between_from_table_and_alias_is_kept(self):
+        out, _ = format_sql("SELECT o.a FROM orders /* src */ o")
+        assert "FROM orders o -- src\n" in out
+
+    def test_comment_does_not_move_aligned_aliases(self):
+        sql = (
+            "SELECT o.a FROM orders o LEFT JOIN users /* people */ u ON u.id = o.user_id "
+            "LEFT JOIN addresses addr ON addr.id = o.aid"
+        )
+        out, _ = format_sql(sql)
+        assert "FROM orders            o\nLEFT JOIN users        u /* people */ ON" in out
+        assert "LEFT JOIN addresses addr ON" in out
+
+    def test_comment_on_join_without_condition_ends_the_line(self):
+        out, _ = format_sql("SELECT t.a FROM t CROSS JOIN u /* every row */")
+        assert "CROSS JOIN u -- every row\n" in out
+
+    def test_comments_on_table_and_alias_stay_on_the_join_line(self):
+        out, _ = format_sql("SELECT x.a FROM t x LEFT JOIN u /* first */ y /* second */ ON y.id = x.id")
+        assert "LEFT JOIN u y /* first */ /* second */ ON y.id = x.id\n" in out
+        assert format_sql(out)[0] == out
 
 
 class TestGroupByPerLine:

@@ -41,7 +41,7 @@ import sqlglot.expressions as exp
 from sqlglot.dialects.dialect import groupconcat_sql as _groupconcat_sql
 from sqlglot.dialects.duckdb import DuckDB
 
-from jarify.parser import _IFNULL_SENTINEL, FROM_FIRST_JOINS_KEY
+from jarify.parser import _IFNULL_SENTINEL, CTE_COMMENTS_AFTER_AS, FROM_FIRST_JOINS_KEY
 
 if TYPE_CHECKING:
     from jarify.config import JarifyConfig
@@ -697,21 +697,25 @@ class JarifyGenerator(DuckDB.Generator):
             comments = comments + (alias_node.pop_comments() or [])
         alias_sql = self.sql(expression, "alias")
 
+        # A comment written between AS and the opening paren goes after AS,
+        # even one that sat on its own line there. It was written last, so it
+        # also comes last when several comments go above the CTE.
+        after_as = expression.meta.get(CTE_COMMENTS_AFTER_AS) or []
+
         # Comments on their own line before the `)` that closes the body stay
         # at the end of the body.
-        body_end = [c for c in comments if c.strip() in self._closing_paren_comment_texts]
-        comments = [c for c in comments if c.strip() not in self._closing_paren_comment_texts]
-
+        body_end = [c for c in comments if c.strip() in self._closing_paren_comment_texts and c not in after_as]
+        comments = [c for c in comments if c not in body_end]
+        comments = [c for c in comments if c not in after_as] + [c for c in comments if c in after_as]
         if self._leading_comment_texts:
-            lead = [c for c in comments if c.strip() in self._leading_comment_texts]
-            trail = [c for c in comments if c.strip() not in self._leading_comment_texts]
+            lead = [c for c in comments if c.strip() in self._leading_comment_texts and c not in after_as]
+            trail = [c for c in comments if c.strip() not in self._leading_comment_texts or c in after_as]
         else:
             lead, trail = [], comments
 
         trail = [c for c in trail if c.strip()]
         if len(trail) > 1:
-            # Only one `--` comment fits after AS, since it ends the line, and
-            # sqlglot drops comments placed between AS and the opening paren.
+            # Only one `--` comment fits after AS, since it ends the line.
             # Several comments go above the CTE instead, one per line, where
             # own-line comments above a CTE are kept.
             lead, trail = [c for c in comments if c.strip()], []
@@ -809,15 +813,20 @@ class JarifyGenerator(DuckDB.Generator):
         op_sql = self._join_keyword(expression)
         this = expression.this
 
+        condition_follows = bool(expression.args.get("on") or expression.args.get("using"))
+
         if self._join_alias_col is not None and isinstance(this, exp.Table):
             table_ref = self.table_parts(this)
-            alias_str = self._table_alias_str(this)
+            alias_str = self._table_alias_str(this, comment=False)
+            table_comments = self._table_comments_sql(this, sql_follows=condition_follows)
             if alias_str:
                 pad = " " * max(
                     1, self._join_alias_col - len(op_sql) - 1 - len(table_ref) - self._table_alias_width(this)
                 )
-                return self.seg(self._inline_on_sql(expression, f"{op_sql} {table_ref}{pad}{alias_str}"))
-            return self.seg(self._inline_on_sql(expression, f"{op_sql} {table_ref}"))
+                return self.seg(
+                    self._inline_on_sql(expression, f"{op_sql} {table_ref}{pad}{alias_str}{table_comments}")
+                )
+            return self.seg(self._inline_on_sql(expression, f"{op_sql} {table_ref}{table_comments}"))
 
         if self._join_alias_col is not None and isinstance(this, exp.Unnest):
             alias_node = this.args.get("alias")
@@ -836,8 +845,9 @@ class JarifyGenerator(DuckDB.Generator):
         # No alignment path: render table ref, drop AS for simple tables
         if isinstance(this, exp.Table):
             table_ref = self.table_parts(this)
-            alias_str = self._table_alias_str(this)
+            alias_str = self._table_alias_str(this, comment=False)
             this_sql = f"{table_ref} {alias_str}" if alias_str else table_ref
+            this_sql += self._table_comments_sql(this, sql_follows=condition_follows)
         else:
             this_sql = self.sql(this)
 
@@ -864,15 +874,16 @@ class JarifyGenerator(DuckDB.Generator):
         if not isinstance(table, exp.Table):
             return super().from_sql(expression)
 
-        alias_str = self._table_alias_str(table)
+        alias_str = self._table_alias_str(table, comment=False)
         if not alias_str:
             return super().from_sql(expression)
 
         table_ref = self.table_parts(table)
+        table_comments = self._table_comments_sql(table)
         if self._join_alias_col is not None:
             pad = " " * max(1, self._join_alias_col - len("FROM") - 1 - len(table_ref) - self._table_alias_width(table))
-            return self.seg(f"FROM {table_ref}{pad}{alias_str}")
-        return self.seg(f"FROM {table_ref} {alias_str}")
+            return self.seg(f"FROM {table_ref}{pad}{alias_str}{table_comments}")
+        return self.seg(f"FROM {table_ref} {alias_str}{table_comments}")
 
     # ------------------------------------------------------------------
     # FROM/JOIN alignment helpers
@@ -888,16 +899,32 @@ class JarifyGenerator(DuckDB.Generator):
         op = " ".join(part for part in (method, side, kind) if part)
         return f"{op} JOIN" if op else "JOIN"
 
-    def _table_alias_str(self, table: exp.Table) -> str:
+    def _table_alias_str(self, table: exp.Table, *, comment: bool = True) -> str:
         """Return the alias string for a table node, or empty string if none."""
         alias_node = table.args.get("alias")
-        return self.sql(alias_node) if alias_node else ""
+        return self.sql(alias_node, comment=comment) if alias_node else ""
+
+    def _table_comments_sql(self, table: exp.Table, *, sql_follows: bool = False) -> str:
+        """Render the comments on a table reference and on its alias, after the alias.
+
+        table_parts() renders only the table's name, so the comments sqlglot
+        attaches to the table node itself (``JOIN u /* note */ ON``) were lost.
+        generate() writes a comment as ``/* */`` when SQL follows it on the
+        line. Several comments each get a line, except before a JOIN's ``ON``
+        or ``USING``: a comment on its own line there would be lost on the
+        next pass, so they stay on the line as ``/* */``.
+        """
+        alias_node = table.args.get("alias")
+        alias_comments = (alias_node.comments if alias_node else None) or []
+        comments = [c for c in [*(table.comments or []), *alias_comments] if c.strip()]
+        if sql_follows and len(comments) > 1 and not any("*/" in c for c in comments):
+            return "".join(f" /*{_mark_comment_lines(c)}*/" if "\n" in c else f" /* {c.strip()} */" for c in comments)
+        return self._render_comments(comments)
 
     def _table_alias_width(self, table: exp.Table) -> int:
         """Return the alias's width for alignment: without its comments, which
         follow the alias on the line."""
-        alias_node = table.args.get("alias")
-        return len(self.sql(alias_node, comment=False)) if alias_node else 0
+        return len(self._table_alias_str(table, comment=False))
 
     def _inline_on_sql(self, expression: exp.Join, head: str) -> str:
         """Append the ON or USING clause to the JOIN line *head*.

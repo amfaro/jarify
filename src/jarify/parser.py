@@ -62,15 +62,45 @@ class _JarifyDuckDBParser(_DuckDB.Parser):
         return query
 
     def _parse_cte(self) -> _exp.CTE | _exp.FunctionSpecification | None:
+        start = self._index
         cte = super()._parse_cte()
+        if not isinstance(cte, _exp.CTE):
+            return cte
+
+        # sqlglot keeps the comments on a CTE's AS but drops those between AS
+        # and the body's opening paren (`_a AS -- note` survives, `_a AS
+        # MATERIALIZED -- note` and an own-line comment before `(` don't).
+        # Attach them to the CTE, marked so the generator writes them after AS.
+        comments = _comments_before_cte_body(self._tokens[start : self._index])
+        if comments:
+            cte.add_comments(comments)
+            cte.meta[CTE_COMMENTS_AFTER_AS] = comments
+
         # The CTE takes the comments of the `)` that closes its body, unless it
         # already took comments from its AS.  Then sqlglot leaves them to the
         # next node it builds: the WITH clause, which writes them above the
         # statement, or nothing when a comma follows, which deletes them.
-        if isinstance(cte, _exp.CTE) and self._prev_comments and self._prev.token_type == TokenType.R_PAREN:
+        if self._prev_comments and self._prev.token_type == TokenType.R_PAREN:
             cte.add_comments(self._prev_comments)
             self._prev_comments = []
         return cte
+
+
+# Meta key on a CTE node: comments written between its AS and the body's "(".
+CTE_COMMENTS_AFTER_AS = "jarify_comments_after_as"
+
+
+def _comments_before_cte_body(tokens: list[typing.Any]) -> list[str]:
+    """Return the comments on the tokens after a CTE's AS, up to the body's opening paren."""
+    as_index = next((i for i, token in enumerate(tokens) if token.token_type == TokenType.ALIAS), None)
+    if as_index is None:
+        return []
+    comments: list[str] = []
+    for token in tokens[as_index + 1 :]:
+        comments.extend(token.comments)
+        if token.token_type == TokenType.L_PAREN:
+            break
+    return comments
 
 
 class _JarifyDuckDB(_DuckDB):
