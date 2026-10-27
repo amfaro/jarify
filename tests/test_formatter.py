@@ -1236,6 +1236,88 @@ class TestWindowListWrapping:
         assert format_sql(once)[0] == once
 
 
+class TestAggregateOrderByWrapping:
+    """An aggregate with arguments before its ORDER BY wraps like list(x ORDER BY …) (#379)."""
+
+    WIDE = (
+        "SELECT STRING_AGG(some_long_column_name, ', ' ORDER BY another_long_column_name, "
+        "a_third_long_column_name, yet_another_column_name) AS v FROM t GROUP BY ALL"
+    )
+    KEYS = (
+        "nomination_id DESC, created_at DESC, client_id, program_id, nomination_application_id, "
+        "employee_user_id, reporting_period_key"
+    )
+    WRAPPED_KEYS = (
+        "nomination_id DESC",
+        ",created_at DESC",
+        ",client_id",
+        ",program_id",
+        ",nomination_application_id",
+        ",employee_user_id",
+        ",reporting_period_key",
+    )
+
+    def test_wide_string_agg_puts_order_by_below_the_arguments(self):
+        short = "SELECT STRING_AGG(DISTINCT name, ', ' ORDER BY name DESC) AS names FROM t GROUP BY ALL"
+        assert "   STRING_AGG(DISTINCT name, ', ' ORDER BY name DESC) AS names\n" in format_sql(short)[0]
+        out, _ = format_sql(self.WIDE)
+        expected = [
+            "   STRING_AGG(",
+            "     some_long_column_name",
+            "    ,', '",
+            "     ORDER BY another_long_column_name, a_third_long_column_name, yet_another_column_name",
+            "  ) AS v",
+        ]
+        assert "\n".join(expected) in out
+
+    def test_long_string_agg_key_list_puts_one_key_per_line(self):
+        sql = f"SELECT STRING_AGG(nomination_id, ', ' ORDER BY {self.KEYS}) AS ids FROM t GROUP BY ALL"
+        out, _ = format_sql(sql)
+        keys = [" " * (7 if key.startswith(",") else 8) + key for key in self.WRAPPED_KEYS]
+        expected = ["   STRING_AGG(", "     nomination_id", "    ,', '", "     ORDER BY", *keys, "  ) AS ids"]
+        assert "\n".join(expected) in out
+
+    def test_wide_string_agg_with_trailing_commas(self):
+        config = JarifyConfig(leading_commas=False, trailing_commas=True)
+        out, _ = format_sql(self.WIDE, config)
+        expected = [
+            "  STRING_AGG(",
+            "    some_long_column_name,",
+            "    ', '",
+            "    ORDER BY another_long_column_name, a_third_long_column_name, yet_another_column_name",
+            "  ) AS v",
+        ]
+        assert "\n".join(expected) in out
+
+    def test_long_string_agg_key_list_with_trailing_commas(self):
+        config = JarifyConfig(leading_commas=False, trailing_commas=True)
+        sql = f"SELECT STRING_AGG(nomination_id, ', ' ORDER BY {self.KEYS}) AS ids FROM t GROUP BY ALL"
+        out, _ = format_sql(sql, config)
+        assert "    ', '\n    ORDER BY\n      nomination_id DESC,\n      created_at DESC,\n" in out
+        assert "\n      reporting_period_key\n  ) AS ids" in out
+
+    def test_other_aggregates_put_order_by_below_their_arguments(self):
+        sql = (
+            "SELECT arg_max(nomination_application_name, points_awarded ORDER BY created_at DESC, "
+            "nomination_application_id, employee_user_id) AS top_name FROM t GROUP BY ALL"
+        )
+        out, _ = format_sql(sql)
+        expected = [
+            "   ARG_MAX(",
+            "     nomination_application_name",
+            "    ,points_awarded",
+            "     ORDER BY created_at DESC, nomination_application_id, employee_user_id",
+            "  ) AS top_name",
+        ]
+        assert "\n".join(expected) in out
+
+    def test_wrapped_string_agg_is_idempotent(self):
+        sql = f"{self.WIDE[: -len(' FROM t GROUP BY ALL')]}, STRING_AGG(x, ',' ORDER BY {self.KEYS}) AS w FROM t"
+        once, _ = format_sql(sql)
+        assert "STRING_AGG(\n" in once
+        assert format_sql(once)[0] == once
+
+
 class TestJoinTableComments:
     """A comment on a FROM / JOIN table is kept, after the table or its alias (#355)."""
 
@@ -1330,7 +1412,7 @@ class TestInListWrapping:
 
     def test_long_not_in_list_after_and_indents_under_the_condition(self):
         out, _ = format_sql(f"SELECT a FROM t WHERE x = 1 AND c NOT IN {self.LONG} AND y = 2")
-        assert "  AND NOT c IN (\n     'NLD'\n    ,'DEU'\n" in out
+        assert "  AND c NOT IN (\n     'NLD'\n    ,'DEU'\n" in out
         assert "\n    ,'NOR'\n  )\n  AND y = 2\n" in out
 
     def test_in_list_wraps_when_the_whole_expression_is_too_wide(self):
@@ -1371,6 +1453,125 @@ class TestInListWrapping:
     def test_wrapped_in_lists_are_idempotent(self):
         sql = f"SELECT c IN {self.LONG} AS eu, [{self.LONG[1:-1]}] AS l FROM t WHERE c NOT IN {self.LONG}"
         once, _ = format_sql(sql)
+        assert format_sql(once)[0] == once
+
+
+class TestNotAfterOperand:
+    """NOT IN, NOT BETWEEN, NOT SIMILAR TO and NOT GLOB keep NOT after the operand (#379)."""
+
+    def test_not_in_and_not_between_keep_not_after_the_operand(self):
+        out, _ = format_sql(
+            "SELECT a FROM t WHERE a NOT IN (SELECT b FROM u) AND c NOT LIKE 'x%' AND d NOT BETWEEN 1 AND 2"
+        )
+        assert "WHERE a NOT IN (SELECT b FROM u)\n  AND c NOT LIKE 'x%'\n  AND d NOT BETWEEN 1 AND 2\n" in out
+
+    def test_leading_not_is_written_after_the_operand_unless_parenthesized(self):
+        sql = "SELECT a FROM t WHERE NOT a IN (1, 2) AND NOT d BETWEEN 1 AND 2 AND NOT (b IN (3)) AND NOT (c > 3)"
+        out, _ = format_sql(sql)
+        assert "WHERE a NOT IN (1, 2)\n  AND d NOT BETWEEN 1 AND 2\n  AND NOT (b IN (3))\n  AND NOT (c > 3)\n" in out
+
+    def test_not_similar_to_and_not_glob_keep_not_after_the_operand(self):
+        sql = (
+            "SELECT a NOT SIMILAR TO 'x.*' AS s, b NOT GLOB 'x*' AS g, c NOT ILIKE 'x' AS i, "
+            "d IS NOT DISTINCT FROM e AS d, f IS NOT NULL AS n, NOT f AS f2, NOT EXISTS (SELECT 1 FROM u) AS x FROM t"
+        )
+        out, _ = format_sql(sql)
+        for text in ("a NOT SIMILAR TO 'x.*'", "b NOT GLOB 'x*'"):
+            assert text in out
+        # The negations sqlglot already keeps in place are unchanged.
+        for text in ("c NOT ILIKE 'x'", "d IS NOT DISTINCT FROM e", "f IS NOT NULL", "NOT f ", "NOT EXISTS("):
+            assert text in out
+
+    def test_not_in_in_a_select_list_join_filter_and_case(self):
+        sql = (
+            "SELECT CASE WHEN a NOT IN (1) THEN 1 WHEN a NOT BETWEEN 2 AND 3 THEN 2 END AS c, "
+            "COUNT(*) FILTER (WHERE b NOT IN (1)) AS n FROM t INNER JOIN u ON u.a = t.a AND u.b NOT IN (1, 2)"
+        )
+        out, _ = format_sql(sql)
+        for text in (
+            "WHEN a NOT IN (1)",
+            "WHEN a NOT BETWEEN 2 AND 3",
+            "FILTER(WHERE b NOT IN (1))",
+            "ON u.a = t.a AND u.b NOT IN (1, 2)",
+        ):
+            assert text in out
+
+    def test_long_not_in_subquery_takes_the_block_form(self):
+        subquery = (
+            "SELECT user_id FROM excluded_users "
+            "WHERE excluded_reason = 'a reason long enough to put the subquery on its own lines'"
+        )
+        out, _ = format_sql(f"SELECT a FROM t WHERE user_id NOT IN ({subquery})")
+        assert "WHERE user_id NOT IN\n(\n  SELECT\n     user_id\n" in out
+
+    def test_own_line_comment_before_not_in_goes_above_where(self):
+        out, _ = format_sql("SELECT a FROM t WHERE\n-- only active\na NOT IN (1, 2)\nAND b = 1")
+        assert "FROM t\n-- only active\nWHERE a NOT IN (1, 2)\n  AND b = 1\n" in out
+
+    def test_not_in_is_idempotent(self):
+        once, _ = format_sql(
+            "SELECT NOT a IN (1) AS x FROM t WHERE NOT b BETWEEN 1 AND 2 OR c NOT IN (SELECT c FROM u)"
+        )
+        assert "a NOT IN (1)" in once
+        assert format_sql(once)[0] == once
+
+
+class TestConditionLinesAfterConnector:
+    """A multi-line condition after OR / AND keeps its lines under its connector (#379)."""
+
+    VALUES = ", ".join(f"'value_number_{i:02d}'" for i in range(7))
+
+    def _values(self, column: int) -> list[str]:
+        """The wrapped VALUES, with the first value's text starting at *column*."""
+        return [
+            f"{' ' * column}'value_number_00'",
+            *(f"{' ' * (column - 1)},'value_number_{i:02d}'" for i in range(1, 7)),
+        ]
+
+    def test_in_list_after_or_is_indented_under_the_or(self):
+        out, _ = format_sql(f"SELECT a FROM t WHERE a = 1 OR b IN ({self.VALUES})")
+        assert "\n".join(["WHERE a = 1", "   OR b IN (", *self._values(6), "   )", ";"]) in out
+
+    def test_in_list_after_or_with_trailing_commas(self):
+        config = JarifyConfig(leading_commas=False, trailing_commas=True)
+        out, _ = format_sql(f"SELECT a FROM t WHERE a = 1 OR b IN ({self.VALUES})", config)
+        assert "WHERE a = 1\n   OR b IN (\n     'value_number_00',\n     'value_number_01',\n" in out
+        assert "\n     'value_number_06'\n   )\n;" in out
+
+    def test_in_subquery_after_or_is_indented_under_the_or(self):
+        subquery = (
+            "SELECT user_id FROM excluded_users "
+            "WHERE excluded_reason = 'a reason long enough to put the subquery on its own lines'"
+        )
+        out, _ = format_sql(f"SELECT a FROM t WHERE a = 1 OR b IN ({subquery})")
+        assert "WHERE a = 1\n   OR b IN\n   (\n     SELECT\n        user_id\n" in out
+        assert "\n   )\n;" in out
+
+    def test_in_list_in_having_is_indented_under_its_connector(self):
+        out, _ = format_sql(f"SELECT a, COUNT(*) AS n FROM t GROUP BY ALL HAVING COUNT(*) = 1 OR a IN ({self.VALUES})")
+        assert "\n".join(["HAVING COUNT(*) = 1", "    OR a IN (", *self._values(7), "    )"]) in out
+        out, _ = format_sql(f"SELECT a, COUNT(*) AS n FROM t GROUP BY ALL HAVING COUNT(*) = 1 AND a IN ({self.VALUES})")
+        assert "\n".join(["HAVING COUNT(*) = 1", "   AND a IN (", *self._values(6), "   )"]) in out
+
+    def test_in_list_in_commented_join_condition_is_indented_under_the_or(self):
+        out, _ = format_sql(f"SELECT a FROM t INNER JOIN u ON u.a = t.a -- same\nOR u.b IN ({self.VALUES})")
+        # OR is right-aligned under ON, so the condition after it starts where the first one does.
+        or_column = len("INNER JOIN u ON ") - len("OR ")
+        expected = [f"{' ' * or_column}OR u.b IN (", *self._values(or_column + 3), f"{' ' * or_column})"]
+        assert "\n".join(expected) in out
+
+    def test_in_list_in_case_condition_is_indented_under_the_or(self):
+        sql = f"SELECT CASE WHEN a = 1 OR b IN ({self.VALUES}) THEN 'x' WHEN a = 2 THEN 'y' END AS z FROM t"
+        out, _ = format_sql(sql)
+        assert "\n".join(["     WHEN a = 1", "       OR b IN (", *self._values(10), "       )", "     THEN 'x'"]) in out
+
+    def test_wrapped_conditions_after_or_are_idempotent(self):
+        sql = (
+            f"SELECT CASE WHEN a = 1 OR b IN ({self.VALUES}) THEN 1 WHEN a = 2 THEN 2 END AS z FROM t "
+            f"WHERE a = 1 OR (c = 2 AND b IN ({self.VALUES})) OR b IN ({self.VALUES})"
+        )
+        once, _ = format_sql(sql)
+        assert "\n   OR (\n     c = 2\n     AND b IN (\n        'value_number_00'\n" in once
         assert format_sql(once)[0] == once
 
 
@@ -1529,7 +1730,7 @@ class TestCommentsInOneLineConstructs:
         sql = "SELECT list(a ORDER BY b -- oldest\n) AS l, string_agg(a, ',' ORDER BY b -- abc\n) AS s FROM t"
         result, _ = format_sql(sql)
         assert "   list(\n     a ORDER BY b -- oldest\n  ) AS l" in result
-        assert "  ,STRING_AGG(\n     a, ',' ORDER BY b -- abc\n  ) AS s" in result
+        assert "  ,STRING_AGG(\n     a\n    ,',' ORDER BY b -- abc\n  ) AS s" in result
 
     def test_commented_in_list_wraps(self):
         result, _ = format_sql("SELECT a FROM t WHERE a IN (1 -- one\n, 2 -- two\n)")

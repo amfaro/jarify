@@ -82,6 +82,8 @@ Jarify overrides sqlglot's `DuckDB.Generator` to enforce its opinionated style. 
 | `LEFT`/`RIGHT OUTER JOIN` | as written | `LEFT`/`RIGHT JOIN`; `LEFT`/`RIGHT OUTER JOIN` with `explicit_outer_join` | `join_sql()` |
 | `CASE WHEN x THEN y [ELSE z] END` | CASE WHEN form | `if(x, y[, z])` | `if_sql()` + rule in `rules/` |
 | Lambda in a list function | `x -> y` / `LAMBDA x : y` | `lambda x: y` | `lambda_sql()` |
+| `NOT IN` / `NOT BETWEEN` / `NOT SIMILAR TO` / `NOT GLOB` | `NOT a IN (…)` | `a NOT IN (…)` | `not_sql()`, `in_sql()`, `between_sql()` |
+| Aggregate `ORDER BY` (`STRING_AGG(x, sep ORDER BY k)`) | one line | `ORDER BY` on its own line when the call doesn't fit | `func()`, `_ordered_aggregate_sql()` |
 
 When adding a new override, add it to this table.
 

@@ -27,7 +27,8 @@ SELECT
      a ORDER BY b DESC -- newest first
   ) AS c2
   ,STRING_AGG(
-     a, ',' ORDER BY b -- alphabetical
+     a
+    ,',' ORDER BY b -- alphabetical
   ) AS c3
 FROM t
 GROUP BY ALL

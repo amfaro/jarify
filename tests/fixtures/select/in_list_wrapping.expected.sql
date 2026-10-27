@@ -40,7 +40,7 @@ SELECT
    a
 FROM t
 WHERE client_id = 1
-  AND NOT country_code IN (
+  AND country_code NOT IN (
      'NLD'
     ,'DEU'
     ,'POL'

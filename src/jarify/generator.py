@@ -12,12 +12,14 @@ Subclasses sqlglot's DuckDBGenerator to enforce jarify's opinionated rules:
 - CTE: opening paren on its own line, comma-prefix separator
 - Consistent keyword casing; DuckDB functions in lowercase
 - IS NOT NULL preserved (not rewritten to NOT x IS NULL)
+- NOT IN / NOT BETWEEN / NOT SIMILAR TO / NOT GLOB keep NOT after the operand
 - NULLS LAST/FIRST suppressed when it matches DuckDB's default
 - SELECT * FROM t → FROM t (DuckDB FROM-first syntax)
 - JSON extraction casts keep grouping: (json_expr->'path')::type
 - Dynamic JSON extraction paths stay as function calls; only static paths use -> / ->>
 - Struct tuple casts (val, ...)::type use leading-comma style when multi-line
 - DISTINCT inside aggregates appears on its own line when the call wraps
+- An aggregate's ORDER BY goes on its own line, below its arguments, when the call wraps
 - CREATE TABLE: opening paren on its own line, column name/type alignment,
   blank line before table-level constraints
 - Aggregate and window functions (COUNT, SUM, ROW_NUMBER, RANK, …) are uppercase;
@@ -1430,8 +1432,16 @@ class JarifyGenerator(DuckDB.Generator):
             stmts.append("END")
             return stmts
 
-        def _searched_when_prefix(line: str) -> str:
-            return "   " if line.startswith("OR ") else "  "
+        def _searched_when_prefixes(continuation: list[str]) -> list[str]:
+            # AND / OR are right-aligned; the other lines of the condition
+            # after one, such as a wrapped IN list, move right with it.
+            prefixes = []
+            prefix = "  "
+            for line in continuation:
+                if line.startswith(("AND ", "OR ")):
+                    prefix = "   " if line.startswith("OR ") else "  "
+                prefixes.append(prefix)
+            return prefixes
 
         def _build_searched() -> list[str]:
             stmts = ["CASE"]
@@ -1439,8 +1449,7 @@ class JarifyGenerator(DuckDB.Generator):
                 wp_lines = wp.splitlines()
                 stmts.append(f" WHEN {wp_lines[0]}")
                 continuation = wp_lines[1:]
-                prefixes = [_searched_when_prefix(line) for line in continuation]
-                stmts.extend(self._prefix_lines(continuation, prefixes))
+                stmts.extend(self._prefix_lines(continuation, _searched_when_prefixes(continuation)))
                 _append_multiline(stmts, "THEN", tp, prefix=" ", continuation_prefix="  ")
             if default_sql is not None:
                 _append_multiline(stmts, "ELSE", default_sql, prefix=" ", continuation_prefix="  ")
@@ -1560,6 +1569,7 @@ class JarifyGenerator(DuckDB.Generator):
                 isinstance(node, self._INFIX_NODES)
                 or (isinstance(node, exp.Cast) and not isinstance(node, exp.TryCast))  # a::int
                 or (isinstance(node, exp.Not) and isinstance(node.this, exp.Is))  # a IS NOT NULL
+                or (isinstance(node, exp.Not) and self._negated_after_operand(node.this))  # a NOT IN (…)
             )
             node = node.this if starts_with_this and isinstance(node.this, exp.Expr) else None
         return nodes
@@ -1710,7 +1720,10 @@ class JarifyGenerator(DuckDB.Generator):
         The first line starts with the keyword; top-level AND/OR lines are
         right-justified so condition content aligns one column after the
         keyword's last line (e.g. column 6 for WHERE, column 7 for HAVING).
-        An own-line comment lines up with the AND/OR it precedes.
+        The other lines of a condition, such as a wrapped ``IN (…)`` list's
+        values and ``)``, keep their indentation relative to the line the
+        condition starts on: they move right with its AND/OR. An own-line
+        comment lines up with the line it precedes.
         """
         # Force connector_sql to produce multi-line output (for post-processing
         # below) even if the compact form would fit within max_line_length.
@@ -1725,15 +1738,14 @@ class JarifyGenerator(DuckDB.Generator):
         prefixes: list[str] = []
         first_code = self._code_part(lines[0])
         depth = first_code.count("(") - first_code.count(")")
+        # The first condition's lines start at the keyword's column.
+        condition_prefix = ""
 
         for line in lines[1:]:
             if depth == 0 and line.startswith(("AND ", "OR ")):
                 connector_width = len(line.split(" ", 1)[0]) + 1
-                prefixes.append(" " * max(0, keyword_width - connector_width))
-            else:
-                # Pass continuation lines through as-is; child methods (e.g.
-                # in_sql) are responsible for their own relative indentation.
-                prefixes.append("")
+                condition_prefix = " " * max(0, keyword_width - connector_width)
+            prefixes.append(condition_prefix)
             if not self._is_comment_line(line):
                 code = self._code_part(line)
                 depth += code.count("(") - code.count(")")
@@ -1770,27 +1782,37 @@ class JarifyGenerator(DuckDB.Generator):
                a
               ,b
             )
+
+        Under a NOT, the operator is written ``NOT IN`` (see
+        ``_negated_after_operand``).
         """
+        if expression.args.get("unnest"):
+            return super().in_sql(expression)
+        this = self.sql(expression, "this")
+        op = "NOT IN" if self._negated_after_operand(expression) else "IN"
         query = expression.args.get("query")
         if self.pretty and query is not None:
-            this = self.sql(expression, "this")
             compact = self._compact_sql(query.this)
             # A commented subquery can't go on one line (a -- comment would
             # swallow the rest of it).
-            if not self._has_comments(query) and not self.too_wide([f"{this} IN ({compact})"]):
-                return f"{this} IN ({compact})"
+            if not self._has_comments(query) and not self.too_wide([f"{this} {op} ({compact})"]):
+                return f"{this} {op} ({compact})"
             select_sql = self.sql(query.this)
             indented = self.indent(select_sql)
-            return f"{this} IN\n(\n{indented}\n)"
-        is_value_list = not any(expression.args.get(k) for k in ("unnest", "field", "is_global"))
-        if self.pretty and is_value_list and expression.expressions:
-            this = self.sql(expression, "this")
+            return f"{this} {op}\n(\n{indented}\n)"
+        field = expression.args.get("field")
+        is_global = " GLOBAL" if expression.args.get("is_global") else ""
+        if query is not None:
+            in_sql = self.sql(query)
+        elif field is not None:
+            in_sql = self.sql(field)
+        else:
             values = self.expressions(expression, dynamic=True, new_line=True, skip_first=True, skip_last=True)
             # The values alone may fit while the whole `col IN (…)` doesn't.
-            if "\n" not in values and self.too_wide([f"{this} IN ({values})"]):
+            if self.pretty and not is_global and "\n" not in values and self.too_wide([f"{this} {op} ({values})"]):
                 values = self._wrapped_args([self.sql(e) for e in expression.expressions])
-            return f"{this} IN ({values})"
-        return super().in_sql(expression)
+            in_sql = f"({values})"
+        return f"{this}{is_global} {op} {in_sql}"
 
     # ------------------------------------------------------------------
     # Star: expand EXCLUDE / REPLACE / RENAME as multi-line select content
@@ -1842,6 +1864,7 @@ class JarifyGenerator(DuckDB.Generator):
         return self.binary(expression, "!=")
 
     # IS NOT NULL: preserve original form instead of NOT x IS NULL
+    # NOT IN / NOT BETWEEN / NOT SIMILAR TO / NOT GLOB: NOT after the operand
     # ------------------------------------------------------------------
 
     def not_sql(self, expression: exp.Not) -> str:
@@ -1851,7 +1874,44 @@ class JarifyGenerator(DuckDB.Generator):
             # this shortcut never renders, so carry its comments over.
             comments = [*(inner.comments or []), *(inner.expression.comments or [])]
             return self.maybe_comment(f"{self.sql(inner.this)} IS NOT NULL", comments=comments)
+        if self._negated_after_operand(inner):
+            # The predicate writes the NOT itself, after its operand.
+            return self.sql(expression, "this")
         return f"NOT {self.sql(expression, 'this')}"
+
+    @staticmethod
+    def _negated_after_operand(expression: exp.Expr | None) -> bool:
+        """True when *expression* is a predicate its parent NOT negates as ``x NOT IN (…)``.
+
+        sqlglot parses ``a NOT IN (…)`` and ``NOT a IN (…)`` to the same
+        ``Not(In)`` tree, and DuckDB reads both as ``NOT (a IN (…))``. Jarify
+        writes the ``NOT`` after the operand, the form ``NOT LIKE`` and
+        ``IS NOT NULL`` keep. The same goes for ``NOT BETWEEN``, ``NOT SIMILAR
+        TO`` and ``NOT GLOB``. ``NOT (a IN (…))`` keeps its parentheses, so its
+        ``NOT`` stays in front. An ``IN UNNEST`` and a ``BETWEEN SYMMETRIC``,
+        which DuckDB's generator rewrites, keep the leading ``NOT`` too.
+        """
+        if expression is None or not isinstance(expression.parent, exp.Not) or expression.arg_key != "this":
+            return False
+        if isinstance(expression, exp.In):
+            return not expression.args.get("unnest")
+        if isinstance(expression, exp.Between):
+            return not expression.args.get("symmetric")
+        return isinstance(expression, (exp.SimilarTo, exp.Glob))
+
+    def between_sql(self, expression: exp.Between) -> str:
+        if not self._negated_after_operand(expression):
+            return super().between_sql(expression)
+        this = self.sql(expression, "this")
+        low = self.sql(expression, "low")
+        high = self.sql(expression, "high")
+        return f"{this} NOT BETWEEN {low} AND {high}"
+
+    def similarto_sql(self, expression: exp.SimilarTo) -> str:
+        return self.binary(expression, "NOT SIMILAR TO" if self._negated_after_operand(expression) else "SIMILAR TO")
+
+    def glob_sql(self, expression: exp.Glob) -> str:
+        return self.binary(expression, "NOT GLOB" if self._negated_after_operand(expression) else "GLOB")
 
     # ------------------------------------------------------------------
     # format_args: apply leading-comma style when function args wrap
@@ -1988,19 +2048,81 @@ class JarifyGenerator(DuckDB.Generator):
         sql = super().order_sql(expression, flat=flat)
         if not self.pretty or not self.too_wide([sql]):
             return sql
-        keyword = f"ORDER {'SIBLINGS ' if expression.args.get('siblings') else ''}BY"
         if expression.args.get("this") is not None:
-            # An aggregate's `x ORDER BY a, b` is a call argument. When it
-            # doesn't fit, ORDER BY goes on its own line under the argument,
-            # its keys one per line if they don't fit either.
-            keys = self.expressions(expression, flat=True)
-            clause = f"{keyword} {keys}"
-            if self.too_wide([clause]):
-                clause = self._wrapped_list_clause(keyword, expression)
-            return self._argument_lines(f"{self.sql(expression, 'this')}\n{clause}")
+            # An aggregate's `x ORDER BY a, b` is a call argument (calls
+            # rendered through func() lay it out in _ordered_aggregate_sql).
+            return self._order_below_sql(self.sql(expression, "this"), expression)
         if flat and isinstance(expression.parent, exp.Window):
-            return self._argument_lines(self._wrapped_list_clause(keyword, expression))
+            return self._argument_lines(self._wrapped_list_clause(self._order_keyword(expression), expression))
         return sql
+
+    @staticmethod
+    def _order_keyword(expression: exp.Order) -> str:
+        return f"ORDER {'SIBLINGS ' if expression.args.get('siblings') else ''}BY"
+
+    def _order_below_sql(self, arg_sql: str, order: exp.Order) -> str:
+        """Return a call argument with an aggregate's ORDER BY on its own line below it.
+
+        The keys stay on the ORDER BY line while it fits and go one per line
+        otherwise, like a window's. The lines are laid out for one argument
+        of a wrapped call (see _argument_lines).
+        """
+        keyword = self._order_keyword(order)
+        clause = f"{keyword} {self.expressions(order, flat=True)}"
+        if self.too_wide([clause]):
+            clause = self._wrapped_list_clause(keyword, order)
+        return self._argument_lines(f"{arg_sql}\n{clause}")
+
+    # ------------------------------------------------------------------
+    # Aggregate ORDER BY: `list(x ORDER BY k)`, `STRING_AGG(x, sep ORDER BY k)`,
+    # `arg_max(x, y ORDER BY k)` all wrap the same way
+    # ------------------------------------------------------------------
+
+    def func(
+        self,
+        name: str,
+        *args: t.Any,
+        prefix: str = "(",
+        suffix: str = ")",
+        normalize: bool = True,
+    ) -> str:
+        values = [arg for arg in args if arg is not None and not isinstance(arg, bool)]
+        order = values[-1] if values else None
+        if self.pretty and (prefix, suffix) == ("(", ")") and self._is_aggregate_order(order):
+            order = t.cast(exp.Order, order)
+            func_name = self.normalize_func(name) if normalize else name
+            return self._ordered_aggregate_sql(func_name, [*values[:-1], order.this], order)
+        return super().func(name, *args, prefix=prefix, suffix=suffix, normalize=normalize)
+
+    @staticmethod
+    def _is_aggregate_order(arg: t.Any) -> bool:
+        """True when *arg* is an aggregate's ``x ORDER BY …`` argument."""
+        return isinstance(arg, exp.Order) and arg.args.get("this") is not None
+
+    def _ordered_aggregate_sql(self, name: str, args: t.Sequence[exp.Expr | str], order: exp.Order) -> str:
+        """Render the call ``name(args ORDER BY keys)`` of an aggregate with an ORDER BY.
+
+        *args* are the call's arguments; the ORDER BY follows the last one.
+        The call stays on one line while it fits. Otherwise its arguments go
+        one per line, as in any wrapped call, and ORDER BY goes on its own
+        line below them, its keys one per line if they don't fit on it
+        either. A call that wraps only because it carries a comment keeps
+        ORDER BY on its last argument's line (a ``--`` comment then ends
+        the line instead of swallowing the ``)``).
+        """
+        arg_sqls = [self.sql(arg) for arg in args]
+        clause = f"{self._order_keyword(order)} {self.expressions(order, flat=True)}"
+        # The ORDER BY clause's own comments follow its keys, as sql(order) puts them.
+        order_comments = self._inline_comments(order)
+        inline = f"{name}({', '.join(arg_sqls)} {clause})"
+        multiline = any("\n" in sql for sql in [*arg_sqls, clause])
+        if not multiline and not self.too_wide([inline]):
+            if not any(self._has_comments(arg) for arg in [*args, order] if isinstance(arg, exp.Expr)):
+                return inline
+            last = f"{arg_sqls[-1]} {clause}{order_comments}"
+        else:
+            last = self._order_below_sql(arg_sqls[-1], order) + order_comments
+        return f"{name}({self._wrapped_args([*arg_sqls[:-1], last])})"
 
     @staticmethod
     def _is_order_by_all(expression: exp.Order) -> bool:
@@ -2122,11 +2244,22 @@ class JarifyGenerator(DuckDB.Generator):
     # ------------------------------------------------------------------
     # string_agg: prefer string_agg (PostgreSQL-compatible) over the
     # Oracle-style listagg alias that sqlglot's DuckDB generator emits.
-    # ORDER BY inside the aggregate is rendered compactly (non-pretty)
-    # to keep it inline: STRING_AGG(x, ', ' ORDER BY x).
+    # The call wraps like any other: STRING_AGG(x, ', ' ORDER BY x) like
+    # list(x ORDER BY x), STRING_AGG(x, ', ') like any call.
     # ------------------------------------------------------------------
 
     def groupconcat_sql(self, expression: exp.GroupConcat) -> str:
+        this = expression.this
+        if not self.pretty or isinstance(this, exp.Limit):
+            return self._compact_groupconcat_sql(expression)
+        # sqlglot writes the separator a call leaves out: string_agg's default, ','.
+        separator = expression.args.get("separator") or exp.Literal.string(",")
+        if self._is_aggregate_order(this):
+            order = t.cast(exp.Order, this)
+            return self._ordered_aggregate_sql(self.normalize_func("string_agg"), [order.this, separator], order)
+        return self.func("string_agg", this, separator)
+
+    def _compact_groupconcat_sql(self, expression: exp.GroupConcat) -> str:
         # _groupconcat_sql mutates the expression via order.this.pop(); copy to
         # avoid corruption when the generator visits the same node twice (e.g.
         # during AS-alignment width computation and then actual rendering).
@@ -2275,9 +2408,12 @@ class JarifyGenerator(DuckDB.Generator):
         # Non-DISTINCT, compact mode, or DISTINCT that fits inline: emit list(<inner>).
         # format_args wraps a too-wide or commented argument the way list_sql's
         # fallback does; sqlglot parses list(x ORDER BY y) as ArrayAgg, so this
-        # path must match it.
-        inner = self.format_args(expression.this)
-        result = f"{func_name}({inner})"
+        # path must match it. An ORDER BY wraps as in any aggregate (func()).
+        if self.pretty and self._is_aggregate_order(expression.this):
+            order = t.cast(exp.Order, expression.this)
+            result = self._ordered_aggregate_sql(func_name, [order.this], order)
+        else:
+            result = f"{func_name}({self.format_args(expression.this)})"
         return self._add_arrayagg_null_filter(result, expression, expression.this)
 
     def list_sql(self, expression: exp.List) -> str:
