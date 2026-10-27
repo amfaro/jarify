@@ -16,6 +16,7 @@ from jarify.parser import (
     _reinsert_line_rust_fmt_placeholders,
     _restore_ctas_body_placeholders,
     _unmask_rust_fmt_placeholders,
+    keyword_comments,
     parse_sql,
     parse_sql_lenient,
 )
@@ -207,6 +208,60 @@ class TestCteClosingParenComments:
         with_ = tree.args["with_"]
         assert with_.expressions[0].comments == [" as", " end"]
         assert not with_.comments
+
+
+class TestKeywordComments:
+    """The parser keeps the comments sqlglot drops on some keywords (#378)."""
+
+    def test_not_keeps_comments_before_and_after_it(self) -> None:
+        (tree,) = parse_sql("SELECT a FROM t WHERE\n-- before\nNOT -- after\na")
+        not_ = tree.find(exp.Not)
+        assert not_.comments == [" before"]
+        assert keyword_comments(not_, "NOT") == [" after"]
+
+    def test_qualify_keeps_its_comments(self) -> None:
+        (tree,) = parse_sql("SELECT a FROM t\n-- above\nQUALIFY /* after */ ROW_NUMBER() OVER (ORDER BY a) = 1")
+        assert tree.args["qualify"].comments == [" above", " after "]
+
+    @pytest.mark.parametrize("condition", ["ON /* c */ u.id = t.id", "USING /* c */ (id)"])
+    def test_join_keeps_the_comments_on_on_and_using(self, condition: str) -> None:
+        (tree,) = parse_sql(f"SELECT a FROM t JOIN u {condition}")
+        assert tree.args["joins"][0].comments == [" c "]
+
+    def test_nested_join_keeps_its_own_on_comments(self) -> None:
+        (tree,) = parse_sql("SELECT a FROM t JOIN u JOIN v ON /* inner */ v.id = u.id ON /* outer */ u.id = t.id")
+        join = tree.args["joins"][0]
+        assert join.comments == [" outer "]
+        assert join.this.args["joins"][0].comments == [" inner "]
+
+    def test_case_keeps_when_then_and_else_comments(self) -> None:
+        sql = "SELECT CASE /* case */ WHEN /* w */ a THEN /* t */ CASE WHEN b THEN /* inner */ 1 END ELSE /* e */ 2 END"
+        (tree,) = parse_sql(sql)
+        case = tree.find(exp.Case)
+        (branch,) = case.args["ifs"]
+        assert keyword_comments(branch, "WHEN") == [" w "]
+        assert keyword_comments(branch, "THEN") == [" t "]
+        assert keyword_comments(case, "ELSE") == [" e "]
+        assert keyword_comments(branch.args["true"].args["ifs"][0], "THEN") == [" inner "]
+        assert case.comments == [" case "]
+
+    def test_subquery_keeps_comments_before_and_after_its_closing_paren(self) -> None:
+        (tree,) = parse_sql("SELECT s.a FROM (\nSELECT a FROM t\n-- end\n) -- after\ns")
+        subquery = tree.find(exp.Subquery)
+        assert keyword_comments(subquery, ")") == [" end"]
+        assert subquery.comments == [" after"]
+
+    def test_if_keeps_comments_on_if_and_its_closing_paren(self) -> None:
+        (tree,) = parse_sql("SELECT\n-- above\nif(a, 1, 2) -- after\nAS v")
+        assert tree.expressions[0].comments == [" above", " after"]
+
+    def test_filter_keeps_comments_on_its_closing_paren(self) -> None:
+        (tree,) = parse_sql("SELECT count(*) FILTER (WHERE a) -- after\n")
+        assert tree.find(exp.Filter).comments == [" after"]
+
+    def test_set_operation_keeps_comments_on_all_and_by_name(self) -> None:
+        (tree,) = parse_sql("FROM t UNION /* u */ ALL /* a */ BY NAME -- n\nFROM u")
+        assert tree.comments == [" u ", " a ", " n"]
 
 
 class TestRustFmtPlaceholderMasking:

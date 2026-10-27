@@ -359,7 +359,7 @@ WHERE type       = _property_type
 
 ### WHERE — `IN (subquery)` layout
 
-When the full `col IN (SELECT ...)` expression fits on one line within the configured max line length, it stays inline. When it would exceed the threshold, or the subquery contains a comment or a `CASE`, the `(` goes on its own line, the inner query is indented by one level, and `)` closes at the same column as `IN`. (A `--` comment on the inline form would comment out the rest of the line, and a `CASE` is always multi-line; for the same reasons a `FROM (subquery)` holding either is never collapsed onto one line.)
+When the full `col IN (SELECT ...)` expression fits on one line within the configured max line length, it stays inline. When it would exceed the threshold, or the subquery contains a comment, a `CASE` or a `WITH`, the `(` goes on its own line, the inner query is indented by one level, and `)` closes at the same column as `IN`. (A `--` comment on the inline form would comment out the rest of the line, a `CASE` is always multi-line, and a `WITH` lays out its CTEs as at the top level; for the same reasons a `FROM (subquery)` holding any of them is never collapsed onto one line.)
 
 **Bad**
 ```sql
@@ -708,6 +708,36 @@ WITH _tf AS
 )
 ```
 
+The same goes for a subquery in `FROM` or `JOIN`: a comment on its own line before its closing `)` stays at the end of its body. A subquery that holds a `WITH` lays out its CTEs as at the top level.
+
+**Bad** (the comment is dropped, and the CTE is squeezed onto the subquery's line)
+```sql
+SELECT
+   s.a
+FROM (WITH _c AS
+(SELECT a FROM t) SELECT a FROM _c) AS s
+;
+```
+
+**Good**
+```sql
+SELECT
+   s.a
+FROM (
+  WITH _c AS
+  (
+    SELECT
+       a
+    FROM t
+  )
+  SELECT
+     a
+  FROM _c
+  -- keeps every row
+) AS s
+;
+```
+
 ---
 
 ### Predicate comments — keep `OR` / `AND` outside the comment
@@ -760,6 +790,34 @@ WHERE a /* only active rows */ = 1
 -- only active rows
 WHERE a = 1
   AND b = 2
+```
+
+A comment on the keyword itself goes above the line too: one written on or above the `WHERE`, `HAVING` or `QUALIFY` line goes above that clause, and one written before or after a join's `ON` or `USING` goes above the join. So does one after `UNION ALL`, above the `UNION ALL` line. A comment after `NOT` stays after it, as a `/* */` block comment, since the condition follows on its line. Where jarify writes `NOT` after the operand, as in `a NOT IN (…)` or `a IS NOT NULL`, the comment goes at the end of the condition.
+
+**Bad** (the comments are dropped)
+```sql
+SELECT
+   a
+FROM t
+INNER JOIN u ON u.id = t.id
+WHERE NOT a
+QUALIFY
+  ROW_NUMBER() OVER (PARTITION BY a ORDER BY b DESC) = 1
+;
+```
+
+**Good**
+```sql
+SELECT
+   a
+FROM t
+-- same id
+INNER JOIN u ON u.id = t.id
+WHERE NOT /* archived */ a
+-- latest first
+QUALIFY
+  ROW_NUMBER() OVER (PARTITION BY a ORDER BY b DESC) = 1
+;
 ```
 
 ---
@@ -1632,6 +1690,39 @@ SELECT
       ELSE 'other'
     END
   ) AS m
+FROM t
+;
+```
+
+A comment on `WHEN`, `THEN` or `ELSE`, written above the keyword or after it, goes on its own line above the line the keyword starts, as a comment on `AND` / `OR` goes above the connector. In a simple CASE, where `THEN` shares the `WHEN` line, it goes above the `WHEN` line. A single-branch CASE with such a comment stays a CASE instead of becoming `if()`.
+
+**Bad** (the comments are dropped)
+```sql
+SELECT
+   CASE
+     WHEN country = 'SER'
+     THEN 'SRB'
+     WHEN country = 'ROM'
+     THEN 'ROU'
+     ELSE country
+   END AS iso_code
+FROM t
+;
+```
+
+**Good**
+```sql
+SELECT
+   CASE
+     -- legacy codes
+     WHEN country = 'SER'
+     THEN 'SRB'
+     WHEN country = 'ROM'
+     -- renamed in 2002
+     THEN 'ROU'
+     -- already ISO
+     ELSE country
+   END AS iso_code
 FROM t
 ;
 ```
