@@ -420,6 +420,29 @@ ORDER BY
 
 ---
 
+### Window specs — one clause per line when wrapping
+
+A window spec stays on one line when it fits. When it doesn't, each clause (`PARTITION BY`, `ORDER BY`, the frame) goes on its own line, with no commas between them.
+
+**Bad**
+```sql
+SELECT SUM(a.allocation_per_year / 12) OVER (PARTITION BY a.client_id, a.nomination_application_ids, a.employee_user_id ORDER BY m.the_month ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running FROM a
+```
+
+**Good**
+```sql
+SELECT
+   SUM(a.allocation_per_year / 12) OVER (
+     PARTITION BY a.client_id, a.nomination_application_ids, a.employee_user_id
+     ORDER BY m.the_month
+     ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+  ) AS running
+FROM a
+;
+```
+
+---
+
 ### CTE layout
 
 The opening parenthesis goes on its own line. Each subsequent CTE is prefixed with a comma (no space between comma and name).
