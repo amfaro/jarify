@@ -51,6 +51,7 @@ from jarify.parser import (
     CTE_COMMENTS_AFTER_AS,
     FROM_FIRST_JOINS_KEY,
     KEYWORD_COMMENTS,
+    TILDE_OPERATOR_KEY,
     all_keyword_comments,
     keyword_comments,
 )
@@ -2262,6 +2263,14 @@ class JarifyGenerator(DuckDB.Generator):
             return self.maybe_comment(sql, comments=all_keyword_comments(expression))
         return sql
 
+    def regexpfullmatch_sql(self, expression: exp.RegexpFullMatch) -> str:
+        if expression.meta.get(TILDE_OPERATOR_KEY):
+            # Written as `~` (or `!~`): DuckDB versions differ in whether it
+            # matches the whole string, so keep the operator rather than
+            # pick one by naming a function.
+            return self.binary(expression, "!~" if self._negated_after_operand(expression) else "~")
+        return self.function_fallback_sql(expression)
+
     def binary(self, expression: exp.Binary, op: str) -> str:
         if not expression.meta_get(KEYWORD_COMMENTS) or op.startswith("OPERATOR("):
             return super().binary(expression, op)
@@ -2303,6 +2312,8 @@ class JarifyGenerator(DuckDB.Generator):
             return not expression.args.get("unnest")
         if isinstance(expression, exp.Between):
             return not expression.args.get("symmetric")
+        if isinstance(expression, exp.RegexpFullMatch):
+            return bool(expression.meta.get(TILDE_OPERATOR_KEY))
         return isinstance(expression, (exp.SimilarTo, exp.Glob))
 
     def between_sql(self, expression: exp.Between) -> str:
@@ -2356,6 +2367,9 @@ class JarifyGenerator(DuckDB.Generator):
                 and not expression.args.get("joins")
                 and isinstance(from_, exp.From)
                 and isinstance(from_.this, exp.Values)
+                # `FROM (VALUES …) v(id, name)` names its columns; a bare
+                # VALUES would call them col0, col1, … instead.
+                and not from_.this.args.get("alias", exp.TableAlias()).args.get("columns")
             ):
                 return self._cte_values_sql(from_.this)
 
@@ -2444,6 +2458,26 @@ class JarifyGenerator(DuckDB.Generator):
         return f"{self._values_keyword_sql(expression)}\n{body}"
 
     def values_sql(self, expression: exp.Values, values_as_table: bool = True) -> str:
+        if (
+            self.pretty
+            and values_as_table
+            and (expression.args.get("alias") or isinstance(expression.parent, (exp.From, exp.Table)))
+            and not any(expression.args.get(key) for key in ("order", "limit", "offset"))
+        ):
+            # A VALUES table in FROM or JOIN: on one line when it fits,
+            # otherwise laid out like a subquery, the rows under VALUES.
+            # The alias is rendered once, so an unnamed one uses up a single
+            # generated name (_t0, …).
+            alias = self.sql(expression, "alias")
+            alias_sql = f" AS {alias}" if alias else ""
+            if self._may_go_on_one_line(expression):
+                rows = ", ".join(self._compact_sql(row) for row in expression.expressions)
+                compact = f"(VALUES {rows}){alias_sql}"
+                if not self.too_wide([compact]):
+                    return compact
+            rows = self.expressions(expression)
+            body = f"{self._values_keyword_sql(expression)}\n{rows}"
+            return f"(\n{self.indent(body)}\n){alias_sql}"
         sql = super().values_sql(expression, values_as_table=values_as_table)
         if not keyword_comments(expression, "VALUES"):
             return sql
@@ -3008,7 +3042,7 @@ class JarifyGenerator(DuckDB.Generator):
     def schema_sql(self, expression: exp.Schema) -> str:
         this = self.sql(expression, "this")
         sql = self.schema_columns_sql(expression)
-        if this and sql and self.pretty:
+        if this and sql and self.pretty and sql.startswith("(\n"):
             return f"{this}\n{sql}"
         return f"{this} {sql}" if this and sql else this or sql
 
@@ -3017,6 +3051,9 @@ class JarifyGenerator(DuckDB.Generator):
             return ""
         if not self.pretty:
             return super().schema_columns_sql(expression)
+
+        if all(isinstance(e, (exp.Identifier, exp.Column)) for e in expression.expressions):
+            return self._column_names_sql(expression.expressions)
 
         col_defs = [e for e in expression.expressions if isinstance(e, exp.ColumnDef)]
         table_constraints = [e for e in expression.expressions if not isinstance(e, exp.ColumnDef)]
@@ -3054,6 +3091,23 @@ class JarifyGenerator(DuckDB.Generator):
         # Indent each non-blank line by pad spaces; keep blank lines clean
         indented = [(" " * self.pad + line) if line else "" for line in lines]
         body = "\n".join(indented)
+        return f"(\n{body}\n)"
+
+    def _column_names_sql(self, names: list[exp.Expr]) -> str:
+        """Render a list of column names, such as ``INSERT INTO t (a, b)``'s.
+
+        It stays on the line when it fits, and otherwise puts one name per
+        line with leading commas, like a CREATE TABLE's columns.
+        """
+        sqls = [self.sql(name, comment=False) for name in names]
+        compact = f"({', '.join(sqls)})"
+        if not any(name.comments for name in names) and not self.too_wide([compact]):
+            return compact
+        lines: list[str] = []
+        for i, (name, sql) in enumerate(zip(names, sqls, strict=True)):
+            for item_line in self._list_item_lines(sql, name.comments or [], first=i == 0):
+                lines.extend(item_line.split("\n"))
+        body = "\n".join((" " * self.pad + line) if line else "" for line in lines)
         return f"(\n{body}\n)"
 
     def columndef_sql(self, expression: exp.ColumnDef, sep: str = " ") -> str:
