@@ -31,6 +31,7 @@ Subclasses sqlglot's DuckDBGenerator to enforce jarify's opinionated rules:
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import re
 import typing as t
@@ -785,6 +786,11 @@ class JarifyGenerator(DuckDB.Generator):
         return normalized
 
     def join_sql(self, expression: exp.Join) -> str:
+        if self.pretty:
+            # The first ON condition shares the JOIN line, so a comment written
+            # on its own line before it goes above the JOIN. Hoist it before
+            # the keyword normalization below copies the node.
+            self._hoist_leading_comments(expression.args.get("on"), expression)
         has_condition = expression.args.get("on") or expression.args.get("using")
         if not expression.side and not expression.kind and not expression.method:
             if has_condition:
@@ -1065,10 +1071,24 @@ class JarifyGenerator(DuckDB.Generator):
             self._flatten_connector(node.left, terms, ops, op_comments)
             ops.append(op_name)
             if op_comments is not None:
+                if self.pretty and not self._is_select_item(node):
+                    # A comment on its own line after the connector goes above it.
+                    self._hoist_leading_comments(node.right, node)
                 op_comments.append(node.comments or [])
             self._flatten_connector(node.right, terms, ops, op_comments)
         else:
             terms.append(self.sql(node))
+
+    @staticmethod
+    def _is_select_item(node: exp.Expr) -> bool:
+        """True when *node* is a SELECT-list item, bare or under its alias.
+
+        expressions() renders such an item's own comments itself, and sqlglot
+        moves them onto the alias when it parses the output again, so comments
+        moved onto the item would not come back in the same place.
+        """
+        parent = node.parent
+        return isinstance(parent, exp.Alias) or (isinstance(parent, exp.Select) and node.arg_key == "expressions")
 
     def _own_line_comments(self, comments: list[str]) -> list[str]:
         """Render comments as lines that stand on their own, one per comment."""
@@ -1120,7 +1140,18 @@ class JarifyGenerator(DuckDB.Generator):
         if not self._has_comments(expression.this) and not self.too_wide([f"({compact})"]):
             sql = f"({compact})"
         else:
-            sql = super().paren_sql(expression)
+            # A comment on its own line before the first condition inside the
+            # parentheses stays on its own line, after the "(". It documents
+            # that first branch, so AND / OR still break onto their own lines.
+            prev_force = self._connector_force_expand
+            with self._leading_comments_lifted(expression.this) as inner_lead:
+                self._connector_force_expand = prev_force or bool(inner_lead)
+                try:
+                    inner = self.sql(expression, "this")
+                finally:
+                    self._connector_force_expand = prev_force
+            inner = "\n".join([*self._own_line_comments(inner_lead), inner])
+            sql = f"({self.seg(self.indent(inner), sep='')}{self.seg(')', sep='')}"
 
         inline = self._render_comments(trail) if trail else ""
         if lead:
@@ -1302,6 +1333,11 @@ class JarifyGenerator(DuckDB.Generator):
         Falls back to _inline_clause_sql when the top-level is not AND (e.g.
         a bare OR at the top level).
         """
+        if self.pretty and isinstance(expression.parent, (exp.Select, exp.Update, exp.Delete)):
+            # The first condition shares the WHERE line, so a comment written
+            # on its own line before it goes above WHERE. (Not in an aggregate's
+            # FILTER (WHERE …), which stays on the aggregate's line.)
+            self._hoist_leading_comments(expression.this, expression)
         if not self.pretty or not isinstance(expression.this, exp.And):
             return self._inline_clause_sql("WHERE", expression)
 
@@ -1352,8 +1388,89 @@ class JarifyGenerator(DuckDB.Generator):
         """
         if isinstance(condition, exp.And):
             left = self._flatten_and(condition.this, comments)
+            # A comment on its own line after AND goes above it, with the AND's own.
+            self._hoist_leading_comments(condition.expression, condition)
             return left + self._flatten_and(condition.expression, condition.comments or [])
         return [(condition, comments or [])]
+
+    # Nodes whose comments come from an operator token after their first operand
+    # (``=``, ``AND``, ``IN``, ``BETWEEN``), not from the token that starts them.
+    _INFIX_NODES: ClassVar[tuple[type[exp.Expr], ...]] = (exp.Binary, exp.In, exp.Between)
+
+    def _first_token_nodes(self, condition: exp.Expr) -> list[exp.Expr]:
+        """Return the nodes that may hold the comments written before *condition*'s first token.
+
+        sqlglot attaches an own-line comment to the node built from the token
+        after it: the column in ``a = 1``, the ``CAST`` in ``CAST(a AS int) = 1``.
+        Those nodes render their comments after themselves, inside the
+        condition. Walk down the operands that come first, skipping the nodes
+        whose comments belong to an operator token.
+        """
+        nodes: list[exp.Expr] = []
+        node: exp.Expr | None = condition
+        while node is not None:
+            # AND / OR are Funcs too; their comments are the connector's.
+            infix = isinstance(node, exp.Connector) or (
+                isinstance(node, self._INFIX_NODES) and not isinstance(node, exp.Func)
+            )
+            if not infix:
+                nodes.append(node)
+            starts_with_this = (
+                isinstance(node, self._INFIX_NODES)
+                or (isinstance(node, exp.Cast) and not isinstance(node, exp.TryCast))  # a::int
+                or (isinstance(node, exp.Not) and isinstance(node.this, exp.Is))  # a IS NOT NULL
+            )
+            node = node.this if starts_with_this and isinstance(node.this, exp.Expr) else None
+        return nodes
+
+    def _detach_leading_comments(
+        self, condition: exp.Expr | None
+    ) -> tuple[list[str], list[tuple[exp.Expr, list[str]]]]:
+        """Detach the own-line comments written before *condition*'s first token.
+
+        Returns the comments, and each node they came from with its original
+        comment list, so a caller can put them back.
+        """
+        lead: list[str] = []
+        detached: list[tuple[exp.Expr, list[str]]] = []
+        if condition is None or not self._leading_comment_texts:
+            return lead, detached
+        for node in self._first_token_nodes(condition):
+            comments = node.comments or []
+            node_lead = [c for c in comments if c.strip() in self._leading_comment_texts]
+            if node_lead:
+                detached.append((node, comments))
+                lead.extend(node_lead)
+                node.comments = [c for c in comments if c.strip() not in self._leading_comment_texts]
+        return lead, detached
+
+    def _hoist_leading_comments(self, condition: exp.Expr | None, owner: exp.Expr) -> None:
+        """Move the own-line comments written before *condition* onto *owner*.
+
+        *owner* renders its comments on their own line(s) before the line that
+        starts the condition: a WHERE, HAVING or JOIN renders them above its
+        keyword, an AND / OR above the connector. Moving them, rather than
+        rendering them here, keeps a node that is rendered twice (once to
+        measure it) from losing them.
+        """
+        lead, _ = self._detach_leading_comments(condition)
+        if lead:
+            owner.add_comments(lead)
+
+    @contextlib.contextmanager
+    def _leading_comments_lifted(self, condition: exp.Expr | None) -> t.Iterator[list[str]]:
+        """Detach the own-line comments written before *condition* while the block runs.
+
+        Yields them, for the caller to render on their own line(s) before the
+        condition, and puts them back afterwards: a node that is rendered twice
+        (once to measure it) must find them again.
+        """
+        lead, detached = self._detach_leading_comments(condition)
+        try:
+            yield lead
+        finally:
+            for node, comments in detached:
+                node.comments = comments
 
     def _has_comments(self, expression: exp.Expr | None) -> bool:
         """Return True when expression or any descendant carries SQL comments."""
@@ -1395,7 +1512,24 @@ class JarifyGenerator(DuckDB.Generator):
         return result
 
     def having_sql(self, expression: exp.Having) -> str:
+        if self.pretty:
+            # Like WHERE: a comment before the first condition goes above HAVING.
+            self._hoist_leading_comments(expression.this, expression)
         return self._inline_clause_sql("HAVING", expression)
+
+    def qualify_sql(self, expression: exp.Qualify) -> str:
+        """Render QUALIFY with its condition on the next line, as sqlglot does.
+
+        A comment written on its own line before the condition stays there,
+        between QUALIFY and the condition. (A comment on or above the QUALIFY
+        line itself is dropped by sqlglot's parser, so it can't go there.)
+        """
+        if not self.pretty:
+            return super().qualify_sql(expression)
+        with self._leading_comments_lifted(expression.this) as lead:
+            this = self.sql(expression, "this")
+        body = "\n".join([*self._own_line_comments(lead), this])
+        return f"{self.seg('QUALIFY')}{self.sep()}{self.indent(body)}"
 
     def _inline_clause_sql(self, keyword: str, expression: exp.Expr) -> str:
         """Format a clause (WHERE/HAVING) with the first condition inline.

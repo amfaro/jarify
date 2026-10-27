@@ -669,7 +669,7 @@ WHERE 1 = 1
   )
 ```
 
-The same holds for comments on the top-level branches of `WHERE`, `HAVING`, `QUALIFY`, `JOIN … ON` and `CASE WHEN` conditions. A trailing comment stays at the end of its branch's line. A comment on its own line before `AND` / `OR` stays on its own line, aligned with that `AND` / `OR`; a comment written just after the `AND` / `OR` moves to its own line above it.
+The same holds for comments on the top-level branches of `WHERE`, `HAVING`, `QUALIFY`, `JOIN … ON` and `CASE WHEN` conditions. A trailing comment stays at the end of its branch's line. A comment on its own line before `AND` / `OR` stays on its own line, aligned with that `AND` / `OR`; a comment written after the `AND` / `OR`, on its line or on the next, moves to its own line above it.
 
 **Bad** (comments dropped, or `OR` commented out)
 ```sql
@@ -684,6 +684,21 @@ WHERE a IS NOT NULL -- has a
    -- b only matters when a is missing
    OR b IS NOT NULL
    OR c > 0 -- fallback
+```
+
+The first condition shares its line with `WHERE`, `HAVING` or `JOIN … ON`, so a comment written before it goes on its own line above that line, where a comment written on the `WHERE` line also goes. `QUALIFY` puts its condition on the next line, so the comment stays between `QUALIFY` and the condition. Inside parentheses, a comment before the first branch stays on its own line after the `(`, as in the first example.
+
+**Bad** (the comment lands inside the condition)
+```sql
+WHERE a /* only active rows */ = 1
+  AND b                        = 2
+```
+
+**Good**
+```sql
+-- only active rows
+WHERE a = 1
+  AND b = 2
 ```
 
 ---
@@ -1003,7 +1018,7 @@ CROSS JOIN UNNEST(o.group_by_values) gbv(group_by_value)
 
 If any entry in the block is a subquery (multi-line), alignment is skipped for the entire block, but `ON` is still kept inline.
 
-An `ON` condition that carries comments can't stay on one line, because a `--` comment would swallow the rest of it. It is laid out like `WHERE` instead: the first condition stays on the `JOIN` line, and each `AND` / `OR` goes on its own line, right-justified so the conditions line up after `ON`. A single commented condition stays inline.
+An `ON` condition that carries comments can't stay on one line, because a `--` comment would swallow the rest of it. It is laid out like `WHERE` instead: the first condition stays on the `JOIN` line, and each `AND` / `OR` goes on its own line, right-justified so the conditions line up after `ON`. A single commented condition stays inline. A comment written on its own line before the first condition goes above the `JOIN` line (see [Predicate comments](#predicate-comments--keep-or--and-outside-the-comment)).
 
 ```sql
 SELECT
