@@ -7,8 +7,8 @@ import re
 from sqlglot.dialects.dialect import Dialect
 from sqlglot.errors import ParseError, TokenError
 from sqlglot.expressions import Expression
+from sqlglot.tokens import Token, TokenType
 from sqlglot.tokens import Tokenizer as SqlglotTokenizer
-from sqlglot.tokens import TokenType
 
 from jarify.comment_overrides import parse_comment_overrides
 from jarify.config import JarifyConfig
@@ -224,10 +224,10 @@ def _find_leading_comment_texts(sql: str) -> frozenset[str]:
     """Return stripped texts of comments that appear on their own line before a token.
 
     A comment is "leading" when it occupies the region between the previous
-    token's end and the current token's start in the source text.  This lets
-    the generator distinguish ``-- note\nfoo`` (leading) from ``foo -- note``
-    (trailing) even though sqlglot stores both in the same ``node.comments``
-    list.
+    token's end and the current token's start in the source text, on a line
+    of its own (see :func:`_own_line_comment_in`).  This lets the generator
+    distinguish ``-- note\nfoo`` (leading) from ``foo -- note`` (trailing)
+    even though sqlglot stores both in the same ``node.comments`` list.
 
     See also :func:`_find_trailing_sep_comment_texts` for comments that appear
     on their own line *after* an expression but before its following comma
@@ -236,6 +236,7 @@ def _find_leading_comment_texts(sql: str) -> frozenset[str]:
     from sqlglot.tokens import TokenType
 
     tokens = SqlglotTokenizer().tokenize(sql)
+    inline_blocks = _inline_block_comment_texts(sql, tokens)
     leading: set[str] = set()
     for idx, tok in enumerate(tokens):
         if not tok.comments:
@@ -245,7 +246,7 @@ def _find_leading_comment_texts(sql: str) -> frozenset[str]:
         prev_type = tokens[idx - 1].token_type if idx > 0 else None
         for comment in tok.comments:
             stripped = comment.strip()
-            if not stripped or not _line_comment_in(before, stripped):
+            if not stripped or not _own_line_comment_in(before, comment):
                 continue
             # When the owning token is a comma AND the preceding token is a
             # plain expression (not a closing paren), sqlglot's parser moves
@@ -255,7 +256,7 @@ def _find_leading_comment_texts(sql: str) -> frozenset[str]:
             if tok.token_type == TokenType.COMMA and prev_type != TokenType.R_PAREN:
                 continue
             leading.add(stripped)
-    return frozenset(leading)
+    return frozenset(leading - inline_blocks)
 
 
 def _find_trailing_sep_comment_texts(sql: str) -> frozenset[str]:
@@ -276,6 +277,7 @@ def _find_trailing_sep_comment_texts(sql: str) -> frozenset[str]:
     from sqlglot.tokens import TokenType
 
     tokens = SqlglotTokenizer().tokenize(sql)
+    inline_blocks = _inline_block_comment_texts(sql, tokens)
     trailing_sep: set[str] = set()
     for idx, tok in enumerate(tokens):
         if not tok.comments or tok.token_type != TokenType.COMMA:
@@ -289,9 +291,49 @@ def _find_trailing_sep_comment_texts(sql: str) -> frozenset[str]:
         before = sql[prev_end : tok.start]
         for comment in tok.comments:
             stripped = comment.strip()
-            if stripped and _line_comment_in(before, stripped):
+            if stripped and _own_line_comment_in(before, comment):
                 trailing_sep.add(stripped)
-    return frozenset(trailing_sep)
+    return frozenset(trailing_sep - inline_blocks)
+
+
+def _own_line_comment_in(text: str, comment: str) -> bool:
+    """Return True when *text*, the source before the token that owns *comment*,
+    holds the comment on a line of its own.
+
+    A ``--`` comment always ends its line.  A ``/* */`` comment counts when a
+    line break follows it before the token: one on the line above a column
+    does, while ``/* note */ col`` does not.  A comment never starts on the
+    previous token's line, since sqlglot gives such a comment to the previous
+    token, so nothing needs checking before it.
+    """
+    if _line_comment_in(text, comment.strip()):
+        return True
+    block = f"/*{comment}*/"
+    start = text.find(block)
+    return start != -1 and "\n" in text[start + len(block) :]
+
+
+def _inline_block_comment_texts(sql: str, tokens: list[Token]) -> frozenset[str]:
+    """Return stripped texts of block comments that share a line with the token that owns them.
+
+    The generator tells comments apart by their text alone.  When the same
+    block comment is written on a line of its own in one place and next to
+    SQL in another (the same commented-out columns, say), both get the inline
+    placement, which never moves a comment away from the SQL it follows.
+    """
+    inline: set[str] = set()
+    for idx, tok in enumerate(tokens):
+        if not tok.comments:
+            continue
+        prev_end = tokens[idx - 1].end if idx > 0 else 0
+        next_start = tokens[idx + 1].start if idx + 1 < len(tokens) else len(sql)
+        before = sql[prev_end : tok.start]
+        after = sql[tok.end + 1 : next_start]
+        for comment in tok.comments:
+            block = f"/*{comment}*/"
+            if block in after or (block in before and not _own_line_comment_in(before, comment)):
+                inline.add(comment.strip())
+    return frozenset(inline)
 
 
 def _find_closing_paren_comment_texts(sql: str) -> frozenset[str]:

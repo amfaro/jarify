@@ -525,7 +525,7 @@ class TestBlockCommentLines:
     def test_commented_out_columns_between_columns_keep_their_lines(self):
         sql = "SELECT\n   a\n  /* testing\n  ,b\n  */\n  ,d\nFROM t\n;\n"
         result, _ = format_sql(sql)
-        assert "   a /* testing\n  ,b\n  */\n  ,d\n" in result
+        assert "   a\n  /* testing\n  ,b\n  */\n  ,d\n" in result
         assert format_sql(result)[0] == result
 
     def test_comment_lines_without_leading_space_are_kept(self):
@@ -540,6 +540,61 @@ class TestBlockCommentLines:
         assert not warnings
         assert "ORDER BY\n   a /* o\n   p */\n;" in result
         assert format_sql(result)[0] == result
+
+
+class TestOwnLineBlockComments:
+    """A block comment on its own line keeps a line of its own, like a ``--`` comment (#362).
+
+    Regression: between SELECT columns it was pulled onto the end of the
+    previous column's line.
+    """
+
+    def test_block_comment_between_columns_stays_on_its_own_line(self):
+        sql = "SELECT\n   a\n  ,b\n  /* ,c\n  ,d */\n  ,e\nFROM t\n;\n"
+        result, _ = format_sql(sql)
+        assert result == sql
+        assert format_sql(result)[0] == result
+
+    def test_one_line_block_comment_between_columns_gets_its_own_line(self):
+        result, _ = format_sql("SELECT\n   a\n  /* note */\n  ,b\nFROM t\n")
+        assert "   a\n  -- note\n  ,b\n" in result
+
+    def test_block_comment_before_the_first_column_stays_above_it(self):
+        result, _ = format_sql("SELECT\n  /* several\n  lines */\n   a\n  ,b\nFROM t\n")
+        assert "SELECT\n   /* several\n  lines */\n   a\n  ,b\n" in result
+        assert format_sql(result)[0] == result
+
+    def test_block_comment_after_a_column_stays_on_its_line(self):
+        result, _ = format_sql("SELECT\n   a /* first */\n  ,b /* spans\n  lines */\n  ,c\nFROM t\n")
+        assert "   a -- first\n  ,b /* spans\n  lines */\n  ,c\n" in result
+
+    def test_block_comment_above_a_cte_stays_above_it(self):
+        sql = "WITH _a AS (SELECT 1 AS x)\n/* about _b */\n,_b AS (SELECT 2 AS y)\nSELECT x, y FROM _a, _b\n"
+        result, _ = format_sql(sql)
+        assert ")\n-- about _b\n,_b AS\n(" in result
+
+    def test_same_block_comment_on_its_own_line_and_after_sql_keeps_the_inline_placement(self):
+        # Comments are matched by text, so the two can't be placed differently;
+        # the one after `,e` must not move to the line above it.
+        comment = "/* ,b\n  ,c */"
+        sql = f"SELECT\n   a\n  ,e\n  {comment}\nFROM t\n;\n\nSELECT\n   a\n  ,e {comment}\nFROM t\n;\n"
+        result, _ = format_sql(sql)
+        assert f"  ,e {comment}\nFROM t\n" in result
+        assert format_sql(result)[0] == result
+
+    def test_comment_written_in_two_places_is_not_duplicated(self):
+        sql = "SELECT\n   a\n  ,b\n  -- x\n  ,e\nFROM t\n;\n\nSELECT\n   a\n  ,b\n  -- x\nFROM t\n;\n"
+        result, _ = format_sql(sql)
+        assert result.count("-- x") == 2
+        assert "  ,b\n  -- x\n  ,e\n" in result
+        assert format_sql(result)[0] == result
+
+    def test_own_line_block_comments_are_found(self):
+        from jarify.formatter import _find_leading_comment_texts, _find_trailing_sep_comment_texts
+
+        sql = "SELECT\n  /* lead */\n   a /* trailing */\n  /* sep\n  lines */\n  ,b\n  /* inline */ ,c\nFROM t"
+        assert _find_leading_comment_texts(sql) == {"lead"}
+        assert _find_trailing_sep_comment_texts(sql) == {"sep\n  lines"}
 
 
 def test_searched_case_puts_then_on_its_own_line_and_expands_connectors():

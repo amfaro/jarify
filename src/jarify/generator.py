@@ -391,20 +391,29 @@ class JarifyGenerator(DuckDB.Generator):
                     and e.comments
                     and (self._leading_comment_texts or self._trailing_sep_comment_texts)
                 ):
-                    lead = [c for c in e.comments if c.strip() in self._leading_comment_texts]
                     trail_sep = [c for c in e.comments if c.strip() in self._trailing_sep_comment_texts]
+                    # Both sets match comments by text, so a comment written in
+                    # two places can be in both; write it once, after the column.
+                    lead = [
+                        c
+                        for c in e.comments
+                        if c.strip() in self._leading_comment_texts
+                        and c.strip() not in self._trailing_sep_comment_texts
+                    ]
                     trail = [
                         c
                         for c in e.comments
                         if c.strip() not in self._leading_comment_texts
                         and c.strip() not in self._trailing_sep_comment_texts
                     ]
+                    # Own-line comments keep a line of their own; a multi-line
+                    # block comment keeps its lines as written.
                     for c in lead:
-                        result_sqls.append(f" {prefix}-- {c.strip()}")
+                        result_sqls.append(f" {prefix}{self._render_comments([c], leading=True)}")
                     inline = self._render_comments(trail)
                     result_sqls.append(f"{leader}{prefix}{sql}{inline}")
                     for c in trail_sep:
-                        result_sqls.append(f"{prefix}-- {c.strip()}")
+                        result_sqls.append(f"{prefix}{self._render_comments([c], leading=True)}")
                 else:
                     inline = self._inline_comments(e) if isinstance(e, exp.Expr) else ""
                     result_sqls.append(f"{leader}{prefix}{sql}{inline}")
@@ -1115,7 +1124,7 @@ class JarifyGenerator(DuckDB.Generator):
 
         inline = self._render_comments(trail) if trail else ""
         if lead:
-            rendered_lead = "\n".join(f"-- {c.strip()}" for c in lead if c.strip())
+            rendered_lead = self._render_comments(lead, leading=True)
             return f"{rendered_lead}\n{sql}{inline}" if rendered_lead else f"{sql}{inline}"
         return f"{sql}{inline}"
 
