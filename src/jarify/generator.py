@@ -40,6 +40,7 @@ from typing import TYPE_CHECKING, ClassVar
 import sqlglot.expressions as exp
 from sqlglot.dialects.dialect import groupconcat_sql as _groupconcat_sql
 from sqlglot.dialects.duckdb import DuckDB
+from sqlglot.helper import name_sequence
 
 from jarify.parser import _IFNULL_SENTINEL, CTE_COMMENTS_AFTER_AS, FROM_FIRST_JOINS_KEY
 
@@ -64,6 +65,22 @@ def _mark_comment_lines(comment: str) -> str:
 def restore_comment_lines(sql: str) -> str:
     """Put the lines of multi-line block comments back exactly as written."""
     return _MARKED_COMMENT_LINE_RE.sub(lambda m: "\n " if m.group(1) == _COMMENT_SPACE_MARK else "\n", sql)
+
+
+# Column-alias alignment measures where each SELECT list and star REPLACE /
+# RENAME list starts once the statement is rendered (see
+# JarifyGenerator._measure_alias_prefixes). Each such list is numbered in its
+# node's meta, and while measuring, the leader character that starts the
+# list's first line is swapped for a mark: one character from Unicode's
+# supplementary private use area, offset by the list's number, so widths
+# stay the same.
+_ALIAS_LIST_KEY = "jarify_alias_list"
+_ALIAS_LIST_MARK_BASE = 0xF0000
+_ALIAS_LIST_MARK_LAST = 0xFFFFD
+_ALIAS_LIST_MARK_RE = re.compile(f"[{chr(_ALIAS_LIST_MARK_BASE)}-{chr(_ALIAS_LIST_MARK_LAST)}]")
+# Measuring passes before jarify settles for the last prefixes measured. A
+# second pass is needed only when the first pass's estimate was wrong.
+_ALIAS_PREFIX_PASSES = 3
 
 
 def _jarify_struct_sql(self: JarifyGenerator, expression: exp.Struct) -> str:
@@ -191,6 +208,8 @@ class JarifyGenerator(DuckDB.Generator):
         self._lowercase_func_overrides = frozenset(name.lower() for name in config.lowercase_functions)
         self._as_align_width: int | None = None  # set during SELECT expression rendering
         self._tree_as_align_column: int | None = None  # visible AS column target per statement tree during generate()
+        self._alias_prefixes: dict[int, int] = {}  # measured text column of each aligned list, by list number
+        self._alias_probe: dict[int, set[int]] | None = None  # while measuring: prefixes each list was given
         self._col_name_align: int | None = None  # set during CREATE TABLE column rendering
         self._col_type_align: int | None = None  # set during CREATE TABLE column rendering
         self._join_alias_col: int | None = None  # set during FROM/JOIN block rendering
@@ -233,13 +252,90 @@ class JarifyGenerator(DuckDB.Generator):
         return sql
 
     def _generate_once(self, expression: exp.Expr, copy: bool) -> str:
-        saved_align = self._tree_as_align_column
-        if self.pretty:
-            self._tree_as_align_column = self._compute_tree_as_align_column(expression)
-        try:
+        if not self.pretty:
             return restore_comment_lines(super().generate(expression, copy=copy))
+        saved_align, saved_prefixes = self._tree_as_align_column, self._alias_prefixes
+        if copy:
+            expression = expression.copy()
+        try:
+            self._alias_prefixes = self._measure_alias_prefixes(expression)
+            self._tree_as_align_column = self._compute_tree_as_align_column(expression)
+            return restore_comment_lines(super().generate(expression, copy=False))
         finally:
-            self._tree_as_align_column = saved_align
+            self._tree_as_align_column, self._alias_prefixes = saved_align, saved_prefixes
+
+    def _measure_alias_prefixes(self, expression: exp.Expr) -> dict[int, int]:
+        """Return the column each aligned list's text starts in, by list number.
+
+        Aligning ``AS`` to a visible column needs the width of everything
+        before a list's text on its lines. That indentation comes from
+        whatever encloses the list (CTE and subquery parentheses, a macro
+        body, a star's REPLACE block) and is known only once the statement
+        is rendered. So the statement is rendered with each list's first
+        line marked (see ``_mark_alias_list``), and the columns the marks
+        land in are read back. When those differ from the prefixes the
+        rendering used, it is rendered again with the measured ones. The
+        marked output is thrown away; the caller renders the statement again
+        with the prefixes returned here.
+
+        Lists are numbered in node meta, which copies keep, so a list still
+        matches its measurement when rendering goes through a copy (a bare
+        JOIN's INNER JOIN copy, the FROM-first copy of a SELECT). A
+        statement with fewer than two column aliases aligns nothing, so it
+        isn't measured. Each measuring pass names unnamed table aliases
+        (``_t0``, ``_t1``, …) from its own sequence, so the caller's
+        rendering gets the names it would get without measuring.
+        """
+        aliases = sum(isinstance(alias.parent, (exp.Select, exp.Star)) for alias in expression.find_all(exp.Alias))
+        if aliases < 2:
+            return {}
+        for number, node in enumerate(expression.find_all(exp.Select, exp.Star)):
+            node.meta[_ALIAS_LIST_KEY] = number
+
+        outer_align, next_name = self._tree_as_align_column, self._next_name
+        prefixes: dict[int, int] = {}
+        for _ in range(_ALIAS_PREFIX_PASSES):
+            self._alias_prefixes = prefixes
+            self._alias_probe = {}
+            self._next_name = name_sequence("_t")
+            try:
+                tree = expression.copy()
+                self._tree_as_align_column = self._compute_tree_as_align_column(tree)
+                sql = super().generate(tree, copy=False)
+                used = self._alias_probe
+            finally:
+                self._alias_probe = None
+                self._tree_as_align_column, self._next_name = outer_align, next_name
+
+            measured: dict[int, int] = {}
+            for line in sql.split("\n"):
+                for mark in _ALIAS_LIST_MARK_RE.finditer(line):
+                    number = ord(mark.group()) - _ALIAS_LIST_MARK_BASE
+                    if number in used:
+                        measured.setdefault(number, mark.start() + 1)
+            if all(used[number] == {prefix} for number, prefix in measured.items()):
+                break
+            prefixes = {**prefixes, **measured}
+        return prefixes
+
+    def _alias_list_prefix(self, node: exp.Expr, estimate: int) -> int:
+        """Return the measured text column of the list ``node`` heads, else ``estimate``."""
+        number = node.meta_get(_ALIAS_LIST_KEY)
+        if number is None:
+            return estimate
+        prefix = self._alias_prefixes.get(number, estimate)
+        if self._alias_probe is not None:
+            self._alias_probe.setdefault(number, set()).add(prefix)
+        return prefix
+
+    def _mark_alias_list(self, node: exp.Expr, sql: str) -> str:
+        """While measuring, swap the leader that starts a list's first line for the list's mark."""
+        number = node.meta_get(_ALIAS_LIST_KEY)
+        if self._alias_probe is None or number is None or not sql:
+            return sql
+        if _ALIAS_LIST_MARK_BASE + number > _ALIAS_LIST_MARK_LAST:
+            return sql
+        return chr(_ALIAS_LIST_MARK_BASE + number) + sql[1:]
 
     @staticmethod
     def _swallowing_comment_texts(sql: str, texts: set[str]) -> set[str]:
@@ -376,7 +472,8 @@ class JarifyGenerator(DuckDB.Generator):
                 self._tree_as_align_column - prefix_width
                 if self._tree_as_align_column is not None
                 else self._snap_to_alias_guide(
-                    self._compute_as_align_width(list(expressions_list)), prefix_width=prefix_width
+                    self._compute_as_align_width(list(expressions_list), prefix_width=prefix_width),
+                    prefix_width=prefix_width,
                 )
             )
 
@@ -421,6 +518,8 @@ class JarifyGenerator(DuckDB.Generator):
         finally:
             self._as_align_width = saved_align
 
+        if is_select and result_sqls:
+            result_sqls[0] = self._mark_alias_list(t.cast(exp.Select, expression), result_sqls[0])
         result_sql = "\n".join(s.rstrip() for s in result_sqls)
         # dynamic=True means "wrap only if necessary" — stay inline when content fits.
         # Commented items never go inline: a -- comment would swallow the rest of the line.
@@ -552,10 +651,14 @@ class JarifyGenerator(DuckDB.Generator):
     def _select_expression_prefix_width(self, select: exp.Select) -> int:
         """Return visible prefix width before a SELECT-list expression.
 
-        In pretty mode, each expression line gets the generator pad plus the
-        leading-comma marker (` ` for the first row, `,` for subsequent rows).
-        Every ancestor SELECT adds one more indent level around the nested
-        statement, so nested CTEs/subqueries shift the visible `AS` column.
+        That's the 0-based column the expressions' text starts in, as
+        ``_measure_alias_prefixes`` measured it in the rendered statement.
+        Before it's measured, it's estimated: each expression line gets the
+        generator pad plus the leading-comma marker (` ` for the first row,
+        `,` for subsequent rows), and every ancestor SELECT adds one indent
+        level. That's right for a top-level query and its CTEs, not for every
+        context (a macro body, a CTE of a UNION), which the measurement
+        corrects.
         """
         ancestor_selects = 0
         parent = select.parent
@@ -563,7 +666,18 @@ class JarifyGenerator(DuckDB.Generator):
             if isinstance(parent, exp.Select):
                 ancestor_selects += 1
             parent = parent.parent
-        return self.pad + 1 + (ancestor_selects * self._indent)
+        return self._alias_list_prefix(select, self.pad + 1 + (ancestor_selects * self._indent))
+
+    def _star_list_prefix_width(self, star: exp.Star) -> int:
+        """Return the visible prefix width before a star's REPLACE or RENAME expressions.
+
+        Measured like a SELECT list's. The estimate: ``star_sql`` puts the
+        lists three columns right of the star, which starts where the
+        enclosing SELECT list's text does.
+        """
+        parent = star.parent
+        select_prefix = self._select_expression_prefix_width(parent) if isinstance(parent, exp.Select) else self.pad + 1
+        return self._alias_list_prefix(star, select_prefix + 3)
 
     def _collect_as_alignment_metrics(self, expressions_list: list) -> tuple[list[int], int]:
         """Return ``(column_widths, alias_count)`` for a SELECT expression list.
@@ -1701,7 +1815,7 @@ class JarifyGenerator(DuckDB.Generator):
             saved_align = self._as_align_width
             payload_expressions = list(expression.args.get(key) or [])
             if key in ("replace", "rename"):
-                prefix_width = self.pad + 4
+                prefix_width = self._star_list_prefix_width(expression)
                 self._as_align_width = self._snap_to_alias_guide(
                     self._compute_as_align_width(payload_expressions, prefix_width=prefix_width),
                     prefix_width=prefix_width,
@@ -1712,6 +1826,8 @@ class JarifyGenerator(DuckDB.Generator):
                 self._as_align_width = saved_align
             if not payload:
                 continue
+            if key in ("replace", "rename"):
+                payload = self._mark_alias_list(expression, payload)
             lines.append(f" {keyword} (")
             lines.extend(f"   {line}" for line in payload.splitlines())
             lines.append(" )")
