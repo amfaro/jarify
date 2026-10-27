@@ -1516,6 +1516,48 @@ class TestCtesInSubqueries:
         assert "     THEN (\n        WITH c AS\n" in out
 
 
+class TestNestedJoins:
+    """A nested join keeps its inner join, written as a parenthesized group (#386)."""
+
+    def test_nested_join_is_kept_in_parentheses(self):
+        out, _ = format_sql("SELECT t.a FROM t JOIN u JOIN v ON v.id = u.id ON u.id = t.id")
+        assert out == (
+            "SELECT\n   t.a\nFROM t\nINNER JOIN (\n  u\n  INNER JOIN v ON v.id = u.id\n) ON u.id = t.id\n;\n"
+        )
+        assert format_sql(out)[0] == out
+
+    def test_nested_join_with_using_is_kept(self):
+        out, _ = format_sql("SELECT t.a FROM t JOIN u JOIN v USING (id) USING (id)")
+        assert "INNER JOIN (\n  u\n  INNER JOIN v USING (id)\n) USING (id)\n" in out
+
+    def test_group_aliases_align_like_a_from_clause(self):
+        sql = (
+            "SELECT tt.a FROM tbl tt LEFT JOIN (users uu JOIN visits vv ON vv.uid = uu.id "
+            "LEFT JOIN x.yy_things y ON y.vid = vv.id) ON uu.id = tt.uid"
+        )
+        out, _ = format_sql(sql)
+        assert (
+            "LEFT JOIN (\n"
+            "  users                uu\n"
+            "  INNER JOIN visits    vv ON vv.uid = uu.id\n"
+            "  LEFT JOIN x.yy_things y ON y.vid = vv.id\n"
+            ") ON uu.id = tt.uid\n"
+        ) in out
+
+    def test_deeper_nesting_keeps_every_join(self):
+        out, _ = format_sql("SELECT t.a FROM t JOIN u JOIN v JOIN w ON w.id = v.id ON v.id = u.id ON u.id = t.id")
+        assert (
+            "INNER JOIN (\n"
+            "  u\n"
+            "  INNER JOIN (\n"
+            "    v\n"
+            "    INNER JOIN w ON w.id = v.id\n"
+            "  ) ON v.id = u.id\n"
+            ") ON u.id = t.id\n"
+        ) in out
+        assert format_sql(out)[0] == out
+
+
 class TestGroupByPerLine:
     def test_group_by_multi_column_one_per_line(self):
         # When all non-agg columns are in GROUP BY, the formatter rewrites to GROUP BY ALL.
