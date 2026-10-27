@@ -745,6 +745,31 @@ Jarify places a multi-line `/* … */` comment like any other comment but never 
 )
 ```
 
+A block comment on a line of its own keeps a line of its own, as a `--` comment there does: between two `SELECT` columns it stays between them, above the first column or above a CTE it stays above it. One that fits on one line is written as a `--` comment.
+
+**Bad** (the commented-out columns are pulled onto the line of `,b`)
+```sql
+SELECT
+   a
+  ,b /* ,c
+  ,d */
+  ,e
+FROM t
+;
+```
+
+**Good**
+```sql
+SELECT
+   a
+  ,b
+  /* ,c
+  ,d */
+  ,e
+FROM t
+;
+```
+
 ---
 
 ### Table aliases — `AS` omitted in `FROM`/`JOIN`, required in `SELECT`

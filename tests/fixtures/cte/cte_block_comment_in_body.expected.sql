@@ -14,7 +14,8 @@ WITH _managers AS
 ,_admins AS
 (
   SELECT
-     pa.user_id AS root_user_id /* add in for testing
+     pa.user_id AS root_user_id
+    /* add in for testing
     ,pa.client_id
     */
     ,u.user_id
