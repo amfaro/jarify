@@ -85,5 +85,8 @@ tasks:
         bash -c 'UV_PUBLISH_TOKEN="$PYPI_TOKEN_JARIFY" mise run release:publish'
     env:
       DRY_RUN: ${{ init.dry-run }}
+      # git/clone's credential helper reads GITHUB_TOKEN when pushing the tag;
+      # gh reads GH_TOKEN.
+      GITHUB_TOKEN: ${{ vaults.rwx-github-workflows.github-apps.amfaro-rwx-workflows-management.token }}
       GH_TOKEN: ${{ vaults.rwx-github-workflows.github-apps.amfaro-rwx-workflows-management.token }}
       DOPPLER_TOKEN: ${{ vaults.jarify.secrets.DOPPLER_TOKEN }}
