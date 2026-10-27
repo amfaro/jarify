@@ -416,6 +416,32 @@ WHERE client_id = 1
 WHERE rec_status_key IN ('nom_status_denied', 'nom_status_draft')
 ```
 
+After `OR`, a wrapped list is laid out as after `AND`: its values and `)` move right with the connector, so `)` lines up under the `OR`. The same goes for the block form of an `IN (subquery)`, and for a condition after `OR` or `AND` in `HAVING`, in a commented `JOIN … ON` and under a `CASE`'s `WHEN`.
+
+**Bad**
+```sql
+WHERE client_id = 1
+   OR rec_status_key IN (
+   'nom_status_denied'
+  ,'nom_status_draft'
+  ,'nom_status_expired_draft'
+  ,'nom_status_pending_approval'
+  ,'nom_status_terminated'
+)
+```
+
+**Good**
+```sql
+WHERE client_id = 1
+   OR rec_status_key IN (
+      'nom_status_denied'
+     ,'nom_status_draft'
+     ,'nom_status_expired_draft'
+     ,'nom_status_pending_approval'
+     ,'nom_status_terminated'
+   )
+```
+
 ---
 
 ### `GROUP BY` — one expression per line
@@ -1139,6 +1165,24 @@ WHERE end_date IS NOT NULL
 
 ---
 
+### `NOT IN`, `NOT BETWEEN` — `NOT` after the operand
+
+`NOT IN`, `NOT BETWEEN`, `NOT SIMILAR TO` and `NOT GLOB` keep `NOT` after the operand, as `NOT LIKE` and `IS NOT NULL` do. A `NOT` written in front of such a predicate, as in `NOT a IN (1, 2)`, moves after the operand too: DuckDB reads both forms as `NOT (a IN (1, 2))`. A `NOT` in front of parentheses, as in `NOT (a IN (1, 2))`, stays where it is.
+
+**Bad**
+```sql
+WHERE NOT user_id IN (SELECT user_id FROM excluded_users)
+  AND NOT created_on BETWEEN '2024-01-01' AND '2024-12-31'
+```
+
+**Good**
+```sql
+WHERE user_id NOT IN (SELECT user_id FROM excluded_users)
+  AND created_on NOT BETWEEN '2024-01-01' AND '2024-12-31'
+```
+
+---
+
 ### `NULLS LAST` — suppressed when it matches DuckDB default
 
 DuckDB orders `ASC` columns `NULLS LAST` by default. When the explicit `NULLS LAST` matches that default it is dropped. `NULLS FIRST` (non-default) is always preserved.
@@ -1311,13 +1355,14 @@ FROM t
 
 ### `ORDER BY` inside aggregates — own line when wrapping
 
-An aggregate's `ORDER BY` stays on its argument's line while `expr ORDER BY …` fits, as in `list(a ORDER BY b)`. When it doesn't, the call wraps and `ORDER BY` goes on its own line, lined up with the argument. A key list that still doesn't fit puts one key per line, as in a window spec.
+An aggregate with an `ORDER BY` stays on one line while the whole call fits, as in `list(a ORDER BY b)` or `STRING_AGG(a, ', ' ORDER BY b)`. When it doesn't, the call wraps: its arguments go one per line, like any wrapped call's, and `ORDER BY` goes on its own line below them, lined up with them. A key list that still doesn't fit puts one key per line, as in a window spec. `STRING_AGG`'s separator and the other arguments of an aggregate such as `arg_max` count as arguments.
 
 **Bad**
 ```sql
 SELECT
    list({'nomination_id': nomination_id, 'created_at': created_at, 'created_on': created_at::date} ORDER BY created_at DESC, nomination_id DESC) AS noms
   ,list(nomination_id ORDER BY created_at DESC, nomination_id DESC, client_id, program_id, nomination_application_id, employee_user_id, reporting_period_key) AS ids
+  ,STRING_AGG(nomination_application_name, ', ' ORDER BY nomination_application_name, nomination_application_id DESC, created_at DESC) AS names
 FROM t
 GROUP BY ALL
 ```
@@ -1340,6 +1385,11 @@ SELECT
        ,employee_user_id
        ,reporting_period_key
   ) AS ids
+  ,STRING_AGG(
+     nomination_application_name
+    ,', '
+     ORDER BY nomination_application_name, nomination_application_id DESC, created_at DESC
+  ) AS names
 FROM t
 GROUP BY ALL
 ;
