@@ -120,3 +120,82 @@ def test_mask_sqlmesh_runtime_tokens_avoids_source_marker_collisions():
     assert "__jsm0__ AS existing_marker" in masked
     assert all(marker not in sql for marker in mapping)
     assert unmask_sqlmesh_runtime_tokens(masked, mapping) == sql
+
+
+def test_split_macro_statements_are_opaque():
+    sql = (
+        "MODEL (name foo.bar);\n\n@DEF(db, 'X');\n@DEF(schema, 'dbo');\n\n\nselect a from @read_parquet(@db, @schema)\n"
+    )
+    segments = split_sqlmesh_segments(sql)
+    assert [(s.kind, s.text) for s in segments] == [
+        ("opaque", "MODEL (name foo.bar);\n\n@DEF(db, 'X');\n@DEF(schema, 'dbo');\n\n\n"),
+        ("sql", "select a from @read_parquet(@db, @schema)\n"),
+    ]
+
+
+def test_split_macro_statement_keeps_comments_above_it():
+    sql = (
+        "MODEL (name foo.bar);\n"
+        "select 1;  -- about select\n"
+        "\n"
+        "/*\nblock ; note\n*/\n"
+        "-- line note\n"
+        "@ensure_sql_macro('n');\n"
+        "\n"
+        "-- about the query\n"
+        "select 2\n"
+    )
+    segments = split_sqlmesh_segments(sql)
+    assert [(s.kind, s.text) for s in segments] == [
+        ("opaque", "MODEL (name foo.bar);\n"),
+        ("sql", "select 1;  -- about select\n"),
+        ("opaque", "\n/*\nblock ; note\n*/\n-- line note\n@ensure_sql_macro('n');\n\n"),
+        ("sql", "-- about the query\nselect 2\n"),
+    ]
+
+
+def test_split_post_statement_macro_keeps_trailing_comments():
+    sql = "select 1;\n@grant_select('r');  -- grant\n-- end of model\n"
+    segments = split_sqlmesh_segments(sql)
+    assert [(s.kind, s.text) for s in segments] == [
+        ("sql", "select 1;\n"),
+        ("opaque", "@grant_select('r');  -- grant\n-- end of model\n"),
+    ]
+
+
+def test_split_macro_statement_alone_is_opaque():
+    sql = "@DEF(x, 1);\n"
+    assert [(s.kind, s.text) for s in split_sqlmesh_segments(sql)] == [("opaque", sql)]
+
+
+def test_split_multiline_macro_call_ignores_parens_and_semicolons_in_strings_and_comments():
+    macro = "@DEF(\n  x,\n  ['a;b', ')']  -- not the end );\n);\n"
+    sql = macro + "select @x\n"
+    segments = split_sqlmesh_segments(sql)
+    assert [(s.kind, s.text) for s in segments] == [
+        ("opaque", macro),
+        ("sql", "select @x\n"),
+    ]
+
+
+def test_split_macro_statements_chained_on_one_line_are_opaque():
+    sql = "@DEF(x, 1); @DEF(y, 2);\nselect @x\n"
+    segments = split_sqlmesh_segments(sql)
+    assert [(s.kind, s.text) for s in segments] == [
+        ("opaque", "@DEF(x, 1); @DEF(y, 2);\n"),
+        ("sql", "select @x\n"),
+    ]
+
+
+def test_split_macro_statement_sharing_a_line_with_sql_stays_sql():
+    for sql in ("@DEF(x, 1); select @x\n", "select 1; @post();\n"):
+        assert [(s.kind, s.text) for s in split_sqlmesh_segments(sql)] == [("sql", sql)]
+
+
+def test_split_macro_calls_inside_statements_stay_sql():
+    for sql in (
+        "select @tenantize(a) as a from @read_parquet(@db, 'x');\n",
+        "@x(1) + 1;\n",
+        "@post()\n",
+    ):
+        assert [(s.kind, s.text) for s in split_sqlmesh_segments(sql)] == [("sql", sql)]

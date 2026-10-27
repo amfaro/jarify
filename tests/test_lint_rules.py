@@ -524,3 +524,13 @@ class TestSQLMeshSyntax:
         sql = "MODEL (name foo.bar);\nTHIS IS NOT VALID SQL @@@!!!\n"
         rules = _lint(sql)
         assert "parse-error" in rules
+
+    def test_macro_pre_statement_no_parse_error(self):
+        sql = (
+            "MODEL (name foo.bar);\n"
+            "@IF(\n  @runtime_stage = 'evaluating',\n  CREATE TABLE IF NOT EXISTS x (a INT)\n);\n"
+            "SELECT * FROM t\n"
+        )
+        rules = _lint(sql, prefer_from_first=False)
+        assert "parse-error" not in rules
+        assert "no-select-star" in rules

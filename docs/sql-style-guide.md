@@ -1191,7 +1191,7 @@ FROM orders
 
 ### Statement terminator
 
-Every statement ends with a semicolon on its own line, followed by a blank line.
+Every statement ends with a semicolon on its own line, followed by a blank line. SQLMesh macro statements, described next, are the exception.
 
 **Bad**
 ```sql
@@ -1242,6 +1242,44 @@ FROM t
 SELECT b
 FROM u
 */
+```
+
+---
+
+### SQLMesh macro statements — kept as written
+
+In a SQLMesh model, Jarify keeps the `MODEL (...)` block as written. It does the same for each top-level statement that is only a macro call followed by `;`: `@DEF(...)` definitions and pre- or post-statements such as `@ensure_sql_macro(...)`. The statement keeps its own line and its `;`, and the comments above it and the blank lines around it are kept too. The model's query and other SQL statements are formatted as usual, including macros used inside them, such as `FROM @read_parquet(...)`.
+
+A macro statement that shares a line with other SQL is formatted like any other statement.
+
+**Bad**
+```sql
+MODEL (
+  name sales.orders,
+);
+
+-- Where the source files live.
+@DEF(source_db, 'X');
+@DEF(source_schema, 'dbo');
+
+select id, amount from @read_parquet(@source_db, @source_schema, 'orders')
+```
+
+**Good**
+```sql
+MODEL (
+  name sales.orders,
+);
+
+-- Where the source files live.
+@DEF(source_db, 'X');
+@DEF(source_schema, 'dbo');
+
+SELECT
+   id
+  ,amount
+FROM @read_parquet(@source_db, @source_schema, 'orders')
+;
 ```
 
 ---
