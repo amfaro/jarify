@@ -883,6 +883,63 @@ class TestOrderByAll:
         assert "ORDER BY\n" not in out
 
 
+class TestInListWrapping:
+    LONG = (
+        "('NLD', 'DEU', 'POL', 'ISR', 'FRA', 'GBR', 'ITA', 'ESP', 'AUT', 'BEL', 'SWE', "
+        "'CHE', 'ROU', 'CZE', 'DNK', 'PRT', 'FIN', 'HUN', 'GRC', 'UKR', 'IRL', 'NOR')"
+    )
+
+    def test_long_in_list_puts_one_value_per_line(self):
+        out, _ = format_sql(f"SELECT a FROM t WHERE c IN {self.LONG}")
+        assert "WHERE c IN (\n   'NLD'\n  ,'DEU'\n" in out
+        assert "\n  ,'NOR'\n)\n;" in out
+
+    def test_long_not_in_list_after_and_indents_under_the_condition(self):
+        out, _ = format_sql(f"SELECT a FROM t WHERE x = 1 AND c NOT IN {self.LONG} AND y = 2")
+        assert "  AND NOT c IN (\n     'NLD'\n    ,'DEU'\n" in out
+        assert "\n    ,'NOR'\n  )\n  AND y = 2\n" in out
+
+    def test_in_list_wraps_when_the_whole_expression_is_too_wide(self):
+        column = "a_really_quite_long_column_name_that_pushes_the_line_past_the_limit"
+        values = "('value_one', 'value_two', 'value_three', 'value_four', 'value_five')"
+        out, _ = format_sql(f"SELECT a FROM t WHERE {column} IN {values}")
+        assert f"WHERE {column} IN (\n   'value_one'\n  ,'value_two'\n" in out
+        # With a short column name the same values fit on the line.
+        out, _ = format_sql(f"SELECT a FROM t WHERE c IN {values}")
+        assert f"WHERE c IN {values}\n" in out
+
+    def test_long_in_list_with_trailing_commas(self):
+        config = JarifyConfig(leading_commas=False, trailing_commas=True)
+        out, _ = format_sql(f"SELECT a FROM t WHERE c IN {self.LONG}", config)
+        assert "WHERE c IN (\n  'NLD',\n  'DEU',\n" in out
+        assert "\n  'NOR'\n)\n;" in out
+
+    def test_long_list_literal_puts_one_item_per_line(self):
+        items = ", ".join(f"'item_number_{i:02d}'" for i in range(8))
+        out, _ = format_sql(f"SELECT [{items}] AS l")
+        assert "   [\n     'item_number_00'\n    ,'item_number_01'\n" in out
+        assert "\n    ,'item_number_07'\n  ] AS l" in out
+
+    def test_long_pivot_in_list_stays_on_the_for_line(self):
+        values = ", ".join(f"'category_number_{i:02d}'" for i in range(6))
+        out, _ = format_sql(f"FROM t PIVOT (SUM(amount) FOR category IN ({values}))")
+        assert "PIVOT(SUM(amount) FOR category IN (\n   'category_number_00'\n" in out
+        assert "\n  ,'category_number_05'\n))" in out
+
+    def test_pivot_fields_are_not_separated_by_commas(self):
+        # Wrapping the space-separated FOR fields in leading-comma style wrote
+        # `,b IN (…)`, which DuckDB rejects.
+        a = ", ".join(f"'a_value_number_{i:02d}'" for i in range(3))
+        b = ", ".join(f"'b_value_number_{i:02d}'" for i in range(3))
+        out, _ = format_sql(f"FROM t PIVOT (SUM(amount) FOR a IN ({a}) b IN ({b}))")
+        assert f"FOR a IN ({a}) b IN ({b}))" in out
+
+    def test_wrapped_in_lists_are_idempotent(self):
+        sql = f"SELECT c IN {self.LONG} AS eu, [{self.LONG[1:-1]}] AS l FROM t WHERE c NOT IN {self.LONG}"
+        once, _ = format_sql(sql)
+        assert format_sql(once)[0] == once
+
+
 class TestTrailingRustFmtPlaceholder:
     """Trailing whole-line Rust format placeholders must land *before* the
     statement-terminating semicolon, not after it.

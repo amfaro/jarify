@@ -416,9 +416,15 @@ class JarifyGenerator(DuckDB.Generator):
         commented = dynamic and any(isinstance(e, exp.Expr) and self._has_comments(e) for e in expressions_list)
         if dynamic and not commented and not self.too_wide(result_sqls):
             return sep.join(s.lstrip(",").lstrip() for s in result_sqls)
-        if dynamic and commented and new_line:
-            # Put the items between their own ( and ) lines, like wrapped call
-            # arguments, so the last item's comment can't swallow the ")".
+        if dynamic and new_line:
+            if not commented and sep.strip() != ",":
+                # Space-separated clauses, such as a PIVOT's `FOR col IN (…)`
+                # fields, stay on their line; each one wraps on its own.
+                return sep.join(s.lstrip(",").lstrip() for s in result_sqls)
+            # A bracketed list that doesn't fit, such as an IN list or a list
+            # literal, puts its items between their own ( and ) lines, like
+            # wrapped call arguments. That also keeps the last item's comment
+            # from swallowing the ")".
             return self.indent("\n" + result_sql + "\n", skip_first=True, skip_last=True)
         return self.indent(result_sql, skip_first=skip_first, skip_last=skip_last) if indent else result_sql
 
@@ -1442,10 +1448,11 @@ class JarifyGenerator(DuckDB.Generator):
 
     # ------------------------------------------------------------------
     # IN (subquery): opening paren on its own line
+    # IN (value, …): one value per line, like wrapped call arguments
     # ------------------------------------------------------------------
 
     def in_sql(self, expression: exp.In) -> str:
-        """Render IN with a subquery inline when it fits, multiline otherwise.
+        """Render IN inline when it fits, multiline otherwise.
 
         When the compact form ``col IN (SELECT ...)`` fits within
         ``max_line_length``, it is kept on a single line.  Only when the
@@ -1457,7 +1464,14 @@ class JarifyGenerator(DuckDB.Generator):
               SELECT ...
             )
 
-        Falls back to the base generator for IN with a value list.
+        A value list likewise stays inline while ``col IN (a, b)`` fits.
+        Otherwise, or when a value carries a comment, the values go one per
+        line in leading-comma style, like wrapped call arguments::
+
+            col IN (
+               a
+              ,b
+            )
         """
         query = expression.args.get("query")
         if self.pretty and query is not None:
@@ -1470,6 +1484,14 @@ class JarifyGenerator(DuckDB.Generator):
             select_sql = self.sql(query.this)
             indented = self.indent(select_sql)
             return f"{this} IN\n(\n{indented}\n)"
+        is_value_list = not any(expression.args.get(k) for k in ("unnest", "field", "is_global"))
+        if self.pretty and is_value_list and expression.expressions:
+            this = self.sql(expression, "this")
+            values = self.expressions(expression, dynamic=True, new_line=True, skip_first=True, skip_last=True)
+            # The values alone may fit while the whole `col IN (…)` doesn't.
+            if "\n" not in values and self.too_wide([f"{this} IN ({values})"]):
+                values = self._wrapped_args([self.sql(e) for e in expression.expressions])
+            return f"{this} IN ({values})"
         return super().in_sql(expression)
 
     # ------------------------------------------------------------------

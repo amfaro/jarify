@@ -386,6 +386,38 @@ WHERE program_key IN
 
 ---
 
+### WHERE — `IN (…)` value list layout
+
+When the full `col IN (a, b, …)` expression fits on one line within the configured max line length, it stays inline. When it would exceed the threshold, or a value carries a comment, the values go one per line in leading-comma style, like wrapped function arguments: `IN (` ends its line, and `)` gets a line of its own, lined up with the start of the line that holds `IN (`. The same layout applies to an `IN` list in a `SELECT` list or a `PIVOT`, and a long list literal (`[…]`) wraps the same way.
+
+**Bad**
+```sql
+SELECT rec_id FROM recs WHERE client_id = 1 AND rec_status_key IN ('nom_status_denied', 'nom_status_draft', 'nom_status_expired_draft', 'nom_status_pending_approval', 'nom_status_terminated')
+```
+
+**Good — long list puts one value per line**
+```sql
+SELECT
+   rec_id
+FROM recs
+WHERE client_id = 1
+  AND rec_status_key IN (
+     'nom_status_denied'
+    ,'nom_status_draft'
+    ,'nom_status_expired_draft'
+    ,'nom_status_pending_approval'
+    ,'nom_status_terminated'
+  )
+;
+```
+
+**Good — short list stays inline**
+```sql
+WHERE rec_status_key IN ('nom_status_denied', 'nom_status_draft')
+```
+
+---
+
 ### `GROUP BY` — one expression per line
 
 Every `GROUP BY` expression is on its own line using the same leading-comma style as `SELECT`. `GROUP BY ALL` is exempt and stays on one line.
