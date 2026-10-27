@@ -5,5 +5,6 @@ SELECT
      THEN 'big'
      ELSE 'small'
    END
-FROM t -- jarify: enable prefer-if-over-case
+FROM t
 ;
+-- jarify: enable prefer-if-over-case

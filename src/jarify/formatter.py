@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import re
 
-from sqlglot.errors import ParseError
+from sqlglot.dialects.dialect import Dialect
+from sqlglot.errors import ParseError, TokenError
 from sqlglot.expressions import Expression
 from sqlglot.tokens import Tokenizer as SqlglotTokenizer
+from sqlglot.tokens import TokenType
 
 from jarify.comment_overrides import parse_comment_overrides
 from jarify.config import JarifyConfig
@@ -17,6 +19,7 @@ from jarify.parser import (
     _mask_ifnull,
     _mask_numeric,
     _mask_rust_fmt_placeholders,
+    _read_dialect,
     _reinsert_line_rust_fmt_placeholders,
     _restore_ctas_body_placeholders,
     _unmask_ifnull,
@@ -90,6 +93,14 @@ def _format_sql_core(sql: str, config: JarifyConfig) -> tuple[str, list[FormatWa
     masked_sql = _mask_ifnull(masked_sql)
     masked_sql = _mask_numeric(masked_sql)
 
+    # Comments after the last statement stay out of the parse and are emitted
+    # verbatim after its closing semicolon.
+    masked_sql, trailing = _split_trailing_comments(masked_sql, config.dialect)
+    trailing = _unmask_rust_fmt_placeholders(
+        unmask_sqlmesh_runtime_tokens(_unmask_ifnull(_unmask_numeric(trailing)), sqlmesh_mask),
+        inline_mask,
+    )
+
     try:
         trees = parse_sql(masked_sql, dialect=config.dialect)
     except ParseError as exc:
@@ -100,7 +111,8 @@ def _format_sql_core(sql: str, config: JarifyConfig) -> tuple[str, list[FormatWa
             result = unmask_sqlmesh_runtime_tokens(result, sqlmesh_mask)
             result = _unmask_rust_fmt_placeholders(result, inline_mask)
             result = _reinsert_line_rust_fmt_placeholders(result, line_insertions)
-            return _restore_ctas_body_placeholders(result, ctas_body_map), warnings
+            result = _restore_ctas_body_placeholders(result, ctas_body_map)
+            return _append_trailing_comments(result, trailing), warnings
         warnings.append(FormatWarning(f"could not parse SQL (formatting skipped): {exc}"))
         return sql, warnings
 
@@ -135,7 +147,70 @@ def _format_sql_core(sql: str, config: JarifyConfig) -> tuple[str, list[FormatWa
     result = _reinsert_line_rust_fmt_placeholders(formatted, line_insertions)
     if formatted_parts:
         result = result.rstrip() + "\n;\n"
-    return _restore_ctas_body_placeholders(result, ctas_body_map), warnings
+    result = _restore_ctas_body_placeholders(result, ctas_body_map)
+    return _append_trailing_comments(result, trailing), warnings
+
+
+# ---------------------------------------------------------------------------
+# Comments after the last statement
+# ---------------------------------------------------------------------------
+
+
+def _split_trailing_comments(sql: str, dialect: str) -> tuple[str, str]:
+    """Split the comments that follow the last statement off ``sql``.
+
+    Returns ``(body, trailing)``.  sqlglot attaches these comments to the last
+    token (a final ``;`` becomes an empty statement holding them), and the
+    generator would render them on one line, where a ``--`` comment swallows
+    the comments and commented-out SQL after it.
+
+    *trailing* starts right after the final ``;``.  When the last statement
+    has no ``;``, it starts at the first line break after the last token that
+    is not inside a block comment, so a comment on that token's line stays
+    with it.  *trailing* is empty when no comment follows the last statement,
+    and is the whole input when the input holds only comments.
+    """
+    dialect_obj = Dialect.get_or_raise(_read_dialect(dialect))
+    try:
+        tokens = dialect_obj.tokenize(sql)
+    except TokenError:
+        return sql, ""
+    if not tokens:
+        return ("", sql) if sql.strip() else (sql, "")
+    last = tokens[-1]
+    if not last.comments:
+        return sql, ""
+
+    start = cut = last.end + 1
+    if last.token_type != TokenType.SEMICOLON:
+        while True:
+            cut = sql.find("\n", cut)
+            if cut < 0:
+                return sql, ""
+            try:
+                dialect_obj.tokenize(sql[start:cut])
+                break
+            except TokenError:
+                # This line break is inside a block comment; try the next one.
+                cut += 1
+
+    if not sql[cut:].strip():
+        return sql, ""
+    return sql[:cut], sql[cut:]
+
+
+def _append_trailing_comments(result: str, trailing: str) -> str:
+    """Append the comments split off by :func:`_split_trailing_comments`.
+
+    They follow the closing ``;`` exactly as written: the same line breaks and
+    blank lines, and no ``;`` after them.  Only trailing whitespace at the end
+    of the file is normalized to a single newline.
+    """
+    if not trailing:
+        return result
+    if not result.strip():
+        return trailing.strip() + "\n"
+    return result.rstrip() + trailing.rstrip() + "\n"
 
 
 # ---------------------------------------------------------------------------
@@ -254,6 +329,8 @@ def _try_pivot_order_by_workaround(sql: str, config: JarifyConfig) -> str | None
 
     rules = get_default_rules(config)
     generator = JarifyGenerator(config)
+    generator._leading_comment_texts = _find_leading_comment_texts(pivot_sql)
+    generator._trailing_sep_comment_texts = _find_trailing_sep_comment_texts(pivot_sql)
 
     # Format every statement; ORDER BY attaches only to the last one (the PIVOT)
     formatted_parts = [generator.generate(_apply_rules(t, rules)) for t in trees]

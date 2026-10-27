@@ -519,6 +519,26 @@ WITH _programs AS -- this is where we filter by parameters
 )
 ```
 
+Only one `--` comment fits after `AS`, because it runs to the end of the line. When a CTE carries several comments, they all go above the CTE, one per line, where own-line comments above a CTE already stay.
+
+**Bad**
+```sql
+,_reverse_sorted AS -- rev_seq comes from seq, so rows that still tie -- can't pair the two differently between builds.
+(
+  SELECT ...
+)
+```
+
+**Good**
+```sql
+-- rev_seq comes from seq, so rows that still tie
+-- can't pair the two differently between builds.
+,_reverse_sorted AS
+(
+  SELECT ...
+)
+```
+
 ---
 
 ### Predicate comments — keep `OR` / `AND` outside the comment
@@ -539,6 +559,31 @@ WHERE 1 = 1
     (a = 1)
     OR b = 2
   )
+```
+
+---
+
+### Several comments on one expression — one per line
+
+Nothing follows a `--` comment on its line, not even another comment. When several comments belong to one expression, the first stays after it and each of the others gets its own line.
+
+**Bad**
+```sql
+SELECT
+   a AS c -- first -- second
+  ,b
+FROM t
+;
+```
+
+**Good**
+```sql
+SELECT
+   a AS c -- first
+  -- second
+  ,b
+FROM t
+;
 ```
 
 ---
@@ -1057,6 +1102,39 @@ SELECT
    b
 FROM u
 ;
+```
+
+Comments after the last statement, such as a commented-out test query, are kept exactly as written after its `;`: the same lines and blank lines, with no `;` added after them. A comment on the same line as the last statement's final token stays on that line.
+
+**Bad**
+```sql
+SELECT
+   a
+FROM t
+;
+
+-- one -- two /*
+SELECT b
+FROM u
+*/
+;
+```
+
+**Good**
+```sql
+SELECT
+   a
+FROM t
+;
+
+-- one
+
+-- two
+
+/*
+SELECT b
+FROM u
+*/
 ```
 
 ---
