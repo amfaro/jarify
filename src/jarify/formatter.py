@@ -119,6 +119,7 @@ def _format_sql_core(sql: str, config: JarifyConfig) -> tuple[str, list[FormatWa
     rules = get_default_rules(config, overrides=overrides)
     leading_comment_texts = _find_leading_comment_texts(masked_sql)
     trailing_sep_comment_texts = _find_trailing_sep_comment_texts(masked_sql)
+    closing_paren_comment_texts = _find_closing_paren_comment_texts(masked_sql)
     formatted_parts: list[str] = []
 
     for tree in trees:
@@ -130,6 +131,7 @@ def _format_sql_core(sql: str, config: JarifyConfig) -> tuple[str, list[FormatWa
         generator = JarifyGenerator(tree_config)
         generator._leading_comment_texts = leading_comment_texts
         generator._trailing_sep_comment_texts = trailing_sep_comment_texts
+        generator._closing_paren_comment_texts = closing_paren_comment_texts
         formatted_parts.append(generator.generate(tree))
 
     # Join statements but hold off on the trailing ;\n -- it must come *after*
@@ -292,6 +294,41 @@ def _find_trailing_sep_comment_texts(sql: str) -> frozenset[str]:
     return frozenset(trailing_sep)
 
 
+def _find_closing_paren_comment_texts(sql: str) -> frozenset[str]:
+    """Return stripped texts of comments that sit on their own line before a ``)``.
+
+    Example::
+
+        WITH _a AS
+        (
+          FROM t
+          WHERE x = 1
+          -- this comment ends the CTE body
+        )
+
+    The ``)`` owns such a comment, and sqlglot puts it on the CTE, together
+    with the comments written above the CTE.  The generator uses these texts
+    to keep the comment at the end of the body, before the ``)``.
+
+    A comment that the ``)`` owns and that comes before it always starts on a
+    line of its own (a comment that starts on the line of the previous token
+    belongs to that token), so unlike :func:`_find_leading_comment_texts` this
+    counts block comments too.
+    """
+    from sqlglot.tokens import TokenType
+
+    tokens = SqlglotTokenizer().tokenize(sql)
+    closing: set[str] = set()
+    for idx, tok in enumerate(tokens):
+        if not tok.comments or tok.token_type != TokenType.R_PAREN or idx == 0:
+            continue
+        before = sql[tokens[idx - 1].end : tok.start]
+        for comment in tok.comments:
+            if comment.strip() and (f"--{comment}" in before or f"/*{comment}*/" in before):
+                closing.add(comment.strip())
+    return frozenset(closing)
+
+
 def _line_comment_in(text: str, stripped: str) -> bool:
     """Return True when *text* holds the line comment ``--<stripped>``.
 
@@ -331,6 +368,7 @@ def _try_pivot_order_by_workaround(sql: str, config: JarifyConfig) -> str | None
     generator = JarifyGenerator(config)
     generator._leading_comment_texts = _find_leading_comment_texts(pivot_sql)
     generator._trailing_sep_comment_texts = _find_trailing_sep_comment_texts(pivot_sql)
+    generator._closing_paren_comment_texts = _find_closing_paren_comment_texts(pivot_sql)
 
     # Format every statement; ORDER BY attaches only to the last one (the PIVOT)
     formatted_parts = [generator.generate(_apply_rules(t, rules)) for t in trees]

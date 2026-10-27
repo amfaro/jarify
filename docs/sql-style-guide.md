@@ -625,6 +625,28 @@ Only one `--` comment fits after `AS`, because it runs to the end of the line. W
 )
 ```
 
+A comment on its own line at the end of a CTE body, after its last clause, stays there, before the closing `)`. It doesn't move above the CTE or the statement.
+
+**Bad** (the second comment no longer follows the first)
+```sql
+-- because we only keep track of last_visit_at
+WITH _tf AS
+(
+  FROM time_frames
+  WHERE time_frame_key IN ('current_month', 'trailing_12_months') -- only time frames that end today or later
+)
+```
+
+**Good**
+```sql
+WITH _tf AS
+(
+  FROM time_frames
+  WHERE time_frame_key IN ('current_month', 'trailing_12_months') -- only time frames that end today or later
+  -- because we only keep track of last_visit_at
+)
+```
+
 ---
 
 ### Predicate comments — keep `OR` / `AND` outside the comment

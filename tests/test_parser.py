@@ -177,6 +177,21 @@ class TestFromFirstComments:
         assert tree.this.comments == [" note"]
 
 
+class TestCteClosingParenComments:
+    """A CTE keeps the comments of the ``)`` that closes its body (#361)."""
+
+    def test_cte_without_as_comment_takes_them(self) -> None:
+        (tree,) = parse_sql("WITH _a AS (SELECT 1\n-- end\n) SELECT 1")
+        assert tree.args["with_"].expressions[0].comments == [" end"]
+
+    @pytest.mark.parametrize("rest", ["", ", _b AS (SELECT 2)"])
+    def test_cte_with_as_comment_takes_them_too(self, rest: str) -> None:
+        (tree,) = parse_sql(f"WITH _a AS -- as\n(SELECT 1\n-- end\n){rest} SELECT 1")
+        with_ = tree.args["with_"]
+        assert with_.expressions[0].comments == [" as", " end"]
+        assert not with_.comments
+
+
 class TestRustFmtPlaceholderMasking:
     """_mask/_unmask_rust_fmt_placeholders must round-trip cleanly."""
 
