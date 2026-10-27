@@ -975,7 +975,7 @@ SELECT to_json({'purchaser': ft.purchaser})->>concat('$.', o.group_by_field, '.'
 ```sql
 SELECT
    json_extract_string(to_json({'purchaser': ft.purchaser}), concat('$.', o.group_by_field, '.', o.group_by_key))
-FROM offers             o
+FROM offers                   o
 INNER JOIN fact_transactions ft ON o.id = ft.offer_id
 ;
 ```
