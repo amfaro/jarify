@@ -181,6 +181,36 @@ GROUP BY
 
 ---
 
+### `ARRAY(subquery)` — laid out like a scalar subquery
+
+`array(query)` collects a query's rows into a list. Its query goes below `array(`, indented, and `)` goes on a line of its own, as a scalar subquery's and `EXISTS(…)`'s do. Where a one-line form is used, as in a CASE branch or an `if()` argument that fits, it stays on one line.
+
+**Bad** (the query starts after `array(`, and its other lines don't line up with it)
+```sql
+SELECT
+   array(SELECT
+     tag
+  FROM tags
+  WHERE tags.post_id = p.id) AS tags
+FROM posts p
+;
+```
+
+**Good**
+```sql
+SELECT
+   array(
+    SELECT
+       tag
+    FROM tags
+    WHERE tags.post_id = p.id
+  ) AS tags
+FROM posts p
+;
+```
+
+---
+
 ### Two-argument null fallback — prefer `ifnull()`
 
 Rule: `prefer-ifnull-over-coalesce`
@@ -267,13 +297,23 @@ FROM t
 ;
 ```
 
-A comment on its own line between two items lines up with the commas, and one above the first item lines up with its text. This holds in every leading-comma list: a `SELECT` list, wrapped function arguments, an `IN (…)` list, a struct literal and `VALUES` rows.
+A comment on its own line between two items lines up with the commas, and one above the first item lines up with its text. This holds in every leading-comma list: a `SELECT` list, wrapped function arguments, an `IN (…)` list, a struct literal and `VALUES` rows. It stays between the two items whatever the first one ends with, a `)` included.
+
+**Bad** (the comment moves above the column before it)
+```sql
+SELECT
+   -- b is optional
+   ifnull(a, 0)
+  ,b
+FROM t
+;
+```
 
 **Good**
 ```sql
 SELECT
    -- the key first
-   a
+   ifnull(a, 0)
   -- b is optional
   ,b
 FROM t
@@ -299,6 +339,29 @@ FROM read_parquet(
   ,hive_partitioning = TRUE
   ,hive_types = {'k': text}
 )
+;
+```
+
+With trailing commas (`leading-commas = false`, `trailing-commas = true`), the comments around the items of a `SELECT` list, a `GROUP BY` or `ORDER BY`, a window's keys or an `IN (…)` list stay in the same places: one on its own line above an item stays above it, in the item's column, and one after an item follows its comma.
+
+**Bad** (the comment above the column moves into it)
+```sql
+SELECT
+  a /* the key first */ + 1 AS a1,
+  b
+FROM t
+;
+```
+
+**Good**
+```sql
+SELECT
+  -- the key first
+  a + 1 AS a1,
+  -- b is optional
+  b, -- may be NULL
+  c
+FROM t
 ;
 ```
 
@@ -916,15 +979,19 @@ WHERE a NOT /* legacy codes */ IN (1, 2)
 
 ---
 
-### Several comments on one expression — one per line
+### Several comments on one expression — kept on the lines they were written on
 
-Nothing follows a `--` comment on its line, not even another comment. When several comments belong to one expression, the first stays after it and each of the others gets its own line.
+Nothing follows a `--` comment on its line, not even another comment. Comments written together after an expression stay on its line: each but the last is written as a `/* */` block comment. On a line of its own, a comment after the first would belong to the `)`, `::` or keyword after it on the next pass, and move. Comments written on lines of their own keep their own lines.
 
-**Bad**
+**Bad** (the second comment moves above the call on the next pass)
 ```sql
 SELECT
-   a AS c -- first -- second
-  ,b
+   coalesce(
+     b
+    ,c
+    ,a -- first
+    -- second
+  ) AS v
 FROM t
 ;
 ```
@@ -932,14 +999,19 @@ FROM t
 **Good**
 ```sql
 SELECT
-   a AS c -- first
-  -- second
-  ,b
+   coalesce(
+     b
+    ,c
+    ,a /* first */ -- second
+  ) AS v
+  ,d -- third
+  -- fourth, on its own line
+  ,e
 FROM t
 ;
 ```
 
-A comment on its own line above a column stays there, even when the column has a comment of its own, whatever the column starts with. The same goes for a `GROUP BY` or `ORDER BY` key and a `REPLACE` item.
+A comment on its own line above a column stays there, even when the column has a comment of its own, whatever the column starts with: a `-`, a method call such as `x.title_case()`, `INTERVAL`, a typed literal or a parenthesis. The same goes for an item of any other list, such as a `GROUP BY` or `ORDER BY` key, a `REPLACE` item, a window's keys or an `IN (…)` value, and for a `CREATE TABLE` column. The comments on a column that is an operator expression, such as `a + 1` without an alias, are written once, where a list writes a column's comments.
 
 **Bad** (the comment above moves into the column)
 ```sql
@@ -1761,6 +1833,34 @@ FROM t
 ;
 ```
 
+A comment also stays where it was written after a user-defined type, a JSON path, a lambda's body or an `INTERVAL`, after a CASE's `END` or a window's `)` when a comment is written above it too, before `=` in a condition, and on the comma of a comma join. One whose node is rebuilt into a keyword, such as one after `date_trunc`'s unit, goes after the call.
+
+**Bad** (the comments are dropped)
+```sql
+SELECT
+   a::my_type
+  ,b->>'key'
+  ,list_filter(l, lambda c: regexp_matches(c, 'x')) AS matches
+FROM t
+CROSS JOIN u
+;
+```
+
+**Good**
+```sql
+SELECT
+   a::my_type -- after the type
+  ,b->>'key' -- after the path
+  ,list_filter(
+     l
+    ,lambda c: regexp_matches(c, 'x') -- at the end of the body
+  ) AS matches
+FROM t
+-- written above the join's comma
+CROSS JOIN u
+;
+```
+
 A cast value that needs parentheses and carries a comment puts its parentheses on lines of their own, as a commented parenthesized expression does:
 
 ```sql
@@ -1856,6 +1956,50 @@ SELECT
      THEN 'done'
    END AS outcome
 FROM orders
+;
+```
+
+A `THEN` or `ELSE` value stays on its line when it fits there, counting the columns before it on the line. One that doesn't takes its own layout, as in a SELECT list: a scalar subquery goes below its `(`. Like a wrapped `WHEN` condition's, the value's other lines keep their column relative to its keyword, so a subquery's `)` goes under `THEN` or `ELSE` (under `WHEN` in a simple CASE, whose `THEN` shares the `WHEN` line). The same goes for the arguments of an `if()`, such as a single-branch CASE rewritten to one.
+
+**Bad** (the `)` one column right of `THEN`)
+```sql
+SELECT
+   o.id
+  ,CASE
+     WHEN o.status = 'shipped'
+     THEN (
+        SELECT
+           MAX(s.shipped_at)
+        FROM shipments s
+        WHERE s.order_id       = o.id
+          AND s.carrier_status = 'delivered_to_customer'
+      )
+     WHEN o.status = 'cancelled'
+     THEN o.cancelled_at
+     ELSE o.updated_at
+   END AS last_event_at
+FROM orders o
+;
+```
+
+**Good**
+```sql
+SELECT
+   o.id
+  ,CASE
+     WHEN o.status = 'shipped'
+     THEN (
+       SELECT
+          MAX(s.shipped_at)
+       FROM shipments s
+       WHERE s.order_id       = o.id
+         AND s.carrier_status = 'delivered_to_customer'
+     )
+     WHEN o.status = 'cancelled'
+     THEN o.cancelled_at
+     ELSE o.updated_at
+   END AS last_event_at
+FROM orders o
 ;
 ```
 
@@ -2165,7 +2309,7 @@ FROM @read_parquet(@source_db, @source_schema, 'orders')
 
 ### `CREATE TABLE` layout
 
-The opening parenthesis goes on its own line. Column names are padded to align all type tokens, and types are padded to align all constraint tokens when any column carries constraints. A blank line separates column definitions from table-level constraints (`PRIMARY KEY`, `UNIQUE`, `CHECK`, etc.). A comment after a column definition stays after it, as in a `SELECT` list.
+The opening parenthesis goes on its own line. Column names are padded to align all type tokens, and types are padded to align all constraint tokens when any column carries constraints. A blank line separates column definitions from table-level constraints (`PRIMARY KEY`, `UNIQUE`, `CHECK`, etc.). A comment after a column definition stays after it, and one on its own line above a column stays above it, as in a `SELECT` list; it doesn't widen the column names' alignment.
 
 **Bad**
 ```sql

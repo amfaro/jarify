@@ -25,7 +25,10 @@ def _non_agg_sqls(select: exp.Select) -> set[str]:
     for item in select.expressions:
         inner = item.this if isinstance(item, exp.Alias) else item
         if not inner.find(*_AGG_TYPES):
-            result.add(inner.sql(dialect="duckdb"))
+            # Without comments: the SELECT list keeps them, and which column
+            # holds a comment written between two columns depends on the
+            # comma style.
+            result.add(inner.sql(dialect="duckdb", comments=False))
     return result
 
 
@@ -67,7 +70,7 @@ class PreferGroupByAllRule(FormatterRule):
             if not non_agg:
                 continue
 
-            group_sqls = {e.sql(dialect="duckdb") for e in group.expressions}
+            group_sqls = {e.sql(dialect="duckdb", comments=False) for e in group.expressions}
             if non_agg == group_sqls:
                 group.set("all", True)
                 group.set("expressions", [])
@@ -96,7 +99,7 @@ class PreferGroupByAllRule(FormatterRule):
             if not non_agg:
                 continue
 
-            group_sqls = {e.sql(dialect="duckdb") for e in group.expressions}
+            group_sqls = {e.sql(dialect="duckdb", comments=False) for e in group.expressions}
             if non_agg == group_sqls:
                 _line, _col = _node_pos(group)
                 violations.append(

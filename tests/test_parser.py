@@ -363,6 +363,61 @@ class TestKeywordComments:
         assert rows[2].comments == [" above"]
 
 
+class TestDroppedOperandComments:
+    """The parser keeps the comments sqlglot drops where it rebuilds a node (#394)."""
+
+    @pytest.mark.parametrize(
+        ("sql", "node"), [("-a", exp.Neg), ("~a", exp.BitwiseNot), ("INTERVAL 1 DAY", exp.Interval)]
+    )
+    def test_comment_above_an_operand_goes_on_its_node(self, sql: str, node: type[exp.Expr]) -> None:
+        (tree,) = parse_sql(f"SELECT\n-- c\n{sql}, b")
+        assert tree.find(node).comments == [" c"]
+
+    def test_comment_above_a_method_call_goes_on_its_first_operand(self) -> None:
+        (tree,) = parse_sql("SELECT\n-- c\nt.x.upper(), b")
+        dot = tree.find(exp.Dot)
+        assert dot.this.this.comments == [" c"]
+
+    def test_comment_after_a_user_defined_type_goes_on_the_cast(self) -> None:
+        (tree,) = parse_sql("SELECT a::my_type -- c\n, b")
+        assert tree.find(exp.Cast).comments == [" c"]
+
+    def test_comment_after_a_json_path_goes_on_the_extraction(self) -> None:
+        (tree,) = parse_sql("SELECT a->>'key' -- c\n, b")
+        assert tree.find(exp.JSONExtractScalar).comments == [" c"]
+
+    def test_comment_after_end_stays_with_one_above_case(self) -> None:
+        (tree,) = parse_sql("SELECT\n-- c1\nCASE WHEN a THEN 1 END -- c2\n, b")
+        assert tree.find(exp.Case).comments == [" c1", " c2"]
+
+    def test_comment_above_a_lambda_goes_on_it(self) -> None:
+        (tree,) = parse_sql("SELECT list_transform(k,\n-- c\nlambda x: x + 1)")
+        assert tree.find(exp.Lambda).comments == [" c"]
+
+    def test_comment_on_an_argument_a_builder_rebuilds_goes_on_the_call(self) -> None:
+        (tree,) = parse_sql("SELECT date_trunc('week' -- c\n, d)")
+        assert tree.find(exp.TimestampTrunc, exp.DateTrunc).comments == [" c"]
+
+    def test_comment_after_a_tuples_paren_goes_on_its_first_item_only(self) -> None:
+        (tree,) = parse_sql("SELECT ( -- c\na, b)::t")
+        tuple_ = tree.find(exp.Tuple)
+        assert not tuple_.comments
+        assert tuple_.expressions[0].comments == [" c"]
+
+    def test_comment_after_a_column_definitions_type_goes_on_the_column(self) -> None:
+        (tree,) = parse_sql("CREATE TABLE t (a my_type -- c\n, b int)")
+        assert tree.find(exp.ColumnDef).comments == [" c"]
+
+    def test_comment_on_a_comma_join_goes_on_the_join(self) -> None:
+        (tree,) = parse_sql("SELECT a FROM t\n-- c\n, u")
+        assert tree.args["joins"][0].comments == [" c"]
+
+    def test_each_comment_is_kept_once(self) -> None:
+        (tree,) = parse_sql("SELECT\n-- c1\n-a -- c2\n, f(b -- c3\n) -- c4\nFROM t")
+        comments = [c for node in tree.walk() for c in node.comments or []]
+        assert sorted(comments) == [" c1", " c2", " c3", " c4"]
+
+
 class TestMaskingSkipsCommentsAndStrings:
     """Masking ifnull, numeric and reserved-word casts leaves comments and literals alone (#388)."""
 
