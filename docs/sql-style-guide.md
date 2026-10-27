@@ -622,6 +622,63 @@ FROM enriched
 ;
 ```
 
+A subquery that holds a `WITH` lays out its CTEs the same way, wherever it appears: in `FROM` or `IN (…)`, in parentheses, in a `WHERE`, `HAVING` or `JOIN … ON` condition, as a function or `if()` argument, or in a `CASE`. It never fits on one line, so whatever holds it takes the multi-line form it takes for a subquery too long for one line.
+
+**Bad** (the CTE is squeezed onto the condition's line)
+```sql
+SELECT
+   a
+FROM t
+WHERE (a IN (WITH _c AS
+(SELECT a FROM u) SELECT a FROM _c) OR b)
+;
+```
+
+**Good**
+```sql
+SELECT
+   a
+FROM t
+WHERE (
+  a IN
+  (
+    WITH _c AS
+    (
+      SELECT
+         a
+      FROM u
+    )
+    SELECT
+       a
+    FROM _c
+  )
+  OR b
+)
+;
+```
+
+**Also good** (as an `if()` argument)
+```sql
+SELECT
+   if(
+      x
+     ,(
+        WITH _c AS
+        (
+          SELECT
+             a
+          FROM u
+        )
+        SELECT
+           MAX(a)
+        FROM _c
+      )
+     ,0
+  ) AS v
+FROM t
+;
+```
+
 ---
 
 ### CTE names — underscore prefix
@@ -708,7 +765,7 @@ WITH _tf AS
 )
 ```
 
-The same goes for a subquery in `FROM` or `JOIN`: a comment on its own line before its closing `)` stays at the end of its body. A subquery that holds a `WITH` lays out its CTEs as at the top level.
+The same goes for a subquery in `FROM` or `JOIN`: a comment on its own line before its closing `)` stays at the end of its body. A subquery that holds a `WITH` lays out its CTEs as at the top level (see [CTE layout](#cte-layout)).
 
 **Bad** (the comment is dropped, and the CTE is squeezed onto the subquery's line)
 ```sql
@@ -842,6 +899,27 @@ SELECT
   -- second
   ,b
 FROM t
+;
+```
+
+A comment on its own line above a column stays there, even when the column has a comment of its own, whatever the column starts with. The same goes for a `GROUP BY` or `ORDER BY` key and a `REPLACE` item.
+
+**Bad** (the comment above moves into the column)
+```sql
+SELECT
+   trim(name) /* as the customer entered it */ AS customer_name -- may be empty
+  ,id
+FROM customers
+;
+```
+
+**Good**
+```sql
+SELECT
+   -- as the customer entered it
+   trim(name) AS customer_name -- may be empty
+  ,id
+FROM customers
 ;
 ```
 
@@ -1638,6 +1716,48 @@ FROM data
 ;
 ```
 
+A `WHEN` condition that wraps, such as an `IN (…)` list, an `IN (subquery)` or parentheses, is laid out as after `WHERE`: a list's values start three columns past `WHEN`, and its `)` goes under `WHEN`. After an `AND` or `OR`, they go under the connector, as in `WHERE`.
+
+**Bad** (the `)` one column right of `WHEN`)
+```sql
+SELECT
+   CASE
+     WHEN status IN (
+         'cancelled_by_customer'
+        ,'cancelled_by_merchant'
+        ,'refunded_in_full'
+        ,'refunded_in_part'
+        ,'charged_back'
+        ,'disputed'
+      )
+     THEN 'reversed'
+     WHEN status = 'shipped'
+     THEN 'done'
+   END AS outcome
+FROM orders
+;
+```
+
+**Good**
+```sql
+SELECT
+   CASE
+     WHEN status IN (
+        'cancelled_by_customer'
+       ,'cancelled_by_merchant'
+       ,'refunded_in_full'
+       ,'refunded_in_part'
+       ,'charged_back'
+       ,'disputed'
+     )
+     THEN 'reversed'
+     WHEN status = 'shipped'
+     THEN 'done'
+   END AS outcome
+FROM orders
+;
+```
+
 A CASE is laid out the same way wherever it appears, relative to the column its `CASE` keyword starts in: in a searched CASE, `WHEN`, `THEN` and `ELSE` start two columns past the `C` of `CASE` and `END` sits under it; in a simple CASE, `WHEN` and `ELSE` start one column past the `C` and `END` one column before it (under the comma, in a SELECT list). That holds for a CASE in another CASE's branch, after an operator, in parentheses, and in a `WHERE`, `HAVING`, `QUALIFY` or `JOIN … ON` condition. With trailing commas there's no comma for a simple CASE's `END` to sit under, so it sits under the `C`, as in a searched CASE.
 
 **Bad** (a CASE left on one line, or its lines not under its `CASE`)
@@ -2320,7 +2440,7 @@ WHERE x != y
 
 **Auto-fixed by `fmt`.** Rewrite single-branch `CASE WHEN … THEN … [ELSE …] END` expressions to DuckDB's `IF(condition, true_val, false_val)` function. The IF form is shorter and more idiomatic for simple conditionals.
 
-Applies only to *searched* CASE with exactly one WHEN branch. Multi-branch CASE and simple CASE (`CASE expr WHEN lit …`) are left unchanged. A CASE with a comment inside its WHEN, THEN or ELSE expression is also left unchanged, so the comment stays beside the branch it documents; the rule only rewrites a CASE that carries no comment. So is a CASE with a comment attached to the CASE itself, such as one written on the line above a CASE nested in another CASE's ELSE, because an `if()` call can't keep a comment of its own. When the original `CASE` has no `ELSE`, jarify emits an explicit `NULL` third argument because DuckDB's `IF()` requires three arguments.
+Applies only to *searched* CASE with exactly one WHEN branch. Multi-branch CASE and simple CASE (`CASE expr WHEN lit …`) are left unchanged. A CASE with a comment inside its WHEN, THEN or ELSE expression is also left unchanged, so the comment stays beside the branch it documents; the rule only rewrites a CASE that carries no comment. So is a CASE with a comment attached to the CASE itself, such as one written on the line above a CASE nested in another CASE's ELSE, because an `if()` call can't keep a comment of its own. A comment written above a CASE that makes up a whole column, `GROUP BY` key or `ORDER BY` key belongs to the column, though, so that CASE is still rewritten, and the comment stays above the column. When the original `CASE` has no `ELSE`, jarify emits an explicit `NULL` third argument because DuckDB's `IF()` requires three arguments.
 
 **Bad**
 ```sql

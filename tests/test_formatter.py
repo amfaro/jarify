@@ -682,6 +682,90 @@ class TestOwnLineBlockComments:
         assert _find_trailing_sep_comment_texts(sql) == {"sep\n  lines"}
 
 
+class TestOwnLineCommentAboveCommentedColumn:
+    """A comment on its own line above a column stays there, whatever the column holds (#389).
+
+    sqlglot attaches it to the node the column starts with. An alias with a
+    comment of its own doesn't take it over, so it was written inside the
+    column, ``a /* above */ AS v -- after``, or lost.
+    """
+
+    @pytest.mark.parametrize("comment", ["-- above", "/* above */"])
+    def test_comment_above_a_commented_column_stays_above_it(self, comment):
+        out, _ = format_sql(f"SELECT\n  {comment}\n  a AS v -- after\n ,b FROM t")
+        assert out == "SELECT\n   -- above\n   a AS v -- after\n  ,b\nFROM t\n;\n"
+        assert format_sql(out)[0] == out
+
+    def test_comment_above_a_commented_column_in_a_cte_body(self):
+        out, _ = format_sql("WITH c AS (SELECT\n  -- above\n  a AS v -- after\n ,b FROM t) SELECT v, b FROM c")
+        assert "\n  SELECT\n     -- above\n     a AS v -- after\n    ,b\n  FROM t\n" in out
+        assert format_sql(out)[0] == out
+
+    @pytest.mark.parametrize("comment", ["-- above", "/* above */"])
+    @pytest.mark.parametrize("after", [" -- after", ""])
+    def test_comment_above_a_later_column_lines_up_with_the_commas(self, comment, after):
+        # There it follows the column before, which writes it in the same place
+        # on the next pass.
+        out, _ = format_sql(f"SELECT\n  x,\n  {comment}\n  a AS v{after}\nFROM t")
+        assert out == f"SELECT\n   x\n  -- above\n  ,a AS v{after}\nFROM t\n;\n"
+        assert format_sql(out)[0] == out
+
+    @pytest.mark.parametrize("before", ["", "x,\n  "])
+    def test_single_branch_case_column_with_a_comment_above_becomes_if(self, before):
+        # The comment is the column's, so the CASE is rewritten whether or not
+        # the alias has a comment of its own, and on every pass.
+        out, _ = format_sql(f"SELECT\n  {before}-- above\n  CASE WHEN a THEN 1 ELSE 0 END AS v -- after\nFROM t")
+        assert "-- above\n  " in out
+        assert "if(a, 1, 0) AS v -- after\n" in out
+        assert format_sql(out)[0] == out
+
+    @pytest.mark.parametrize(
+        "column",
+        [
+            "a + 1",
+            "a || 'x'",
+            "a::int",
+            "TRY_CAST(a AS int)",
+            "t.a",
+            "NOT a",
+            "a IN (1, 2)",
+            "a IS NOT NULL",
+            "SUM(a) OVER (PARTITION BY b)",
+            "CASE WHEN a THEN 1 WHEN b THEN 2 END",
+            "(a + 1) * 2",
+            "coalesce(a, 0)",
+        ],
+    )
+    def test_whatever_the_column_starts_with(self, column):
+        out, _ = format_sql(f"SELECT\n  -- above\n  {column} AS v -- after\n ,b FROM t")
+        assert out.startswith("SELECT\n   -- above\n   ")
+        assert out.count("above") == 1
+        assert " AS v -- after\n  ,b\n" in out
+        assert format_sql(out)[0] == out
+
+    def test_comment_above_does_not_move_the_as(self):
+        out, _ = format_sql("SELECT\n  -- above\n  a AS v -- after\n ,bbbbbbbb AS w FROM t")
+        assert "   -- above\n   a        AS v -- after\n  ,bbbbbbbb AS w\n" in out
+
+    def test_comment_above_a_column_without_an_alias(self):
+        out, _ = format_sql("SELECT\n  -- above\n  a + 1 -- after\n ,b FROM t")
+        assert out == "SELECT\n   -- above\n   a + 1 -- after\n  ,b\nFROM t\n;\n"
+
+    def test_comment_above_a_group_by_or_order_by_key(self):
+        sql = (
+            "SELECT a + 1, b, count(*) AS n FROM t\n"
+            "GROUP BY\n  -- above a key\n  a + 1 -- after the key\n ,b\n"
+            "ORDER BY\n  -- above an order key\n  b DESC -- after the order key\n"
+        )
+        out, _ = format_sql(sql)
+        assert "GROUP BY\n   -- above a key\n   a + 1 -- after the key\n  ,b\n" in out
+        assert "ORDER BY\n   -- above an order key\n   b DESC -- after the order key\n" in out
+
+    def test_comment_above_a_replace_item(self):
+        out, _ = format_sql("SELECT * REPLACE (\n  -- above\n  a + 1 AS a -- after\n) FROM t")
+        assert "   REPLACE (\n      -- above\n      a + 1 AS a -- after\n   )\n" in out
+
+
 def test_searched_case_puts_then_on_its_own_line_and_expands_connectors():
     sql = "SELECT CASE WHEN foo THEN bar WHEN baz AND baq THEN world ELSE NULL END AS abc FROM data"
     result, _ = format_sql(sql)
@@ -1558,6 +1642,69 @@ class TestNestedJoins:
         assert format_sql(out)[0] == out
 
 
+_WITH_SUBQUERY = "(WITH c AS (SELECT 1 AS a) SELECT max(a) FROM c)"
+_WITH_SUBQUERY_POSITIONS = {
+    "parenthesized_condition": "SELECT a FROM t WHERE (a IN {q} OR b)",
+    "parenthesized_condition_after_and": "SELECT a FROM t WHERE x = 1 AND (a IN {q} OR b)",
+    "parenthesized_comparison": "SELECT a FROM t WHERE ({q} > 1)",
+    "or_chain": "SELECT a FROM t WHERE a IN {q} OR b",
+    "having": "SELECT a, count(*) AS n FROM t GROUP BY a HAVING count(*) > {q} OR a = 1",
+    "join_on": "SELECT t.a FROM t INNER JOIN u ON u.id = t.id AND u.a IN {q}",
+    "join_on_single_condition": "SELECT t.a FROM t INNER JOIN u ON u.a IN {q}",
+    "join_on_parenthesized": "SELECT t.a FROM t INNER JOIN u ON (u.a IN {q} OR u.b)",
+    "if_condition": "SELECT if(a IN {q}, 1, 0) AS v FROM t",
+    "if_then": "SELECT if(x, {q}, 0) AS v FROM t",
+    "if_else": "SELECT if(x, 0, {q}) AS v FROM t",
+    "simple_case_when": "SELECT CASE x WHEN {q} THEN 1 WHEN 2 THEN 3 END AS v FROM t",
+    "select_list_parentheses": "SELECT (a IN {q} OR b) AS v FROM t",
+    "filter_where": "SELECT COUNT(*) FILTER (WHERE a IN {q} OR b) AS n FROM t",
+    "cte_body": "WITH d AS (SELECT a FROM t WHERE (a IN {q} OR b)) SELECT a FROM d",
+}
+
+
+class TestCtesInExpressionSubqueries:
+    """A subquery holding a WITH is laid out with its CTEs as at the top level in every position (#389).
+
+    Regression: a parenthesized condition, a JOIN condition, an OR chain,
+    if()'s arguments and a simple CASE's WHEN value rendered it on one line,
+    which broke after ``WITH c AS`` and crammed the rest together.
+    """
+
+    @pytest.mark.parametrize("sql", _WITH_SUBQUERY_POSITIONS.values(), ids=_WITH_SUBQUERY_POSITIONS.keys())
+    def test_ctes_are_laid_out_as_at_the_top_level(self, sql):
+        out, _ = format_sql(sql.format(q=_WITH_SUBQUERY))
+        lines = out.splitlines()
+        with_rows = [i for i, line in enumerate(lines) if line.lstrip().startswith("WITH c AS")]
+        assert len(with_rows) == 1, f"WITH doesn't start a line:\n{out}"
+        row = with_rows[0]
+        indent = " " * (len(lines[row]) - len(lines[row].lstrip()))
+        assert lines[row] == f"{indent}WITH c AS"
+        assert lines[row + 1 : row + 4] == [f"{indent}(", f"{indent}  SELECT", f"{indent}     1 AS a"]
+        assert format_sql(out)[0] == out
+
+    def test_parenthesized_condition_takes_its_multi_line_form(self):
+        out, _ = format_sql("SELECT a FROM t WHERE (a IN (WITH c AS (SELECT 1 AS a) SELECT a FROM c) OR b)")
+        assert out == (
+            "SELECT\n   a\nFROM t\nWHERE (\n  a IN\n  (\n    WITH c AS\n    (\n      SELECT\n         1 AS a\n    )\n"
+            "    SELECT\n       a\n    FROM c\n  )\n  OR b\n)\n;\n"
+        )
+
+    def test_if_argument_wraps_the_call(self):
+        out, _ = format_sql("SELECT if(x, (WITH c AS (SELECT 1 AS a) SELECT max(a) FROM c), 0) AS v FROM t")
+        assert "   if(\n      x\n     ,(\n        WITH c AS\n        (\n" in out
+        assert "        FROM c\n      )\n     ,0\n  ) AS v\n" in out
+
+    def test_join_condition_is_laid_out_like_where(self):
+        sql = "SELECT t.a FROM t INNER JOIN u ON u.id = t.id AND u.a IN (WITH c AS (SELECT 1 AS a) SELECT a FROM c)"
+        out, _ = format_sql(sql)
+        assert "INNER JOIN u ON u.id = t.id\n            AND u.a IN\n            (\n              WITH c AS\n" in out
+
+    @pytest.mark.parametrize("when_value", [_WITH_SUBQUERY, "CASE WHEN a THEN 1 WHEN b THEN 2 END"])
+    def test_simple_case_branches_after_a_multi_line_when_value_are_not_padded(self, when_value):
+        out, _ = format_sql(f"SELECT CASE x WHEN {when_value} THEN 1 WHEN 2 THEN 3 END AS v FROM t")
+        assert "\n    WHEN 2 THEN 3\n" in out
+
+
 class TestGroupByPerLine:
     def test_group_by_multi_column_one_per_line(self):
         # When all non-agg columns are in GROUP BY, the formatter rewrites to GROUP BY ALL.
@@ -1813,6 +1960,33 @@ class TestConditionLinesAfterConnector:
         sql = f"SELECT CASE WHEN a = 1 OR b IN ({self.VALUES}) THEN 'x' WHEN a = 2 THEN 'y' END AS z FROM t"
         out, _ = format_sql(sql)
         assert "\n".join(["     WHEN a = 1", "       OR b IN (", *self._values(10), "       )", "     THEN 'x'"]) in out
+
+    def test_in_list_after_a_case_first_when_closes_under_the_when(self):
+        # As after WHERE: the values three columns past the keyword, ) under it (#382).
+        sql = f"SELECT CASE WHEN b IN ({self.VALUES}) THEN 'x' WHEN a = 2 THEN 'y' END AS z FROM t"
+        out, _ = format_sql(sql)
+        assert "\n".join(["     WHEN b IN (", *self._values(8), "     )", "     THEN 'x'"]) in out
+        assert format_sql(out)[0] == out
+
+    def test_in_subquery_after_a_case_first_when_opens_under_the_when(self):
+        subquery = (
+            "SELECT user_id FROM excluded_users "
+            "WHERE excluded_reason = 'a reason long enough to put the subquery on its own lines'"
+        )
+        out, _ = format_sql(f"SELECT CASE WHEN b NOT IN ({subquery}) THEN 'x' WHEN a = 2 THEN 'y' END AS z FROM t")
+        assert "     WHEN b NOT IN\n     (\n       SELECT\n          user_id\n" in out
+        assert "\n     )\n     THEN 'x'\n" in out
+
+    def test_parentheses_after_a_case_first_when_close_under_the_when(self):
+        condition = "a = 1 OR some_long_column_name_aaaaaaaa = " + "_".join(["some_long_table_name"] + ["x" * 20] * 3)
+        out, _ = format_sql(f"SELECT CASE WHEN ({condition}) THEN 'x' WHEN a = 2 THEN 'y' END AS z FROM t")
+        assert "     WHEN (\n       a = 1\n       OR some_long_column_name_aaaaaaaa = " in out
+        assert "\n     )\n     THEN 'x'\n" in out
+
+    def test_in_list_in_a_case_in_where_closes_under_its_when(self):
+        sql = f"SELECT a FROM t WHERE CASE WHEN b IN ({self.VALUES}) THEN 1 WHEN c THEN 2 END = 1"
+        out, _ = format_sql(sql)
+        assert "\n".join(["WHERE CASE", "        WHEN b IN (", *self._values(11), "        )", "        THEN 1"]) in out
 
     def test_wrapped_conditions_after_or_are_idempotent(self):
         sql = (

@@ -595,37 +595,48 @@ class JarifyGenerator(DuckDB.Generator):
                 )
             )
 
+        lifts_item_comments = self._lifts_item_comments(expression, key)
         try:
             result_sqls = []
             for i, e in enumerate(expressions_list):
-                sql = self.sql(e, comment=False)
+                # Comments written on their own line above the item, which a
+                # node inside it holds, go above it too.
+                with self._item_comments_lifted(e) if lifts_item_comments else contextlib.nullcontext([]) as above:
+                    sql = self.sql(e, comment=False)
                 if not sql:
                     continue
                 leader = " " if i == 0 else ","
                 if (
                     isinstance(e, exp.Expr)
-                    and e.comments
+                    and (e.comments or above)
                     and (self._leading_comment_texts or self._trailing_sep_comment_texts)
                 ):
-                    trail_sep = [c for c in e.comments if c.strip() in self._trailing_sep_comment_texts]
+                    own = e.comments or []
+                    trail_sep = [c for c in own if c.strip() in self._trailing_sep_comment_texts]
                     # Both sets match comments by text, so a comment written in
                     # two places can be in both; write it once, after the column.
                     lead = [
-                        c
-                        for c in e.comments
-                        if c.strip() in self._leading_comment_texts
-                        and c.strip() not in self._trailing_sep_comment_texts
+                        *above,
+                        *(
+                            c
+                            for c in own
+                            if c.strip() in self._leading_comment_texts
+                            and c.strip() not in self._trailing_sep_comment_texts
+                        ),
                     ]
                     trail = [
                         c
-                        for c in e.comments
+                        for c in own
                         if c.strip() not in self._leading_comment_texts
                         and c.strip() not in self._trailing_sep_comment_texts
                     ]
                     # Own-line comments keep a line of their own; a multi-line
-                    # block comment keeps its lines as written.
+                    # block comment keeps its lines as written. Above a later
+                    # column, one lines up with the commas: there it follows
+                    # the column before, which writes it in that column too.
+                    lead_pad = "" if i and lifts_item_comments else " "
                     for c in lead:
-                        result_sqls.append(f" {prefix}{self._render_comments([c], leading=True)}")
+                        result_sqls.append(f"{lead_pad}{prefix}{self._render_comments([c], leading=True)}")
                     inline = self._render_comments(trail)
                     result_sqls.append(f"{leader}{prefix}{sql}{inline}")
                     for c in trail_sep:
@@ -830,9 +841,12 @@ class JarifyGenerator(DuckDB.Generator):
         col_widths: list[int] = []
         alias_count = 0
         for e in expressions_list:
+            # Measure an item without the comments written above it, which
+            # expressions() writes on their own lines.
+            with self._item_comments_lifted(e):
+                col_sql = self.sql(e.this) if isinstance(e, exp.Alias) else self.sql(e, comment=False)
             if isinstance(e, exp.Alias):
                 alias_count += 1
-                col_sql = self.sql(e.this)
                 if self._ends_in_literal_lines(col_sql):
                     continue  # aligns on its own, see alias_sql
                 if "\n" in col_sql:
@@ -850,7 +864,6 @@ class JarifyGenerator(DuckDB.Generator):
                 # width so AS keywords clear the longest expression in the list.
                 # Measure without comments, as expressions() renders the column:
                 # a comment after it or on its own line shouldn't move the AS.
-                col_sql = self.sql(e, comment=False)
                 if "\n" not in col_sql and not self._ends_in_literal_lines(col_sql):
                     col_widths.append(len(col_sql))
 
@@ -1228,14 +1241,14 @@ class JarifyGenerator(DuckDB.Generator):
 
         The ON condition stays inline on one line. A commented condition
         cannot (a ``--`` comment would swallow the rest of the line), and
-        neither can one holding a CASE, which is always multi-line. Either is
-        laid out like WHERE: AND/OR on their own lines, right-justified so the
-        conditions align after ``ON``.
+        neither can one holding a CASE or a query with a WITH, which are
+        always multi-line. Such a condition is laid out like WHERE: AND/OR on
+        their own lines, right-justified so the conditions align after ``ON``.
         """
         on_expr = expression.args.get("on")
         using = expression.args.get("using")
         if on_expr:
-            if self._has_comments(on_expr) or self._holds_case(on_expr):
+            if not self._may_go_on_one_line(on_expr):
                 return "\n".join(self._aligned_condition_lines(f"{head} ON", on_expr))
             saved = self.pretty
             self.pretty = False
@@ -1369,7 +1382,10 @@ class JarifyGenerator(DuckDB.Generator):
             return super().connector_sql(expression, op)
 
         if self.pretty:
-            if not self._connector_force_expand and not has_comments:
+            # A query with a WITH never fits on one line, so a chain holding
+            # one breaks AND / OR onto their own lines, as a chain too long
+            # to fit does.
+            if not self._connector_force_expand and not has_comments and not self._holds_with(expression):
                 compact_parts = [terms[0]]
                 for connector_op, term in zip(ops, terms[1:], strict=False):
                     compact_parts.append(f"{connector_op} {term}")
@@ -1474,7 +1490,7 @@ class JarifyGenerator(DuckDB.Generator):
             # A CASE is always multi-line. The parentheses stay around it, and
             # it is laid out under its keyword: `(CASE` … `END)`.
             sql = f"({self.sql(expression, 'this')})"
-        elif not self._has_comments(this) and not self._holds_case(this) and not self.too_wide([f"({compact})"]):
+        elif self._may_go_on_one_line(this) and not self.too_wide([f"({compact})"]):
             sql = f"({compact})"
         else:
             # A comment on its own line before the first condition inside the
@@ -1593,7 +1609,7 @@ class JarifyGenerator(DuckDB.Generator):
                     wp = self.sql(wp_expr)
                 finally:
                     self._connector_force_expand = prev_force
-            elif self.pretty and wp_expr is not None and self._holds_case(wp_expr):
+            elif self.pretty and wp_expr is not None and (self._holds_case(wp_expr) or self._holds_with(wp_expr)):
                 wp = self.sql(wp_expr)
             else:
                 wp = self._compact_sql(wp_expr) if wp_expr is not None else self.sql(e, "this")
@@ -1643,9 +1659,11 @@ class JarifyGenerator(DuckDB.Generator):
 
         def _searched_when_prefixes(continuation: list[str]) -> list[str]:
             # AND / OR are right-aligned; the other lines of the condition
-            # after one, such as a wrapped IN list, move right with it.
+            # after one, such as a wrapped IN list, move right with it. Before
+            # any, they keep their column relative to WHEN, as they do
+            # relative to WHERE: a wrapped list's `)` goes under WHEN.
             prefixes = []
-            prefix = "  "
+            prefix = " "
             for line in continuation:
                 if line.startswith(("AND ", "OR ")):
                     prefix = "   " if line.startswith("OR ") else "  "
@@ -1678,7 +1696,10 @@ class JarifyGenerator(DuckDB.Generator):
             stmts[0] = _CASE_MARK + stmts[0][1:]
             stmts[-1] = f" {_END_MARK}ND"
         else:
-            align = len(when_parts) >= 2 and all("\n" not in tp for tp in then_parts)
+            # THEN values line up only when every branch is on one line: a
+            # WHEN value across lines, such as a CASE or a subquery with a
+            # WITH, has no width to pad the others to.
+            align = len(when_parts) >= 2 and all("\n" not in part for part in [*when_parts, *then_parts])
             stmts = _build_simple(align=align)
             # END goes under the leading comma; with trailing commas there's
             # none, and END goes under CASE.
@@ -1735,7 +1756,7 @@ class JarifyGenerator(DuckDB.Generator):
             else:
                 cond_str = (
                     self.sql(cond)
-                    if isinstance(cond, exp.Paren) and (self._has_comments(cond) or self._holds_case(cond))
+                    if isinstance(cond, exp.Paren) and not self._may_go_on_one_line(cond)
                     else self._compact_sql(cond)
                     if isinstance(cond, exp.Paren)
                     else self.sql(cond)
@@ -1793,23 +1814,28 @@ class JarifyGenerator(DuckDB.Generator):
                 or (isinstance(node, exp.Cast) and not isinstance(node, exp.TryCast))  # a::int
                 or (isinstance(node, exp.Not) and isinstance(node.this, exp.Is))  # a IS NOT NULL
                 or (isinstance(node, exp.Not) and self._negated_after_operand(node.this))  # a NOT IN (…)
+                # COUNT(*) FILTER (…), SUM(a) OVER (…), a[1], a AT TIME ZONE 'UTC'
+                or isinstance(node, (exp.Filter, exp.Window, exp.Bracket, exp.AtTimeZone))
             )
             node = node.this if starts_with_this and isinstance(node.this, exp.Expr) else None
         return nodes
 
     def _detach_leading_comments(
-        self, condition: exp.Expr | None
+        self, condition: exp.Expr | None, exclude: exp.Expr | None = None
     ) -> tuple[list[str], list[tuple[exp.Expr, list[str]]]]:
         """Detach the own-line comments written before *condition*'s first token.
 
         Returns the comments, and each node they came from with its original
-        comment list, so a caller can put them back.
+        comment list, so a caller can put them back. *exclude*'s comments
+        aren't detached.
         """
         lead: list[str] = []
         detached: list[tuple[exp.Expr, list[str]]] = []
         if condition is None or not self._leading_comment_texts:
             return lead, detached
         for node in self._first_token_nodes(condition):
+            if node is exclude:
+                continue
             comments = node.comments or []
             node_lead = [c for c in comments if c.strip() in self._leading_comment_texts]
             if node_lead:
@@ -1832,19 +1858,51 @@ class JarifyGenerator(DuckDB.Generator):
             owner.add_comments(lead)
 
     @contextlib.contextmanager
-    def _leading_comments_lifted(self, condition: exp.Expr | None) -> t.Iterator[list[str]]:
+    def _leading_comments_lifted(
+        self, condition: exp.Expr | None, exclude: exp.Expr | None = None
+    ) -> t.Iterator[list[str]]:
         """Detach the own-line comments written before *condition* while the block runs.
 
         Yields them, for the caller to render on their own line(s) before the
         condition, and puts them back afterwards: a node that is rendered twice
-        (once to measure it) must find them again.
+        (once to measure it) must find them again. *exclude*'s comments stay.
         """
-        lead, detached = self._detach_leading_comments(condition)
+        lead, detached = self._detach_leading_comments(condition, exclude)
         try:
             yield lead
         finally:
             for node, comments in detached:
                 node.comments = comments
+
+    @staticmethod
+    def _lifts_item_comments(expression: exp.Expr | None, key: str | None) -> bool:
+        """True when ``expressions(expression, key)`` renders a list whose items
+        take their own-line comments above them: a SELECT list, a star's
+        REPLACE / RENAME list, or a query's GROUP BY or ORDER BY keys."""
+        if isinstance(expression, exp.Star):
+            return key in ("replace", "rename")
+        if key is not None:
+            return False
+        return isinstance(expression, (exp.Select, exp.Group)) or (
+            isinstance(expression, exp.Order) and isinstance(expression.parent, exp.Query)
+        )
+
+    def _item_comments_lifted(self, item: t.Any) -> t.ContextManager[list[str]]:
+        """Detach the own-line comments written above a list item from the nodes inside it.
+
+        sqlglot attaches a comment on its own line above a column to the node
+        built from the column's first token: the column in ``a AS v``, the
+        parenthesis in ``(a + 1) * 2``. An alias without comments takes it
+        over, but one with a comment of its own (``a AS v -- note``) leaves
+        it there, and the inner node would write it after itself, inside the
+        column (``a /* above */ AS v -- note``). While the block runs they
+        are detached, and the block gets them, to write above the item; the
+        item's own comments stay.
+        """
+        first = item.this if isinstance(item, (exp.Alias, exp.Ordered)) else item
+        if not isinstance(first, exp.Expr):
+            return contextlib.nullcontext([])
+        return self._leading_comments_lifted(first, exclude=item)
 
     def _has_comments(self, expression: exp.Expr | None) -> bool:
         """Return True when expression or any descendant carries SQL comments."""
@@ -1856,25 +1914,27 @@ class JarifyGenerator(DuckDB.Generator):
         """Return True when a descendant of expression (not expression itself) carries comments."""
         return any(node.comments or all_keyword_comments(node) for node in expression.walk() if node is not expression)
 
-    def _may_go_on_one_line(self, query: exp.Expr) -> bool:
-        """Return True unless *query*, a subquery, must take its multi-line form.
+    def _may_go_on_one_line(self, expression: exp.Expr) -> bool:
+        """Return True unless *expression* must take its multi-line form.
 
-        A commented subquery can't go on one line (a -- comment would swallow
-        the rest of it), and neither can one holding a CASE, which is always
-        multi-line, or a WITH, whose CTEs are laid out as at the top level.
+        A commented expression can't go on one line (a -- comment would
+        swallow the rest of it), and neither can one holding a CASE, which is
+        always multi-line, or a query with a WITH, whose CTEs are laid out as
+        at the top level.
         """
-        return not self._has_comments(query) and not self._holds_case(query) and query.find(exp.With) is None
+        return not (self._has_comments(expression) or self._holds_case(expression) or self._holds_with(expression))
 
     def _multiline_arg_sql(self, expression: exp.Expr) -> str | None:
         """Return expression's normal SQL when a call can't put it on one line.
 
         That is when expression carries a comment, which would swallow the
-        rest of a one-line call, or holds a CASE that renders across lines
-        (a CASE is always multi-line). Otherwise return None.
+        rest of a one-line call, or holds a CASE or a query with a WITH that
+        renders across lines (both are always multi-line). Otherwise return
+        None.
         """
         if self._has_comments(expression):
             return self.sql(expression)
-        if not self._holds_case(expression):
+        if not self._holds_case(expression) and not self._holds_with(expression):
             return None
         sql = self.sql(expression)
         return sql if "\n" in sql else None
@@ -1883,6 +1943,16 @@ class JarifyGenerator(DuckDB.Generator):
     def _holds_case(expression: exp.Expr | None) -> bool:
         """Return True when expression is or contains a CASE, which is always multi-line."""
         return expression is not None and expression.find(exp.Case) is not None
+
+    @staticmethod
+    def _holds_with(expression: exp.Expr | None) -> bool:
+        """Return True when expression holds a query with a WITH.
+
+        Its CTEs are laid out as at the top level, so like a CASE it never
+        fits on one line: a construct that would put it on one line takes
+        its multi-line form, as it would for a subquery too long to fit.
+        """
+        return expression is not None and expression.find(exp.With) is not None
 
     def _compact_sql(self, expression: exp.Expr) -> str:
         """Render expression compactly without line breaks."""
@@ -1935,7 +2005,7 @@ class JarifyGenerator(DuckDB.Generator):
         # Check for comments before flattening: rendering the terms pops a
         # Paren's comments, so a second render would lose them.
         this = expression.this
-        if isinstance(this, exp.Connector) and not self._has_comments(this) and not self._holds_case(this):
+        if isinstance(this, exp.Connector) and self._may_go_on_one_line(this):
             terms_temp: list[str] = []
             ops_list: list[str] = []
             self._flatten_connector(this, terms_temp, ops_list)
