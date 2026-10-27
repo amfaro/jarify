@@ -44,7 +44,13 @@ if git diff --staged --quiet; then
 fi
 
 git commit -m "chore(release): v${new_version}"
-git push --force-with-lease origin "${branch}"
+
+# An earlier run may have pushed the branch already. This clone has no
+# remote-tracking ref for it, so a bare --force-with-lease rejects the push as
+# "stale info". Lease against the branch as the remote has it now (empty: it
+# must not exist yet).
+remote_sha=$(git ls-remote origin "refs/heads/${branch}" | cut -f1)
+git push --force-with-lease="${branch}:${remote_sha}" origin "${branch}"
 
 # Create or update release PR
 pr_number=$(gh pr list \
