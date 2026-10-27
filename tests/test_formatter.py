@@ -405,6 +405,69 @@ def test_pivot_order_by_keeps_cte_leading_comments_on_their_own_lines():
     assert not _lines_continuing_after_line_comment(result)
 
 
+class TestCteBodyEndComments:
+    """A comment on its own line at the end of a CTE body stays there (#361).
+
+    Regression: the ``)`` closing the body owns the comment, and the CTE wrote
+    it above itself, which for the first CTE is the top of the statement.
+    """
+
+    def test_comment_after_the_last_clause_stays_in_the_body(self):
+        sql = (
+            "WITH _tf AS\n(\n  FROM time_frames\n"
+            "  WHERE time_frame_key IN ('current_month', 'trailing_12_months') -- only where ends_on >= today\n"
+            "  -- because we only keep track of last_visit_at\n)\n"
+            "SELECT 1 AS x FROM _tf\n;\n"
+        )
+        result, _ = format_sql(sql)
+        assert result.startswith(
+            "WITH _tf AS\n(\n  FROM time_frames\n"
+            "  WHERE time_frame_key IN ('current_month', 'trailing_12_months') -- only where ends_on >= today\n"
+            "  -- because we only keep track of last_visit_at\n)\nSELECT\n"
+        )
+        assert format_sql(result)[0] == result
+
+    def test_comment_after_the_last_column_stays_in_the_body(self):
+        result, _ = format_sql("WITH _a AS (SELECT 1 AS a, 2 AS b\n  -- c comes later\n)\nSELECT a FROM _a")
+        assert "\n    ,2 AS b\n  -- c comes later\n)\nSELECT\n" in result
+        assert format_sql(result)[0] == result
+
+    def test_comment_at_the_end_of_a_cte_stays_out_of_the_next_one(self):
+        sql = (
+            "WITH _a AS (SELECT 1 AS x\n  -- end of _a\n)"
+            ", _b AS (SELECT 2 AS y\n  -- end of _b\n)\n"
+            "SELECT x, y FROM _a, _b"
+        )
+        result, _ = format_sql(sql)
+        assert "     1 AS x\n  -- end of _a\n)\n,_b AS\n(" in result
+        assert "     2 AS y\n  -- end of _b\n)\nSELECT\n" in result
+        assert format_sql(result)[0] == result
+
+    @pytest.mark.parametrize("rest", ["", ", _b AS (SELECT 2 AS y)"])
+    def test_comment_after_as_does_not_move_the_end_comment(self, rest):
+        sql = f"WITH _a AS -- after AS\n(SELECT 1 AS x\n  -- end of _a\n){rest}\nSELECT x FROM _a"
+        result, _ = format_sql(sql)
+        assert result.startswith("WITH _a AS -- after AS\n(\n  SELECT\n     1 AS x\n  -- end of _a\n)\n")
+        assert format_sql(result)[0] == result
+
+    def test_block_comment_stays_in_the_body(self):
+        result, _ = format_sql("WITH _a AS (SELECT x FROM t\n  /* WHERE x > 0\n  AND y > 0 */\n)\nSELECT x FROM _a")
+        assert "  FROM t\n  /* WHERE x > 0\n  AND y > 0 */\n)\nSELECT\n" in result
+        assert format_sql(result)[0] == result
+
+    def test_pivot_order_by_keeps_the_end_comment_in_the_body(self):
+        sql = "WITH _d AS (SELECT a, grp, val FROM t\n  -- end of _d\n)\nPIVOT _d ON grp USING first(val) ORDER BY a"
+        result, warnings = format_sql(sql)
+        assert not warnings
+        assert "  FROM t\n  -- end of _d\n)\nPIVOT _d\n" in result
+
+    def test_only_comments_before_a_closing_paren_are_found(self):
+        from jarify.formatter import _find_closing_paren_comment_texts
+
+        sql = "WITH _a AS (SELECT 1 -- trailing\n  -- own line\n  /* block */\n) -- after\nSELECT 1"
+        assert _find_closing_paren_comment_texts(sql) == {"own line", "block"}
+
+
 class TestCommentsAfterLastStatement:
     """Comments after the last statement come out as written, after its ``;``.
 

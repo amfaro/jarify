@@ -61,6 +61,17 @@ class _JarifyDuckDBParser(_DuckDB.Parser):
             select.add_comments(comments, prepend=True)
         return query
 
+    def _parse_cte(self) -> _exp.CTE | _exp.FunctionSpecification | None:
+        cte = super()._parse_cte()
+        # The CTE takes the comments of the `)` that closes its body, unless it
+        # already took comments from its AS.  Then sqlglot leaves them to the
+        # next node it builds: the WITH clause, which writes them above the
+        # statement, or nothing when a comma follows, which deletes them.
+        if isinstance(cte, _exp.CTE) and self._prev_comments and self._prev.token_type == TokenType.R_PAREN:
+            cte.add_comments(self._prev_comments)
+            self._prev_comments = []
+        return cte
+
 
 class _JarifyDuckDB(_DuckDB):
     Parser = _JarifyDuckDBParser

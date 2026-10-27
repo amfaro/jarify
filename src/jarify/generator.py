@@ -195,6 +195,7 @@ class JarifyGenerator(DuckDB.Generator):
         self._join_alias_col: int | None = None  # set during FROM/JOIN block rendering
         self._leading_comment_texts: frozenset[str] = frozenset()  # set by formatter before generate()
         self._trailing_sep_comment_texts: frozenset[str] = frozenset()  # set by formatter before generate()
+        self._closing_paren_comment_texts: frozenset[str] = frozenset()  # set by formatter before generate()
         self._connector_force_expand: bool = False  # set True inside WHERE/HAVING to always break AND/OR
         self._block_comment_texts: frozenset[str] = frozenset()  # comments generate() renders as /* */
 
@@ -686,6 +687,11 @@ class JarifyGenerator(DuckDB.Generator):
             comments = comments + (alias_node.pop_comments() or [])
         alias_sql = self.sql(expression, "alias")
 
+        # Comments on their own line before the `)` that closes the body stay
+        # at the end of the body.
+        body_end = [c for c in comments if c.strip() in self._closing_paren_comment_texts]
+        comments = [c for c in comments if c.strip() not in self._closing_paren_comment_texts]
+
         if self._leading_comment_texts:
             lead = [c for c in comments if c.strip() in self._leading_comment_texts]
             trail = [c for c in comments if c.strip() not in self._leading_comment_texts]
@@ -709,9 +715,17 @@ class JarifyGenerator(DuckDB.Generator):
         else:
             materialized_str = ""
 
-        body = f"{alias_sql} AS{materialized_str}{comment_suffix}\n{self.wrap(expression)}"
+        body = f"{alias_sql} AS{materialized_str}{comment_suffix}\n{self._cte_body_sql(expression, body_end)}"
 
         return self._render_comments(lead, leading=True), body
+
+    def _cte_body_sql(self, expression: exp.CTE, end_comments: list[str]) -> str:
+        """Return the CTE's body in parentheses, with *end_comments* on their own
+        lines after its last clause, before the ``)``."""
+        if not end_comments:
+            return self.wrap(expression)
+        body = "\n".join([self.sql(expression, "this"), *self._own_line_comments(end_comments)])
+        return f"(\n{self.indent(body, level=1, pad=0)}\n)"
 
     def with_sql(self, expression: exp.With) -> str:
         ctes = expression.expressions
