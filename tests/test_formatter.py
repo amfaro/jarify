@@ -375,6 +375,125 @@ def test_searched_case_right_aligns_or_with_and():
     assert "WHEN baz\n       OR hello\n     THEN world" in result
 
 
+def _assert_comments_end_their_lines(result: str, *comments: str) -> None:
+    """Each comment appears exactly once, with no SQL after it on its line (#251)."""
+    for comment in comments:
+        lines = [line for line in result.splitlines() if f"-- {comment}" in line]
+        assert len(lines) == 1, f"comment {comment!r} missing or duplicated in:\n{result}"
+        assert lines[0].endswith(f"-- {comment}"), f"SQL follows comment {comment!r}: {lines[0]!r}"
+
+
+class TestConditionComments:
+    def test_trailing_comments_after_is_not_null_survive(self):
+        sql = "SELECT a FROM t\nWHERE a IS NOT NULL -- first\n   OR b IS NOT NULL -- second\n"
+        result, _ = format_sql(sql)
+        assert "WHERE a IS NOT NULL -- first\n   OR b IS NOT NULL -- second\n;" in result
+
+    def test_single_commented_condition_keeps_its_comment(self):
+        result, _ = format_sql("SELECT a FROM t\nWHERE a IS NOT NULL -- only\n")
+        assert "WHERE a IS NOT NULL -- only\n;" in result
+
+    def test_trailing_comment_on_parenthesized_branch_survives(self):
+        sql = """SELECT a FROM t
+WHERE a.allocation_per_year IS NOT NULL --eligible_for_allocation = 1
+   OR nr.nominee_user_id IS NOT NULL     --has_points_spend = 1
+   OR (h.rollup_level_id = 0 AND te.user_id IS NOT NULL)  --manager whose team is eligible
+"""
+        result, _ = format_sql(sql)
+        assert (
+            "WHERE a.allocation_per_year IS NOT NULL -- eligible_for_allocation = 1\n"
+            "   OR nr.nominee_user_id IS NOT NULL -- has_points_spend = 1\n"
+            "   OR (h.rollup_level_id = 0 AND te.user_id IS NOT NULL) -- manager whose team is eligible\n"
+        ) in result
+
+    def test_own_line_comment_before_or_lines_up_with_or(self):
+        sql = "SELECT a FROM t\nWHERE a IS NOT NULL\n  -- first\n   OR b IS NOT NULL\n"
+        result, _ = format_sql(sql)
+        assert "WHERE a IS NOT NULL\n   -- first\n   OR b IS NOT NULL\n" in result
+
+    def test_own_line_comment_before_and_lines_up_with_and(self):
+        sql = "SELECT a FROM t\nWHERE a > 1\n  -- first\n  AND b > 2\n  -- second\n  AND c > 3\n"
+        result, _ = format_sql(sql)
+        assert "WHERE a > 1\n  -- first\n  AND b > 2\n  -- second\n  AND c > 3\n" in result
+
+    def test_comment_after_connector_moves_above_it(self):
+        result, _ = format_sql("SELECT a FROM t\nWHERE a = 1 OR -- after\n  b = 2\n")
+        assert "WHERE a = 1\n   -- after\n   OR b = 2\n" in result
+
+    def test_trailing_comment_on_nested_paren_does_not_swallow_or(self):
+        sql = "SELECT a FROM t\nWHERE a = 1 AND ((b = 2) -- b branch\n OR d = 3)\n"
+        result, _ = format_sql(sql)
+        assert "(b = 2) -- b branch\n    OR d = 3\n" in result
+        _assert_comments_end_their_lines(result, "b branch")
+
+    def test_paren_in_comment_does_not_break_connector_alignment(self):
+        sql = "SELECT a FROM t\nWHERE a > 1 -- see (1\n   OR b > 2 -- 2)\n   OR c > 3\n"
+        result, _ = format_sql(sql)
+        assert "WHERE a > 1 -- see (1\n   OR b > 2 -- 2)\n   OR c > 3\n" in result
+
+    def test_uncommented_condition_is_unchanged(self):
+        result, _ = format_sql("SELECT a FROM t WHERE a IS NOT NULL OR b IS NOT NULL")
+        assert "WHERE a IS NOT NULL OR b IS NOT NULL\n" in result
+
+    def test_having_comments_survive(self):
+        sql = "SELECT a, COUNT(*) AS n FROM t GROUP BY a\nHAVING COUNT(*) > 1 -- first\n  -- own\n   OR a IS NOT NULL\n"
+        result, _ = format_sql(sql)
+        assert "HAVING COUNT(*) > 1 -- first\n    -- own\n    OR a IS NOT NULL\n" in result
+
+    def test_qualify_comments_survive(self):
+        sql = (
+            "SELECT a FROM t\n"
+            "QUALIFY row_number() OVER (ORDER BY b) = 1 -- latest\n"
+            "  -- own\n"
+            "  AND a IS NOT NULL -- present\n"
+        )
+        result, _ = format_sql(sql)
+        _assert_comments_end_their_lines(result, "latest", "own", "present")
+        assert "-- own\n  AND a IS NOT NULL -- present\n" in result
+
+    def test_commented_join_on_breaks_onto_lines_aligned_after_on(self):
+        sql = "SELECT a.x FROM a\nJOIN b ON a.id = b.id -- first\n  -- own\n  AND a.k IS NOT NULL -- second\n"
+        result, _ = format_sql(sql)
+        expected = "\n".join(
+            [
+                "INNER JOIN b ON a.id = b.id -- first",
+                "            -- own",
+                "            AND a.k IS NOT NULL -- second",
+            ]
+        )
+        assert expected in result
+
+    def test_single_commented_join_on_condition_stays_inline(self):
+        result, _ = format_sql("SELECT a.x FROM a\nLEFT JOIN b ON a.id = b.id -- only\n")
+        assert "LEFT JOIN b ON a.id = b.id -- only\n" in result
+
+    def test_case_when_condition_comments_survive(self):
+        sql = "SELECT CASE WHEN a > 0 -- first\n  -- own\n  OR b > 1 THEN 1 WHEN c = 2 THEN 3 END AS c FROM t\n"
+        result, _ = format_sql(sql)
+        assert "WHEN a > 0 -- first\n       -- own\n       OR b > 1\n     THEN 1" in result
+
+    def test_single_when_case_with_comments_is_not_rewritten_to_if(self):
+        sql = "SELECT CASE WHEN a IS NOT NULL -- first\n AND b > 1 THEN 1 ELSE 2 END AS c FROM t\n"
+        result, _ = format_sql(sql)
+        assert "if(" not in result
+        assert "WHEN a IS NOT NULL -- first\n      AND b > 1\n     THEN 1" in result
+
+    def test_commented_in_subquery_uses_block_form(self):
+        sql = "SELECT a FROM t WHERE x IN (SELECT y FROM u WHERE y IS NOT NULL -- keep\n OR z = 1)\n"
+        result, _ = format_sql(sql)
+        assert "WHERE x IN\n(\n" in result
+        assert "  WHERE y IS NOT NULL -- keep\n     OR z = 1\n)" in result
+
+    def test_commented_from_subquery_is_not_inlined(self):
+        sql = "SELECT a FROM (SELECT a FROM u WHERE a IS NOT NULL -- keep\n AND b = 1) s\n"
+        result, _ = format_sql(sql)
+        assert "  WHERE a IS NOT NULL -- keep\n    AND b = 1\n) AS s" in result
+
+    def test_commented_if_condition_uses_expanded_form(self):
+        result, _ = format_sql("SELECT if(a IS NOT NULL -- has a\n, 1, 2) AS x FROM t\n")
+        assert "if(\n      a IS NOT NULL -- has a\n     ,1\n     ,2\n  ) AS x" in result
+
+
 class TestFromFirst:
     def test_select_star_becomes_from_first(self):
         from jarify.formatter import format_sql
