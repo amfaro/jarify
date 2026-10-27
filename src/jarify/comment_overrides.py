@@ -41,6 +41,12 @@ SETTING_ALIASES: dict[str, str] = {
     "alias_visual_guide_interval": "alias_visual_guide_interval",
 }
 
+# Each JarifyConfig option's annotation, e.g. "bool" or "int | None", which
+# _parse_setting uses to read a `set` directive's value.
+_SETTING_TYPES: dict[str, str] = {
+    field.name: str(field.type) for field in dataclasses.fields(JarifyConfig) if field.name != "rules"
+}
+
 _DIRECTIVE_RE = re.compile(r"jarify:\s*(.+)", re.IGNORECASE)
 _RANGE_END = 10**9
 
@@ -178,6 +184,10 @@ def parse_comment_overrides(sql: str) -> CommentOverrides:
             name, value = _parse_setting(directive.args)
             if name is None:
                 continue
+            # A second `set` of the same option ends the first one's range.
+            if name in open_setting_ranges:
+                start, previous = open_setting_ranges.pop(name)
+                setting_ranges.append(_SettingRange(start, line_no - 1, name, previous))
             open_setting_ranges[name] = (line_no + 1, value)
             continue
 
@@ -221,12 +231,21 @@ def _parse_setting(args: str) -> tuple[str | None, Any]:
         return None, None
     raw_name, raw_value = [part.strip() for part in args.split("=", 1)]
     name = normalize_setting_name(raw_name)
-    if name in {"max_line_length", "min_column_alias", "alias_visual_guide_interval"}:
+    field_type = _SETTING_TYPES.get(name)
+    # An unknown option, or a list or table one, can't be set from a comment;
+    # passing it on would make config_for_line fail.
+    if field_type is None or field_type.startswith(("list", "dict")):
+        return None, None
+    if field_type == "bool":
+        value = {"true": True, "false": False}.get(raw_value.lower())
+        return (name, value) if value is not None else (None, None)
+    if field_type.startswith("int"):
         try:
             value = int(raw_value)
         except ValueError:
             return None, None
-        if name in {"min_column_alias", "alias_visual_guide_interval"} and value <= 0:
+        # For an optional number (min_column_alias, ...), a non-positive value means unset
+        if field_type != "int" and value <= 0:
             return None, None
         return name, value
     return name, raw_value
