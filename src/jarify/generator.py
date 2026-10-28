@@ -989,30 +989,39 @@ class JarifyGenerator(DuckDB.Generator):
     def _iter_query_aligned_selects(self, expression: exp.Expr) -> t.Iterator[exp.Select]:
         """Yield SELECTs that share query-wide alias alignment.
 
-        Query-wide alignment spans the main SELECT plus any CTE-body SELECTs,
-        including nested CTEs. It intentionally excludes unrelated subqueries in
-        expressions or JOINs, which keep their local alignment behavior.
+        Query-wide alignment spans the main query plus any CTE bodies,
+        including nested CTEs. The main query or a CTE body can be a set
+        operation (UNION, INTERSECT, EXCEPT): every branch of it shares the
+        column too, and its WITH clause, which sqlglot attaches to the set
+        operation rather than to a SELECT, counts like a SELECT's. It
+        intentionally excludes unrelated subqueries in expressions or JOINs,
+        which keep their local alignment behavior.
 
-        When ``expression`` is not itself a SELECT (e.g. a CREATE MACRO wrapping
+        When ``expression`` is not itself a query (e.g. a CREATE MACRO wrapping
         a ``WITH … SELECT`` body) we walk into the statement to find the inner
-        SELECT that owns the top-level WITH clause, then recurse from there so
+        query that owns the top-level WITH clause, then recurse from there so
         that all CTEs inside the statement share a single alignment column.
         """
         if isinstance(expression, exp.Select):
             yield expression
-            with_ = expression.args.get("with_")
-            if isinstance(with_, exp.With):
-                for cte in with_.expressions:
-                    if isinstance(cte, exp.CTE) and isinstance(cte.this, exp.Select):
-                        yield from self._iter_query_aligned_selects(cte.this)
+        elif isinstance(expression, exp.SetOperation):
+            for branch in (expression.this, expression.expression):
+                # A parenthesized branch, (SELECT …) UNION (SELECT …), is a Subquery.
+                yield from self._iter_query_aligned_selects(branch.unnest())
         else:
-            # Non-Select wrapper (e.g. CREATE OR REPLACE MACRO … AS TABLE (…)):
-            # find the inner SELECT that owns the WITH clause and treat it as
+            # Non-query wrapper (e.g. CREATE OR REPLACE MACRO … AS TABLE (…)):
+            # find the inner query that owns the WITH clause and treat it as
             # the root of the query-aligned tree.
             for node in expression.walk():
-                if isinstance(node, exp.Select) and node.args.get("with_"):
+                if isinstance(node, (exp.Select, exp.SetOperation)) and node.args.get("with_"):
                     yield from self._iter_query_aligned_selects(node)
                     return
+            return
+        with_ = expression.args.get("with_")
+        if isinstance(with_, exp.With):
+            for cte in with_.expressions:
+                if isinstance(cte, exp.CTE) and isinstance(cte.this, (exp.Select, exp.SetOperation)):
+                    yield from self._iter_query_aligned_selects(cte.this)
 
     def _select_expression_prefix_width(self, select: exp.Select) -> int:
         """Return visible prefix width before a SELECT-list expression.

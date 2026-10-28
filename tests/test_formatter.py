@@ -167,6 +167,51 @@ def test_min_column_alias_applies_across_ctes_and_outer_select():
     assert as_positions[0] >= 28
 
 
+@pytest.mark.parametrize(
+    "sql",
+    [
+        pytest.param(
+            "WITH _c AS (SELECT x AS cx, y AS cy FROM s) "
+            "SELECT 'margin' AS category, SUM(margin * current_units) AS value FROM t "
+            "UNION ALL SELECT 'rebate' AS category, SUM(r) AS value FROM _c",
+            id="ctes-and-union-branches",
+        ),
+        pytest.param(
+            "(SELECT a AS cx, b AS cy FROM t) UNION ALL (SELECT long_column_name_here AS category, b AS value FROM u)",
+            id="parenthesized-branches",
+        ),
+        pytest.param(
+            "WITH _u AS (SELECT a AS cx FROM t UNION ALL SELECT long_column_name_here AS cy FROM u) "
+            "SELECT cx AS category, 1 AS value FROM _u",
+            id="cte-body-union",
+        ),
+        pytest.param(
+            "SELECT a AS cx, b AS cy FROM t INTERSECT SELECT long_column_name_here AS category, b AS value FROM u "
+            "EXCEPT SELECT c AS cx, d AS cy FROM v",
+            id="intersect-and-except",
+        ),
+        pytest.param(
+            "CREATE OR REPLACE MACRO m(p) AS TABLE (WITH _c AS (SELECT x AS cx, y AS cy FROM s) "
+            "SELECT long_column_name_here AS category, 1 AS value FROM _c UNION ALL SELECT a, b FROM _c)",
+            id="macro-body-union",
+        ),
+    ],
+)
+def test_set_operation_branches_and_ctes_share_one_as_column(sql):
+    result, _ = format_sql(sql)
+
+    as_positions = _alias_positions(result, "cx", "cy", "category", "value")
+    assert len(as_positions) >= 4
+    assert len(set(as_positions)) == 1
+    assert format_sql(result)[0] == result
+
+
+def test_union_of_selects_with_one_alias_between_them_aligns_nothing():
+    result, _ = format_sql("SELECT a FROM t UNION SELECT long_column_name_here AS c FROM u")
+
+    assert "   long_column_name_here AS c\n" in result
+
+
 def test_as_alignment_stays_visually_consistent_across_nested_ctes():
     sql = (
         "WITH outer_group AS ("
@@ -272,12 +317,12 @@ class TestAliasVisualGuideInterval:
         assert _as_columns(baseline, "s1", "s2") == [22, 22]
         assert _as_columns(result, "s1", "s2") == [24, 24]
 
-    def test_applies_to_each_locally_aligned_union_branch(self):
+    def test_applies_to_the_column_union_branches_share(self):
         sql = "SELECT p AS s1, qq AS s2 FROM u UNION ALL SELECT p AS s1, qqqqqq AS s2 FROM v"
         baseline, _ = format_sql(sql)
         result, _ = format_sql(sql, JarifyConfig(alias_visual_guide_interval=12))
 
-        assert _as_columns(baseline, "s1", "s2") == [7, 7, 11, 11]
+        assert _as_columns(baseline, "s1", "s2") == [11, 11, 11, 11]
         assert _as_columns(result, "s1", "s2") == [12, 12, 12, 12]
 
     def test_interval_of_one_matches_default_output(self):

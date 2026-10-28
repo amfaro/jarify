@@ -1,9 +1,9 @@
 WITH _managers AS
 (
   SELECT
-     m.user_id AS root_user_id
+     m.user_id  AS root_user_id
     ,u.user_id
-    ,u.active  AS user_active
+    ,u.active   AS user_active
   /* add in for testing
     ,u.manager_id                           AS direct_user_id
     ,CONCAT(u.first_name, ' ', u.last_name) AS user_full_name

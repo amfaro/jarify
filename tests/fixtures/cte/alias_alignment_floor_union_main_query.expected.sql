@@ -26,8 +26,8 @@ WITH _a AS
   FROM t
 )
 SELECT
-   hired_on                        AS c
-  ,b                               AS d
+   hired_on                                    AS c
+  ,b                                           AS d
 FROM _a
 UNION ALL
 SELECT
