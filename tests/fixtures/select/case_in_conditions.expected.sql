@@ -103,11 +103,11 @@ FROM (
 ;
 
 SELECT
-   COUNT(*) FILTER(WHERE CASE
-                           WHEN x = 1
-                           THEN 'one'
-                           WHEN x = 2
-                           THEN 'two'
-                         END = 'one') AS ones
+   COUNT(*) FILTER (WHERE CASE
+                            WHEN x = 1
+                            THEN 'one'
+                            WHEN x = 2
+                            THEN 'two'
+                          END = 'one') AS ones
 FROM t
 ;

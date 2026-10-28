@@ -28,9 +28,9 @@ FROM t
 
 -- Comments in FILTER (WHERE …) go after WHERE; those before OVER, after the window
 SELECT
-   COUNT(*) FILTER(WHERE /* active */ active)     AS n
-  ,COUNT(*) FILTER(WHERE /* recent */ d > 1)      AS m
-  ,COUNT(*) FILTER(WHERE a) OVER (PARTITION BY b) AS o -- per b
-  ,COUNT(*) OVER (PARTITION BY c)                 AS p -- per c
+   COUNT(*) FILTER (WHERE /* active */ active)     AS n
+  ,COUNT(*) FILTER (WHERE /* recent */ d > 1)      AS m
+  ,COUNT(*) FILTER (WHERE a) OVER (PARTITION BY b) AS o -- per b
+  ,COUNT(*) OVER (PARTITION BY c)                  AS p -- per c
 FROM t
 ;

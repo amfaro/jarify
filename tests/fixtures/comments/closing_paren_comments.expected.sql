@@ -27,8 +27,8 @@ FROM (
 -- Comments on if() are kept, as on any other call
 SELECT
    -- above the call
-   if(b = 1, 'x', 'y')          AS w
-  ,if(a = 1, 'x', 'y')          AS v -- between the call and AS
-  ,COUNT(*) FILTER(WHERE a = 1) AS n -- filtered
+   if(b = 1, 'x', 'y')           AS w
+  ,if(a = 1, 'x', 'y')           AS v -- between the call and AS
+  ,COUNT(*) FILTER (WHERE a = 1) AS n -- filtered
 FROM t
 ;
