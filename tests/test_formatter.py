@@ -391,6 +391,29 @@ def test_dynamic_json_extract_path_keeps_function_call_syntax():
     assert "->>concat(" not in result
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("struct_pack(user_id := u.id, name := u.name)", "struct_pack(user_id := u.id, name := u.name)"),
+        ("STRUCT_PACK(k := 1)", "struct_pack(k := 1)"),
+        ("to_json(struct_pack(p := u.p))", "to_json(struct_pack(p := u.p))"),
+        ("{user_id: u.id, name: u.name}", "{'user_id': u.id, 'name': u.name}"),
+        ("{'user_id': u.id}", "{'user_id': u.id}"),
+    ],
+)
+def test_struct_pack_stays_a_call_and_a_struct_literal_quotes_its_keys(value, expected):
+    """sqlglot reads struct_pack(k := v) and {'k': v} to the same node."""
+    result, _ = format_sql(f"SELECT {value} AS v FROM u")
+    assert f"   {expected} AS v\n" in result
+    assert format_sql(result)[0] == result
+
+
+def test_comment_after_a_struct_pack_entry_follows_its_value():
+    result, _ = format_sql("SELECT struct_pack(\n  a := 1, -- first\n  b := 2\n) AS v FROM u")
+    assert "     a := 1 -- first\n    ,b := 2\n" in result
+    assert format_sql(result)[0] == result
+
+
 def test_transform_macro_is_not_rewritten_to_list_transform():
     sql = "SELECT transform(t, _transform) AS incentivized_amount FROM txns"
     result, _ = format_sql(sql)

@@ -78,6 +78,7 @@ Jarify overrides sqlglot's `DuckDB.Generator` to enforce its opinionated style. 
 | Aggregate/window functions | lowercase | `COUNT`, `SUM`, … | `normalize_func()` |
 | Scalar functions | varies | lowercase | `normalize_func()` |
 | Column expressions | trailing commas | leading commas | `expressions()` |
+| `struct_pack(k := v)` | `{'k': v}` literal | `struct_pack(k := v)`, as written | `_jarify_struct_sql()` + `STRUCT_PACK` in the parser's `FUNCTIONS` |
 | Bare `JOIN` | `JOIN` | `INNER JOIN` | rule in `rules/` |
 | `LEFT`/`RIGHT OUTER JOIN` | as written | `LEFT`/`RIGHT JOIN`; `LEFT`/`RIGHT OUTER JOIN` with `explicit_outer_join` | `join_sql()` |
 | `CASE WHEN x THEN y [ELSE z] END` | CASE WHEN form | `if(x, y[, z])` | `if_sql()` + rule in `rules/` |

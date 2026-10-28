@@ -51,6 +51,7 @@ from jarify.parser import (
     CTE_COMMENTS_AFTER_AS,
     FROM_FIRST_JOINS_KEY,
     KEYWORD_COMMENTS,
+    STRUCT_PACK_KEY,
     TILDE_OPERATOR_KEY,
     all_keyword_comments,
     keyword_comments,
@@ -178,6 +179,19 @@ def _jarify_struct_sql(self: JarifyGenerator, expression: exp.Struct) -> str:
           ,'other': x.other
         }
     """
+    if expression.meta.get(STRUCT_PACK_KEY):
+        # Written as struct_pack(name := value, …): keep the call, with its
+        # names unquoted, laid out like any other call. An entry's own
+        # comments, such as one after its comma, follow its value, as they
+        # would an argument.
+        entries = []
+        for entry in expression.expressions:
+            if isinstance(entry, exp.PropertyEQ) and entry.comments:
+                entry = entry.copy()
+                entry.expression.add_comments(entry.pop_comments())
+            entries.append(entry)
+        return self.func("struct_pack", *entries)
+
     ancestor_cast = expression.find_ancestor(exp.Cast, exp.Select)
     ancestor_cast = None if isinstance(ancestor_cast, exp.Select) else ancestor_cast
 

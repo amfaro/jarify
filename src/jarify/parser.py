@@ -66,6 +66,19 @@ def _marking_tilde(parse: typing.Callable[..., typing.Any]) -> typing.Callable[.
 TILDE_OPERATOR_KEY = "jarify_tilde_operator"
 
 
+def _marking_struct_pack(args: list[typing.Any]) -> _exp.Struct:
+    """Build a `struct_pack(…)` call's Struct and remember it was written as a call."""
+    struct = _exp.Struct.from_arg_list(args)
+    struct.meta[STRUCT_PACK_KEY] = True
+    return struct
+
+
+# Set on a Struct written as `struct_pack(name := value, …)`. sqlglot reads that
+# and a `{'name': value, …}` literal to the same node; the generator writes the
+# call back, with its unquoted names.
+STRUCT_PACK_KEY = "jarify_struct_pack"
+
+
 def _keeping_path_comments(build: typing.Callable[..., typing.Any]) -> typing.Callable[..., typing.Any]:
     """Wrap a JSON_OPERATORS entry so the comments on its path are kept.
 
@@ -107,7 +120,10 @@ class _JarifyDuckDBParser(_DuckDB.Parser):
     # explicit aliases, but not a bare TRANSFORM alias; projects may define their
     # own `transform` macro. Remove the special-case parser entry so bare
     # TRANSFORM(...) round-trips as an anonymous function call.
-    FUNCTIONS: typing.ClassVar = {k: v for k, v in _DuckDB.Parser.FUNCTIONS.items() if k != "TRANSFORM"}
+    FUNCTIONS: typing.ClassVar = {
+        **{k: v for k, v in _DuckDB.Parser.FUNCTIONS.items() if k != "TRANSFORM"},
+        "STRUCT_PACK": _marking_struct_pack,
+    }
     UNARY_PARSERS: typing.ClassVar = {
         **_DuckDB.Parser.UNARY_PARSERS,
         TokenType.NOT: lambda self: self._parse_not(),
