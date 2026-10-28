@@ -83,7 +83,11 @@ def mask_sqlmesh_runtime_tokens(sql: str) -> tuple[str, dict[str, str]]:
     def next_marker(original: str) -> str:
         nonlocal seq
         while True:
-            marker = f"__jsm{seq}__"
+            # As long as the original wherever it's three characters or more,
+            # so the widths jarify aligns AS and table aliases by are the
+            # widths of the unmasked SQL. The `_` on both sides keeps one
+            # marker from occurring inside another.
+            marker = f"_{seq}_"
             seq += 1
             if len(marker) < len(original):
                 marker += "_" * (len(original) - len(marker))
