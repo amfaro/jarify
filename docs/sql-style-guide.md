@@ -150,6 +150,30 @@ FROM t
 
 ---
 
+### `BOOL_OR()` and `BOOL_AND()` — argument as written
+
+`BOOL_OR` and `BOOL_AND` keep their argument as written. jarify doesn't add a `::boolean` cast, which sqlglot writes when transpiling from dialects whose versions take other types. `bool_or` and `logical_or` are both written `BOOL_OR`.
+
+**Bad**
+```sql
+SELECT
+   BOOL_OR((status IN ('denied'))::boolean) AS any_denied
+  ,BOOL_AND(active::boolean)                AS all_active
+FROM t
+;
+```
+
+**Good**
+```sql
+SELECT
+   BOOL_OR(status IN ('denied')) AS any_denied
+  ,BOOL_AND(active)              AS all_active
+FROM t
+;
+```
+
+---
+
 ### `array_agg()` → `list()` — canonical DuckDB aggregate
 
 In DuckDB, `list()` is the canonical aggregate function; `array_agg()` is an alias. Jarify rewrites all `array_agg(...)` calls to `list(...)` regardless of arguments.
