@@ -453,13 +453,35 @@ def test_several_comments_on_a_cte_go_above_it_one_per_line():
 
 @pytest.mark.parametrize(
     "head",
-    ["_a AS\n-- note\n", "_a AS /* note */ ", "_a AS MATERIALIZED\n-- note\n", "_a (x) AS\n-- note\n"],
+    [
+        "_a AS\n-- note\n",
+        "_a AS /* note */ ",
+        "_a AS MATERIALIZED\n-- note\n",
+        "_a (x) AS\n-- note\n",
+        "_a USING KEY (x) AS\n-- note\n",
+    ],
 )
 def test_comment_before_cte_paren_goes_after_as(head):
     """sqlglot drops a comment between a CTE's AS and its "(" (#355)."""
     result, _ = format_sql(f"WITH {head}(SELECT 1 AS x)\nSELECT x FROM _a\n")
     assert result.count("note") == 1
     assert "AS -- note\n(\n" in result or "MATERIALIZED -- note\n(\n" in result
+    assert format_sql(result)[0] == result
+
+
+@pytest.mark.parametrize(
+    ("head", "expected"),
+    [
+        ("_a USING KEY (x) AS", "WITH RECURSIVE _a USING KEY (x) AS\n("),
+        ("_a (x, y) USING KEY (x, y) AS", "WITH RECURSIVE _a (x, y) USING KEY (x, y) AS\n("),
+        ("_a USING KEY (x) AS MATERIALIZED", "WITH RECURSIVE _a USING KEY (x) AS MATERIALIZED\n("),
+    ],
+)
+def test_recursive_cte_keeps_using_key(head, expected):
+    """USING KEY decides which rows a recursive CTE keeps, so it can't be dropped."""
+    sql = f"WITH RECURSIVE {head} (SELECT 1 AS x, 2 AS y UNION SELECT x + 1, y FROM _a WHERE x < 3) FROM _a"
+    result, _ = format_sql(sql)
+    assert expected in result
     assert format_sql(result)[0] == result
 
 
