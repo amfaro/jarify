@@ -76,6 +76,7 @@ Jarify overrides sqlglot's `DuckDB.Generator` to enforce its opinionated style. 
 | Boolean literals | `TRUE` / `FALSE` | `true` / `false` | `boolean_sql()` |
 | Data types | `TEXT`, `INT`, … | `text`, `int`, … | `datatype_sql()` |
 | Aggregate/window functions | lowercase | `COUNT`, `SUM`, … | `normalize_func()` |
+| Aggregate filter | `FILTER(WHERE …)` | `FILTER (WHERE …)`, like `OVER (…)` | `filter_sql()` |
 | Scalar functions | varies | lowercase | `normalize_func()` |
 | Column expressions | trailing commas | leading commas | `expressions()` |
 | Bare `JOIN` | `JOIN` | `INNER JOIN` | rule in `rules/` |
@@ -85,7 +86,6 @@ Jarify overrides sqlglot's `DuckDB.Generator` to enforce its opinionated style. 
 | `NOT IN` / `NOT BETWEEN` / `NOT SIMILAR TO` / `NOT GLOB` | `NOT a IN (…)` | `a NOT IN (…)` | `not_sql()`, `in_sql()`, `between_sql()` |
 | Aggregate `ORDER BY` (`STRING_AGG(x, sep ORDER BY k)`) | one line | `ORDER BY` on its own line when the call doesn't fit | `func()`, `_ordered_aggregate_sql()` |
 | `ARRAY(query)` | query's first line after `array(` | query below `array(`, `)` on its own line, like a scalar subquery | `_jarify_array_sql()` |
-| Aggregate filter | `FILTER(WHERE …)` | `FILTER (WHERE …)`, like `OVER (…)` | `filter_sql()` |
 
 When adding a new override, add it to this table.
 
