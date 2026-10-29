@@ -293,6 +293,11 @@ class JarifyGenerator(DuckDB.Generator):
         # max_line_length.  DuckDB's built-in version always emits a flat string.
         exp.Struct: _jarify_struct_sql,
         exp.Array: _jarify_array_sql,
+        # DuckDB's versions cast the argument to BOOLEAN, for transpiling from
+        # dialects whose BOOL_OR and BOOL_AND take other types.  jarify writes
+        # it as written.
+        exp.LogicalOr: lambda self, e: self.func("BOOL_OR", e.this),
+        exp.LogicalAnd: lambda self, e: self.func("BOOL_AND", e.this),
     }
 
     AFTER_HAVING_MODIFIER_TRANSFORMS: ClassVar[dict[str, t.Any]] = {

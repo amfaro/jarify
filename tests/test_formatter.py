@@ -398,6 +398,22 @@ def test_transform_macro_is_not_rewritten_to_list_transform():
     assert "list_transform" not in result
 
 
+@pytest.mark.parametrize(
+    ("call", "expected"),
+    [
+        ("bool_or(x IN ('a'))", "BOOL_OR(x IN ('a'))"),
+        ("bool_and(x > 1)", "BOOL_AND(x > 1)"),
+        ("bool_or(flag)", "BOOL_OR(flag)"),
+        ("logical_and(flag)", "BOOL_AND(flag)"),
+        ("bool_or(flag::boolean)", "BOOL_OR(flag::boolean)"),
+    ],
+)
+def test_bool_aggregates_keep_their_argument_as_written(call, expected):
+    """sqlglot's DuckDB generator casts BOOL_OR and BOOL_AND arguments to BOOLEAN."""
+    result, _ = format_sql(f"SELECT {call} AS v FROM t")
+    assert f"   {expected} AS v\n" in result
+
+
 def test_leading_comment_inside_or_group_stays_on_its_own_line():
     sql = """SELECT *
 FROM t
