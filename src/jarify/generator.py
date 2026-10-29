@@ -2882,15 +2882,14 @@ class JarifyGenerator(DuckDB.Generator):
         return sql.replace(" ON ", f" ON{self._comments_before_sql(comments)} ", 1)
 
     def filter_sql(self, expression: exp.Filter) -> str:
+        # FILTER (WHERE …), with a space like OVER (…); sqlglot writes FILTER(.
         # The comments written on FILTER, its ( and WHERE go after WHERE.
         comments = keyword_comments(expression, "WHERE")
-        if not comments:
-            return super().filter_sql(expression)
         this = self.sql(expression, "this")
         where = self.sql(expression, "expression").strip()
-        if where.startswith("WHERE"):
+        if comments and where.startswith("WHERE"):
             where = f"WHERE{self._comments_before_sql(comments)}{where[len('WHERE') :]}"
-        return f"{this} FILTER({where})"
+        return f"{this} FILTER ({where})"
 
     # ------------------------------------------------------------------
     # Window: OVER (...) stays inline, but a commented window spec breaks

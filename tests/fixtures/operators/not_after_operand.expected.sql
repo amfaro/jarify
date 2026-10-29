@@ -41,8 +41,8 @@ SELECT
      THEN 'x'
      WHEN t.b NOT BETWEEN 1 AND 2
      THEN 'y'
-   END                                                             AS z
-  ,COUNT(*) FILTER(WHERE t.day_name NOT IN ('Saturday', 'Sunday')) AS weekdays_count
+   END                                                              AS z
+  ,COUNT(*) FILTER (WHERE t.day_name NOT IN ('Saturday', 'Sunday')) AS weekdays_count
 FROM t
 INNER JOIN u ON u.a = t.a AND u.b NOT IN (1, 2)
 GROUP BY ALL

@@ -76,6 +76,7 @@ Jarify overrides sqlglot's `DuckDB.Generator` to enforce its opinionated style. 
 | Boolean literals | `TRUE` / `FALSE` | `true` / `false` | `boolean_sql()` |
 | Data types | `TEXT`, `INT`, … | `text`, `int`, … | `datatype_sql()` |
 | Aggregate/window functions | lowercase | `COUNT`, `SUM`, … | `normalize_func()` |
+| Aggregate filter | `FILTER(WHERE …)` | `FILTER (WHERE …)`, like `OVER (…)` | `filter_sql()` |
 | Scalar functions | varies | lowercase | `normalize_func()` |
 | Column expressions | trailing commas | leading commas | `expressions()` |
 | Bare `JOIN` | `JOIN` | `INNER JOIN` | rule in `rules/` |

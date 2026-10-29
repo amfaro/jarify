@@ -615,6 +615,25 @@ ORDER BY
 
 ---
 
+### Aggregate filters — `FILTER (WHERE …)`
+
+An aggregate's filter is written `FILTER (WHERE …)`, with a space after `FILTER`, like a window's `OVER (…)`.
+
+**Bad**
+```sql
+SELECT COUNT(*) FILTER(WHERE paid) AS paid_count FROM t
+```
+
+**Good**
+```sql
+SELECT
+   COUNT(*) FILTER (WHERE paid) AS paid_count
+FROM t
+;
+```
+
+---
+
 ### Window specs — one clause per line when wrapping
 
 A window spec stays on one line when it fits. When it doesn't, each clause (`PARTITION BY`, `ORDER BY`, the frame) goes on its own line, with no commas between them. A `PARTITION BY` or `ORDER BY` list that still doesn't fit on its line puts one expression per line in leading-comma style, like a query's `ORDER BY`.
@@ -1864,7 +1883,7 @@ A comment in an aggregate's `FILTER (WHERE …)`, written on `FILTER`, its `(` o
 ```sql
 SELECT DISTINCT ON /* the latest row per user */ (user_id)
    user_id
-  ,COUNT(*) FILTER(WHERE /* paid only */ amount > 0) OVER (PARTITION BY user_id) AS paid_orders -- per user
+  ,COUNT(*) FILTER (WHERE /* paid only */ amount > 0) OVER (PARTITION BY user_id) AS paid_orders -- per user
 FROM t
 ;
 ```

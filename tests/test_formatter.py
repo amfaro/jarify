@@ -1009,7 +1009,7 @@ class TestFirstConditionComments:
     def test_comment_that_cannot_move_stays_put_and_stable(self, sql):
         result, _ = format_sql(sql)
         assert result.count("note") == 1
-        assert "FILTER(-- note" not in result
+        assert "FILTER (-- note" not in result
         assert format_sql(result)[0] == result
 
 
@@ -1546,7 +1546,7 @@ class TestKeywordComments:
 
     def test_comment_after_filter_is_kept(self):
         out = self._format("SELECT count(*) FILTER (WHERE a) -- c\n  AS n FROM t")
-        assert "COUNT(*) FILTER(WHERE a) AS n -- c\n" in out
+        assert "COUNT(*) FILTER (WHERE a) AS n -- c\n" in out
 
     def test_comment_after_then_goes_above_then(self):
         sql = (
@@ -1712,7 +1712,7 @@ class TestClauseKeywordComments:
     )
     def test_comment_in_filter_goes_after_where(self, filter_):
         out = self._format(f"SELECT COUNT(*) {filter_} AS n FROM t")
-        assert "   COUNT(*) FILTER(WHERE /* c */ a) AS n\n" in out
+        assert "   COUNT(*) FILTER (WHERE /* c */ a) AS n\n" in out
 
     @pytest.mark.parametrize(
         "over",
@@ -1724,7 +1724,7 @@ class TestClauseKeywordComments:
     )
     def test_comment_before_a_window_spec_goes_after_the_window(self, over):
         out = self._format(f"SELECT COUNT(*) {over} AS n FROM t")
-        assert "   COUNT(*) FILTER(WHERE a) OVER (PARTITION BY b) AS n -- c\n" in out
+        assert "   COUNT(*) FILTER (WHERE a) OVER (PARTITION BY b) AS n -- c\n" in out
 
 
 class TestOpeningBracketComments:
@@ -2279,7 +2279,7 @@ class TestNotAfterOperand:
         for text in (
             "WHEN a NOT IN (1)",
             "WHEN a NOT BETWEEN 2 AND 3",
-            "FILTER(WHERE b NOT IN (1))",
+            "FILTER (WHERE b NOT IN (1))",
             "ON u.a = t.a AND u.b NOT IN (1, 2)",
         ):
             assert text in out
