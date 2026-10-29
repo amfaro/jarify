@@ -1767,6 +1767,26 @@ FROM t
 
 ---
 
+### Struct keys — quoted in a literal, unquoted in `struct_pack()`
+
+A struct literal's keys are quoted strings: `{'user_id': u.id}`. A `struct_pack()` call stays a call, with its names unquoted: `struct_pack(user_id := u.id)`. Both build the same struct, so jarify keeps whichever form was written. A call that doesn't fit on its line wraps like any other call.
+
+**Bad**
+```sql
+SELECT {user_id: u.id, name: u.name} AS person FROM u
+```
+
+**Good**
+```sql
+SELECT
+   {'user_id': u.id, 'name': u.name}            AS person
+  ,struct_pack(user_id := u.id, name := u.name) AS packed
+FROM u
+;
+```
+
+---
+
 ### Struct literal — leading-comma style when multi-line
 
 When a positional struct literal `(val1, val2, ...)::my_struct` wraps across lines, the opening `(` appears on its own line and the fields use the same leading-comma style as `SELECT` lists.
