@@ -25,7 +25,7 @@ SELECT
   ,e NOT GLOB 'a*'          AS not_glob
   ,f IS NOT DISTINCT FROM g AS not_distinct
   ,h IS NOT NULL            AS not_null
-  ,NOT EXISTS(
+  ,NOT EXISTS (
     SELECT
        1
     FROM u

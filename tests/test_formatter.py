@@ -2335,8 +2335,21 @@ class TestNotAfterOperand:
         for text in ("a NOT SIMILAR TO 'x.*'", "b NOT GLOB 'x*'"):
             assert text in out
         # The negations sqlglot already keeps in place are unchanged.
-        for text in ("c NOT ILIKE 'x'", "d IS NOT DISTINCT FROM e", "f IS NOT NULL", "NOT f ", "NOT EXISTS("):
+        for text in ("c NOT ILIKE 'x'", "d IS NOT DISTINCT FROM e", "f IS NOT NULL", "NOT f ", "NOT EXISTS ("):
             assert text in out
+
+    @pytest.mark.parametrize(
+        ("sql", "expected"),
+        [
+            ("SELECT if(EXISTS(SELECT 1 FROM u), 1, 0) AS e FROM t", "   if(EXISTS (SELECT 1 FROM u), 1, 0) AS e\n"),
+            ("SELECT a FROM t WHERE EXISTS(SELECT 1 FROM u WHERE u.id = t.id)", "WHERE EXISTS (\n  SELECT\n"),
+            ("SELECT a FROM t WHERE NOT EXISTS(FROM u)", "WHERE NOT EXISTS (\n  FROM u\n)\n"),
+        ],
+    )
+    def test_exists_has_a_space_before_its_paren(self, sql, expected):
+        out, _ = format_sql(sql)
+        assert expected in out
+        assert format_sql(out)[0] == out
 
     def test_not_in_in_a_select_list_join_filter_and_case(self):
         sql = (

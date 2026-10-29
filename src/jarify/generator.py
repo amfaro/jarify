@@ -254,7 +254,7 @@ _duckdb_array_sql = DuckDB.Generator.TRANSFORMS[exp.Array]
 
 
 def _jarify_array_sql(self: JarifyGenerator, expression: exp.Array) -> str:
-    """Render ``ARRAY(query)`` like a scalar subquery or ``EXISTS(query)``.
+    """Render ``ARRAY(query)`` like a scalar subquery or ``EXISTS (query)``.
 
     The query goes below ``array(``, indented, with ``)`` on a line of its
     own. DuckDB's renderer writes it as a call's argument, so its first line
@@ -2894,6 +2894,10 @@ class JarifyGenerator(DuckDB.Generator):
             and isinstance(ordered.this, exp.Var)
             and ordered.this.name.upper() == "ALL"
         )
+
+    def exists_sql(self, expression: exp.Exists) -> str:
+        # EXISTS (…), with a space like OVER (…); sqlglot writes EXISTS(.
+        return f"EXISTS {self.wrap(expression)}"
 
     def distinct_sql(self, expression: exp.Distinct) -> str:
         # The comments written on DISTINCT ON go after ON.
