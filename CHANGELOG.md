@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.16.0] - 2026-10-29
+### Bug Fixes
+
+- let publish push the release tag ([#404](https://github.com/amfaro/jarify/pull/404)) ([#404](https://github.com/amfaro/jarify/pull/404))
+- keep a recursive CTE's USING KEY ([#405](https://github.com/amfaro/jarify/pull/405)) ([#405](https://github.com/amfaro/jarify/pull/405))
+- keep BOOL_OR and BOOL_AND arguments as written ([#406](https://github.com/amfaro/jarify/pull/406)) ([#406](https://github.com/amfaro/jarify/pull/406))
+- write FILTER (WHERE …) with a space after FILTER ([#407](https://github.com/amfaro/jarify/pull/407)) ([#407](https://github.com/amfaro/jarify/pull/407))
+- keep struct_pack(name := value) as written ([#410](https://github.com/amfaro/jarify/pull/410)) ([#410](https://github.com/amfaro/jarify/pull/410))
+- mask macros with markers as wide as the macro ([#411](https://github.com/amfaro/jarify/pull/411)) ([#411](https://github.com/amfaro/jarify/pull/411))
+- write EXISTS (…) with a space after EXISTS ([#412](https://github.com/amfaro/jarify/pull/412)) ([#412](https://github.com/amfaro/jarify/pull/412))
+
+### Documentation
+
+- refresh 16 examples to jarify's current output ([#409](https://github.com/amfaro/jarify/pull/409)) ([#409](https://github.com/amfaro/jarify/pull/409))
+
+### Features
+
+- align a set operation's branches and its CTEs on one AS column ([#408](https://github.com/amfaro/jarify/pull/408)) ([#408](https://github.com/amfaro/jarify/pull/408))
+
 ## [0.15.0] - 2026-10-27
 ### Bug Fixes
 
