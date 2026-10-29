@@ -65,7 +65,7 @@ SELECT a FROM t WHERE a.active = TRUE AND a.deleted = FALSE
 SELECT
    a
 FROM t
-WHERE a.active = true
+WHERE a.active  = true
   AND a.deleted = false
 ;
 ```
@@ -191,10 +191,12 @@ SELECT
    list(x)
 FROM t
 ;
+
 SELECT
    list(x ORDER BY y)
 FROM t
 ;
+
 SELECT
    list(DISTINCT x)
 FROM t
@@ -344,24 +346,26 @@ FROM t
 ;
 ```
 
-The same pattern applies to function arguments that wrap across lines:
+The same pattern applies to function arguments that wrap across lines, when a call doesn't fit on one:
 
 **Bad**
 ```sql
-SELECT * FROM read_parquet('data.parquet',
-  hive_partitioning = TRUE,
-  hive_types = {'k': text}
+SELECT * FROM read_parquet('s3://my-bucket/events/year=*/month=*/*.parquet',
+  hive_partitioning = true,
+  hive_types = {'k': text},
+  union_by_name = true,
+  filename = true
 )
 ```
 
 **Good**
 ```sql
-SELECT
-   *
 FROM read_parquet(
-   'data.parquet'
-  ,hive_partitioning = TRUE
+   's3://my-bucket/events/year=*/month=*/*.parquet'
+  ,hive_partitioning = true
   ,hive_types = {'k': text}
+  ,union_by_name = true
+  ,filename = true
 )
 ;
 ```
@@ -548,11 +552,11 @@ WHERE client_id = 1
 
 ### `GROUP BY` — one expression per line
 
-Every `GROUP BY` expression is on its own line using the same leading-comma style as `SELECT`. `GROUP BY ALL` is exempt and stays on one line.
+Every `GROUP BY` expression is on its own line using the same leading-comma style as `SELECT`. `GROUP BY ALL` is exempt and stays on one line. A list that names exactly the non-aggregated `SELECT` columns becomes `GROUP BY ALL` (see [`prefer-group-by-all`](#prefer-group-by-all)), so the example groups by a column it doesn't select.
 
 **Bad**
 ```sql
-SELECT a, b, COUNT(*) FROM t GROUP BY a, b
+SELECT a, b, COUNT(*) FROM t GROUP BY a, b, c
 ```
 
 **Good**
@@ -565,6 +569,7 @@ FROM t
 GROUP BY
    a
   ,b
+  ,c
 ;
 ```
 
@@ -720,24 +725,24 @@ WITH base AS (SELECT a, b FROM foo), enriched AS (SELECT base.a, bar.c FROM base
 
 **Good**
 ```sql
-WITH base AS
+WITH _base AS
 (
   SELECT
      a
     ,b
   FROM foo
 )
-,enriched AS
+,_enriched AS
 (
   SELECT
-     base.a
+     _base.a
     ,bar.c
-  FROM base
-  INNER JOIN bar ON base.id = bar.id
+  FROM _base
+  INNER JOIN bar ON _base.id = bar.id
 )
 SELECT
-   enriched.a
-FROM enriched
+   _enriched.a
+FROM _enriched
 ;
 ```
 
@@ -1213,7 +1218,7 @@ SELECT o.* FROM offers o CROSS JOIN UNNEST(o.vals) AS t(v)
 ```sql
 SELECT
    o.*
-FROM offers o
+FROM offers               o
 CROSS JOIN UNNEST(o.vals) t(v)
 ;
 ```
@@ -1258,8 +1263,10 @@ SELECT
   ,CASE
      WHEN foo
      THEN bar
+     WHEN baz
+     THEN qux
      ELSE NULL
-   END        AS abc
+   END         AS abc
 FROM data
 ;
 ```
@@ -1281,8 +1288,8 @@ WITH _a AS
   FROM u
 )
 SELECT
-   q   AS fifth
-  ,rr  AS sixth
+   q     AS fifth
+  ,rr    AS sixth
 FROM _a
 INNER JOIN _b ON 1 = 1
 ;
@@ -1295,25 +1302,25 @@ WITH _outer_group AS
   WITH seed_group AS
   (
     SELECT
-       alpha_value       AS seed_one
-      ,beta_metric       AS seed_two
+       alpha_value   AS seed_one
+      ,beta_metric   AS seed_two
     FROM source_a
   )
   SELECT
-     seed_one           AS outer_one
-    ,seed_two           AS outer_two
+     seed_one        AS outer_one
+    ,seed_two        AS outer_two
   FROM seed_group
 )
 ,_sibling_group AS
 (
   SELECT
-     gamma_code         AS sibling_one
-    ,delta_indicator    AS sibling_two
+     gamma_code      AS sibling_one
+    ,delta_indicator AS sibling_two
   FROM source_b
 )
 SELECT
-   outer_one           AS final_one
-  ,sibling_two         AS final_two
+   outer_one         AS final_one
+  ,sibling_two       AS final_two
 FROM _outer_group
 INNER JOIN _sibling_group ON outer_one = sibling_one
 ;
@@ -1492,6 +1499,7 @@ FROM orders            o -- source
 LEFT JOIN users        u /* people */ ON u.id = o.user_id
 LEFT JOIN addresses addr ON addr.id = o.aid
 CROSS JOIN regions -- every region
+;
 ```
 
 A nested join is written as a parenthesized group, which means the same as the form without parentheses. The group is laid out like a `FROM` clause: its first table on its own line, then one join per line, with aliases aligned.
@@ -1877,7 +1885,7 @@ SELECT
    ) AS rev_seq
   ,list(
      a ORDER BY b -- oldest first
-  ) AS a_list
+  )  AS a_list
 FROM t
 ;
 ```
@@ -1992,6 +2000,7 @@ SELECT
     ELSE ifnull(qr.met::text, o.part)
   END AS expr
 FROM data
+;
 ```
 
 **Also good** (searched CASE)
@@ -2469,7 +2478,8 @@ CREATE OR REPLACE MACRO get_programs_json
   ,_program_supplier_key
 ) AS
 (
-  SELECT 1
+  SELECT
+     1
 )
 ;
 ```
@@ -2507,7 +2517,7 @@ SELECT code, label FROM _lookup
 WITH _lookup (code, label) AS
 (
   VALUES
-     ('a', 'active'  )
+     ('a', 'active')
     ,('i', 'inactive')
 )
 SELECT
@@ -2657,14 +2667,14 @@ SELECT 2
 
 **Good**
 ```sql
-WITH base AS
+WITH _base AS
 (
   SELECT
      1 AS x
 )
 SELECT
    x
-FROM base
+FROM _base
 ;
 ```
 
@@ -2686,7 +2696,12 @@ CREATE TABLE t (score FLOAT, short_label VARCHAR)
 
 **Good**
 ```sql
-CREATE TABLE t (score real, short_label text)
+CREATE TABLE t
+(
+   score       real
+  ,short_label text
+)
+;
 ```
 
 ---
