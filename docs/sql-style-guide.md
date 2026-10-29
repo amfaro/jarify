@@ -755,6 +755,28 @@ FROM t
 ;
 ```
 
+A recursive CTE's `USING KEY (…)` stays between its name, or its column list, and `AS`. It decides which rows each iteration keeps, so dropping it would change the result.
+
+**Good**
+```sql
+WITH RECURSIVE _hierarchy USING KEY (position_id) AS
+(
+  SELECT
+     position_id
+    ,parent_position_id
+  FROM positions
+  WHERE parent_position_id IS NULL
+  UNION
+  SELECT
+     p.position_id
+    ,p.parent_position_id
+  FROM positions        p
+  INNER JOIN _hierarchy h ON p.parent_position_id = h.position_id
+)
+FROM _hierarchy
+;
+```
+
 ---
 
 ### CTE names — underscore prefix

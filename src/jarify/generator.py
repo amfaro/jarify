@@ -1240,7 +1240,14 @@ class JarifyGenerator(DuckDB.Generator):
         else:
             materialized_str = ""
 
-        body = f"{alias_sql} AS{materialized_str}{comment_suffix}\n{self._cte_body_sql(expression, body_end)}"
+        # A recursive CTE's USING KEY (…) decides which rows each iteration
+        # keeps, so it has to stay.
+        key_sql = self.expressions(expression, key="key_expressions", flat=True)
+        using_key = f" USING KEY ({key_sql})" if key_sql else ""
+
+        body = (
+            f"{alias_sql}{using_key} AS{materialized_str}{comment_suffix}\n{self._cte_body_sql(expression, body_end)}"
+        )
 
         return self._render_comments(lead, leading=True), body
 
