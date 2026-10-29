@@ -1222,7 +1222,9 @@ CROSS JOIN UNNEST(o.vals) t(v)
 
 ### Column alias alignment
 
-When a query contains two or more column aliases anywhere in its query-wide `SELECT` lists, the `AS` keyword is aligned to one visible column across the full query. That includes the outer query plus CTE bodies, including nested CTEs, even when those `SELECT` lists are indented at different depths. Multi-line expressions still participate — the closing line (for example `END`) is padded so its trailing `AS` lines up with neighboring single-line aliases.
+When a query contains two or more column aliases anywhere in its query-wide `SELECT` lists, the `AS` keyword is aligned to one visible column across the full query. That includes the outer query plus CTE bodies, including nested CTEs, even when those `SELECT` lists are indented at different depths. When the outer query or a CTE body is a set operation (`UNION`, `INTERSECT`, `EXCEPT`), every branch of it shares the column too. Multi-line expressions still participate — the closing line (for example `END`) is padded so its trailing `AS` lines up with neighboring single-line aliases.
+
+When the query-wide lists have fewer than two aliases between them, as in a `UNION` of `SELECT`s that alias one column at most, there's no shared column: a `SELECT` list with two or more aliases aligns on its own, and a lone alias gets one space before `AS`.
 
 You can also set a minimum visible alias column with `min-column-alias`. Jarify then uses the greater of the configured minimum and the naturally computed alignment column. Longer expressions still win; the setting is a floor, not a fixed hard stop.
 
@@ -1317,6 +1319,32 @@ INNER JOIN _sibling_group ON outer_one = sibling_one
 ;
 ```
 
+**Also good** (the CTE and both branches of the `UNION ALL` share one column)
+```sql
+WITH _owners AS
+(
+  SELECT
+     ou.organization_id
+    ,ou.user_id                      AS owner_user_id
+  FROM organization_users ou
+)
+SELECT
+   cp.organization_id
+  ,'margin'                          AS category
+  ,SUM(cp.margin * cp.current_units) AS value
+FROM customer_products cp
+INNER JOIN _owners      o ON o.organization_id = cp.organization_id
+GROUP BY ALL
+UNION ALL
+SELECT
+   rh.organization_id
+  ,'rebate'                          AS category
+  ,SUM(rh.rebate)                    AS value
+FROM rebate_history rh
+GROUP BY ALL
+;
+```
+
 **Also good** (`min-column-alias = 24`)
 ```sql
 SELECT
@@ -1334,12 +1362,12 @@ DataGrip and the other JetBrains IDEs call these lines *Visual guides* (`Setting
 
 The interval applies wherever jarify aligns column aliases:
 
-- the query-wide column shared by the outer `SELECT` and its CTEs, nested CTEs included
-- `SELECT` lists that align on their own, such as the branches of a top-level `UNION`
+- the query-wide column shared by the outer query and its CTEs, nested CTEs and every branch of a set operation included
+- `SELECT` lists that align on their own, when the query-wide lists have fewer than two aliases between them
 - multi-line expressions, which align by their closing line (`END AS …`)
+- the `REPLACE` and `RENAME` lists of a star
 
 A column whose last line is inside a string literal, such as `'line one<newline>line two' AS note`, aligns on its own with one space before `AS`, since the literal's lines are written as they are (see [String literals](#string-literals--line-breaks-kept-as-written)).
-- the `REPLACE` and `RENAME` lists of a star
 
 Table aliases in `FROM` and `JOIN` keep their own alignment.
 
