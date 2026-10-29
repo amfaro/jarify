@@ -1,5 +1,6 @@
 """Tests for SQLMesh segmentation and runtime token masking."""
 
+from jarify.formatter import format_sql
 from jarify.sqlmesh import (
     looks_like_sqlmesh,
     mask_sqlmesh_runtime_tokens,
@@ -114,12 +115,31 @@ def test_mask_sqlmesh_runtime_tokens_masks_arbitrary_at_identifiers_only_in_code
 
 
 def test_mask_sqlmesh_runtime_tokens_avoids_source_marker_collisions():
-    sql = "SELECT __jsm0__ AS existing_marker, @run_dt AS run_dt"
+    # `_0_____` is the first marker @run_dt would get.
+    sql = "SELECT _0_____ AS existing_marker, @run_dt AS run_dt"
     masked, mapping = mask_sqlmesh_runtime_tokens(sql)
     assert "@run_dt" not in masked
-    assert "__jsm0__ AS existing_marker" in masked
+    assert "_0_____ AS existing_marker" in masked
     assert all(marker not in sql for marker in mapping)
     assert unmask_sqlmesh_runtime_tokens(masked, mapping) == sql
+
+
+def test_mask_sqlmesh_runtime_tokens_keeps_each_token_width():
+    """jarify aligns AS and table aliases on the masked SQL, so a marker is as wide as its token."""
+    sql = "SELECT @ds, {{ var }} FROM @schema.t INNER JOIN @read_parquet(@db, 'x') p ON p.id = t.id"
+    masked, mapping = mask_sqlmesh_runtime_tokens(sql)
+    assert len(mapping) == 5
+    assert all(len(marker) == len(original) for marker, original in mapping.items())
+    assert len(masked) == len(sql)
+    assert unmask_sqlmesh_runtime_tokens(masked, mapping) == sql
+
+
+def test_short_macros_keep_table_and_column_aliases_aligned():
+    sql = "SELECT @ds AS d, abcdefghij AS e FROM _conditions c INNER JOIN @schema.user_attributes ua ON ua.x = c.x"
+    result, _ = format_sql(sql)
+    assert "   @ds        AS d\n  ,abcdefghij AS e\n" in result
+    assert "FROM _conditions                    c\nINNER JOIN @schema.user_attributes ua ON" in result
+    assert format_sql(result)[0] == result
 
 
 def test_split_macro_statements_are_opaque():
