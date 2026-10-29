@@ -183,7 +183,7 @@ GROUP BY
 
 ### `ARRAY(subquery)` — laid out like a scalar subquery
 
-`array(query)` collects a query's rows into a list. Its query goes below `array(`, indented, and `)` goes on a line of its own, as a scalar subquery's and `EXISTS(…)`'s do. Where a one-line form is used, as in a CASE branch or an `if()` argument that fits, it stays on one line.
+`array(query)` collects a query's rows into a list. Its query goes below `array(`, indented, and `)` goes on a line of its own, as a scalar subquery's and `EXISTS (…)`'s do. Where a one-line form is used, as in a CASE branch or an `if()` argument that fits, it stays on one line.
 
 **Bad** (the query starts after `array(`, and its other lines don't line up with it)
 ```sql
@@ -206,6 +206,31 @@ SELECT
     WHERE tags.post_id = p.id
   ) AS tags
 FROM posts p
+;
+```
+
+---
+
+### `EXISTS (subquery)` — a space before the parenthesis
+
+`EXISTS` is followed by a space and then its subquery's `(`, as `OVER` is by its window's. The subquery is laid out like any other: on one line where it fits in a one-line form, as in an `if()` argument, and otherwise below `EXISTS (`, with `)` on a line of its own.
+
+**Bad**
+```sql
+SELECT a FROM t WHERE NOT EXISTS(SELECT 1 FROM u WHERE u.id = t.id)
+```
+
+**Good**
+```sql
+SELECT
+   a
+FROM t
+WHERE NOT EXISTS (
+  SELECT
+     1
+  FROM u
+  WHERE u.id = t.id
+)
 ;
 ```
 

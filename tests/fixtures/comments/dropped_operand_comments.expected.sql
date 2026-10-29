@@ -23,7 +23,7 @@ SELECT
   -- above the window
   ,SUM(b) OVER (PARTITION BY c) -- after the window
   -- above exists
-  ,EXISTS(
+  ,EXISTS (
     SELECT
        1
     FROM u
